@@ -37,6 +37,108 @@
 // ===========================================
 //
 //
+// Number Utilities
+//
+//
+// ===========================================
+
+HERO_INLINE U32 u32_round_to_multiple(U32 v, U32 multiple) {
+	v += multiple / 2;
+	U32 rem = v % multiple;
+	if (v > 0.0f) {
+		return v - rem;
+	} else {
+		return v - rem - multiple;
+	}
+}
+
+HERO_INLINE U32 u32_round_up_to_multiple(U32 v, U32 multiple) {
+	U32 rem = v % multiple;
+	if (rem == 0.0) return v;
+	if (v > 0.0) {
+		return v + multiple - rem;
+	} else {
+		return v - rem;
+	}
+}
+
+HERO_INLINE U32 u32_round_down_to_multiple(U32 v, U32 multiple) {
+	U32 rem = v % multiple;
+	if (rem == 0.0) return v;
+	if (v > 0.0) {
+		return v - rem;
+	} else {
+		return v - rem - multiple;
+	}
+}
+
+#ifndef HERO_GLSL // U64 is not in GLSL
+
+HERO_INLINE U64 u64_round_to_multiple(U64 v, U64 multiple) {
+	v += multiple / 2;
+	U64 rem = v % multiple;
+	if (v > 0.0f) {
+		return v - rem;
+	} else {
+		return v - rem - multiple;
+	}
+}
+
+HERO_INLINE U64 u64_round_up_to_multiple(U64 v, U64 multiple) {
+	U64 rem = v % multiple;
+	if (rem == 0.0) return v;
+	if (v > 0.0) {
+		return v + multiple - rem;
+	} else {
+		return v - rem;
+	}
+}
+
+HERO_INLINE U64 u64_round_down_to_multiple(U64 v, U64 multiple) {
+	U64 rem = v % multiple;
+	if (rem == 0.0) return v;
+	if (v > 0.0) {
+		return v - rem;
+	} else {
+		return v - rem - multiple;
+	}
+}
+
+#endif //  HERO_GLSL
+
+HERO_INLINE F32 f32_round_to_multiple(F32 v, F32 multiple) {
+	v += multiple * 0.5f;
+	F32 rem = hero_mod(v, multiple);
+	if (v > 0.0f) {
+		return v - rem;
+	} else {
+		return v - rem - multiple;
+	}
+}
+
+HERO_INLINE F32 f32_round_up_to_multiple(F32 v, F32 multiple) {
+	F32 rem = hero_mod(v, multiple);
+	if (rem == 0.0) return v;
+	if (v > 0.0) {
+		return v + multiple - rem;
+	} else {
+		return v - rem;
+	}
+}
+
+HERO_INLINE F32 f32_round_down_to_multiple(F32 v, F32 multiple) {
+	F32 rem = hero_mod(v, multiple);
+	if (rem == 0.0) return v;
+	if (v > 0.0) {
+		return v - rem;
+	} else {
+		return v - rem - multiple;
+	}
+}
+
+// ===========================================
+//
+//
 // Color
 //
 //

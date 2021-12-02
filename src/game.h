@@ -9,6 +9,8 @@
 #include <deps/hero/window.c>
 #include <deps/hero/gfx.c>
 
+#include <deps/FastNoiseLite.h>
+
 #define GAME_WINDOW_TITLE "RLE"
 #define GAME_WINDOW_WIDTH 1280
 #define GAME_WINDOW_HEIGHT 720
@@ -38,6 +40,9 @@ struct Game {
 	HeroBufferId index_buffer_id;
 	HeroVertexLayoutId vertex_layout_id;
 	HeroBufferId uniform_buffer_id;
+	HeroImageId noise_image_id;
+	HeroSamplerId clamp_nearest_sampler_id;
+	fnl_state noise_state;
 };
 
 extern Game game;

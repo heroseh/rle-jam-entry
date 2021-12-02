@@ -30,6 +30,7 @@ U8 hero_image_format_bytes_per_pixel[HERO_IMAGE_FORMAT_COUNT] = {
 	[HERO_IMAGE_FORMAT_R8G8B8A8_UNORM] = 4,
 	[HERO_IMAGE_FORMAT_B8G8R8_UNORM] = 3,
 	[HERO_IMAGE_FORMAT_B8G8R8A8_UNORM] = 4,
+	[HERO_IMAGE_FORMAT_R32_SFLOAT] = 4,
 	[HERO_IMAGE_FORMAT_D16] = 2,
 	[HERO_IMAGE_FORMAT_D32] = 3,
 	[HERO_IMAGE_FORMAT_S8] = 1,
@@ -492,6 +493,20 @@ HeroResult hero_image_write(HeroLogicalDevice* ldev, HeroImageId id, HeroImageAr
 	HeroResult result = hero_image_get(ldev, id, &image);
 	if (result < 0) {
 		return result;
+	}
+
+	HeroImageArea a;
+	if (area == NULL) {
+		a.offset_x = 0;
+		a.offset_y = 0;
+		a.offset_z = 0;
+		a.width = image->width;
+		a.height = image->height;
+		a.depth = image->depth;
+		a.mip_level = 0;
+		a.array_layer = 0;
+		a.array_layers_count = image->array_layers_count;
+		area = &a;
 	}
 
 	return hero_gfx_sys.backend_vtable.image_write(ldev, image, area, destination_out);
@@ -2420,6 +2435,7 @@ static VkFormat _hero_vulkan_convert_to_format[HERO_IMAGE_FORMAT_COUNT] = {
 	[HERO_IMAGE_FORMAT_R8G8B8A8_UNORM] = VK_FORMAT_R8G8B8A8_UNORM,
 	[HERO_IMAGE_FORMAT_B8G8R8_UNORM] = VK_FORMAT_B8G8R8_UNORM,
 	[HERO_IMAGE_FORMAT_B8G8R8A8_UNORM] = VK_FORMAT_B8G8R8A8_UNORM,
+	[HERO_IMAGE_FORMAT_R32_SFLOAT] = VK_FORMAT_R32_SFLOAT,
 	[HERO_IMAGE_FORMAT_D16] = VK_FORMAT_D16_UNORM,
 	[HERO_IMAGE_FORMAT_D32] = VK_FORMAT_D32_SFLOAT,
 	[HERO_IMAGE_FORMAT_S8] = VK_FORMAT_S8_UINT,
@@ -2437,6 +2453,7 @@ static HeroImageFormat _hero_vulkan_convert_from_format(VkFormat vk) {
 		case VK_FORMAT_R8G8B8A8_UNORM: fmt = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM; break;
 		case VK_FORMAT_B8G8R8_UNORM: fmt = HERO_IMAGE_FORMAT_B8G8R8_UNORM; break;
 		case VK_FORMAT_B8G8R8A8_UNORM: fmt = HERO_IMAGE_FORMAT_B8G8R8A8_UNORM; break;
+		case VK_FORMAT_R32_SFLOAT: fmt = HERO_IMAGE_FORMAT_R32_SFLOAT; break;
 		case VK_FORMAT_D16_UNORM: fmt = HERO_IMAGE_FORMAT_D16; break;
 		case VK_FORMAT_D32_SFLOAT: fmt = HERO_IMAGE_FORMAT_D32; break;
 		case VK_FORMAT_S8_UINT: fmt = HERO_IMAGE_FORMAT_S8; break;
@@ -3926,6 +3943,7 @@ HeroResult _hero_vulkan_stage_buffer_update(HeroLogicalDeviceVulkan* ldev_vulkan
 	U64 size;
 	if (is_image) {
 		HeroImageArea* area = &data->image.area;
+		align = hero_image_format_bytes_per_pixel[data->image.format];
 		size = (U64)area->width *
 			(U64)area->height *
 			(U64)area->depth *
@@ -3941,7 +3959,7 @@ HeroResult _hero_vulkan_stage_buffer_update(HeroLogicalDeviceVulkan* ldev_vulkan
 	_HeroGfxStagingBufferVulkan* buffer = NULL;
 	for_range(i, 0, sys->free_buffers.count) {
 		_HeroGfxStagingBufferVulkan* b = &sys->free_buffers.data[i];
-		U64 pos = HERO_INT_ROUND_UP_ALIGN(b->size, align);
+		U64 pos = u64_round_up_to_multiple(b->size, align);
 		U64 end_pos = pos + size;
 		if (end_pos > b->cap) {
 			continue;
@@ -4034,7 +4052,7 @@ HeroResult _hero_vulkan_stage_buffer_update(HeroLogicalDeviceVulkan* ldev_vulkan
 		buffer->mapped_memory = mapped_memory;
 	}
 
-	U64 src_offset = HERO_INT_ROUND_UP_ALIGN(buffer->size, align);
+	U64 src_offset = u64_round_up_to_multiple(buffer->size, align);
 	void* dst = HERO_PTR_ADD(buffer->mapped_memory, src_offset);
 	buffer->size += size;
 
@@ -4423,7 +4441,7 @@ HeroResult _hero_vulkan_image_reinit(HeroLogicalDevice* ldev, HeroImageVulkan* i
 	}
 
 	VkDeviceSize vk_device_memory_offset = 0;
-	vk_result = ldev_vulkan->vkBindImageMemory(ldev_vulkan->handle, image_vulkan->handle, vk_device_memory, vk_device_memory_offset);
+	vk_result = ldev_vulkan->vkBindImageMemory(ldev_vulkan->handle, vk_image, vk_device_memory, vk_device_memory_offset);
 	if (vk_result < 0) {
 		return _hero_vulkan_convert_from_result(vk_result);
 	}
@@ -4450,7 +4468,7 @@ HeroResult _hero_vulkan_image_reinit(HeroLogicalDevice* ldev, HeroImageVulkan* i
 		.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
 		.pNext = NULL,
 		.flags = 0,
-		.image = image_vulkan->handle,
+		.image = vk_image,
 		.viewType = _hero_vulkan_convert_to_image_view_type[image_vulkan->public_.type],
 		.format = _hero_vulkan_convert_to_format[image_vulkan->public_.format],
 		.components = {
@@ -4495,6 +4513,7 @@ HeroResult _hero_vulkan_image_init(HeroLogicalDevice* ldev, HeroImageSetup* setu
 
 	image_vulkan->public_.type = setup->type;
 	image_vulkan->public_.format = setup->format;
+	image_vulkan->public_.internal_format = setup->internal_format;
 	image_vulkan->public_.flags = setup->flags;
 	image_vulkan->public_.samples = setup->samples;
 	image_vulkan->public_.memory_location = setup->memory_location;
@@ -4571,7 +4590,7 @@ HeroResult _hero_vulkan_image_write(HeroLogicalDevice* ldev, HeroImage* image, H
 
 	_HeroGfxStagedUpdateData data;
 	data.image.dst_image = image_vulkan->handle;
-	data.image.format = image_vulkan->public_.format;
+	data.image.format = image_vulkan->public_.internal_format;
 	data.image.area = *area;
 
 	result = _hero_vulkan_stage_buffer_update(ldev_vulkan, true, &data, destination_out);
@@ -4714,6 +4733,19 @@ HeroResult _hero_vulkan_shader_module_get(HeroLogicalDevice* ldev, HeroShaderMod
 	return HERO_SUCCESS;
 }
 
+int descriptor_binding_sort_fn(const void* a, const void* b) {
+	const HeroSpirVDescriptorBinding* a_ = a;
+	const HeroSpirVDescriptorBinding* b_ = b;
+
+	if (a_->binding < b_->binding) {
+		return -1;
+	} else if (a_->binding > b_->binding) {
+		return 1;
+	} else {
+		return 0;
+	}
+}
+
 HeroResult _hero_vulkan_shader_metadata_calculate(HeroLogicalDevice* ldev, HeroShaderMetadataSetup* setup, HeroShaderMetadata** out) {
 	HeroResult result;
 	_HeroSpirVInspect inspect = {0};
@@ -4781,6 +4813,8 @@ HeroResult _hero_vulkan_shader_metadata_calculate(HeroLogicalDevice* ldev, HeroS
 		descriptor_bindings[i] = entry->value.binding;
 		i += 1;
 	}
+
+	qsort(descriptor_bindings, inspect.key_to_descriptor_map.count, sizeof(HeroSpirVDescriptorBinding), descriptor_binding_sort_fn);
 
 	*out = metadata;
 	return HERO_SUCCESS;
@@ -5375,7 +5409,7 @@ HeroResult _hero_vulkan_descriptor_set_init(HeroLogicalDevice* ldev, HeroShaderV
 	out->update_data = descriptor_update_data;
 	out->binding_update_data_indices = shader_vulkan->descriptor_binding_update_data_indices;
 	out->bindings_count = shader_vulkan->public_.metadata->spir_v.descriptor_bindings_counts[set];
-	out->last_submitted_frame_idx = ldev->last_completed_frame_idx;
+	out->last_submitted_frame_idx = ldev->last_completed_frame_idx - 1; // start one less, so we can queue the data the frmae it is created
 
 	return HERO_SUCCESS;
 }
@@ -5400,7 +5434,7 @@ HeroResult _hero_vulkan_descriptor_set_update(HeroLogicalDevice* ldev, HeroDescr
 	VkResult vk_result;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
 
-	if (HERO_GFX_FRAME_IDX_LESS_THAN_OR_EQUAL(set->last_submitted_frame_idx, ldev->last_submitted_frame_idx)) {
+	if (HERO_GFX_FRAME_IDX_LESS_THAN(set->last_submitted_frame_idx, ldev->last_submitted_frame_idx)) {
 		HeroDescriptorPoolVulkan* descriptor_pool_vulkan;
 		result = hero_object_pool(HeroDescriptorPoolVulkan, get)(&ldev_vulkan->descriptor_pool_pool, descriptor_pool_id, &descriptor_pool_vulkan);
 		if (result < 0) {

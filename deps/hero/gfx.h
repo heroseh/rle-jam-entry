@@ -257,6 +257,8 @@ enum {
 	HERO_IMAGE_FORMAT_B8G8R8_UNORM,
 	HERO_IMAGE_FORMAT_B8G8R8A8_UNORM,
 
+	HERO_IMAGE_FORMAT_R32_SFLOAT,
+
 	//
 	// depth and stencil
 	HERO_IMAGE_FORMAT_D16,
@@ -306,7 +308,7 @@ enum {
 };
 
 typedef U32 HeroGfxFrameIdx;
-#define HERO_GFX_FRAME_IDX_DIFF(a, b) ((S32)((a) - (S32)(b)) < 0)
+#define HERO_GFX_FRAME_IDX_DIFF(a, b) ((S32)(a) - (S32)(b))
 #define HERO_GFX_FRAME_IDX_LESS_THAN(a, b)             (HERO_GFX_FRAME_IDX_DIFF(a, b) < 0)
 #define HERO_GFX_FRAME_IDX_LESS_THAN_OR_EQUAL(a, b)    (HERO_GFX_FRAME_IDX_DIFF(a, b) <= 0)
 #define HERO_GFX_FRAME_IDX_GREATER_THAN(a, b)          (HERO_GFX_FRAME_IDX_DIFF(a, b) > 0)

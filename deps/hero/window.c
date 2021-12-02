@@ -1101,6 +1101,14 @@ HeroResult hero_event_queue(HeroEvent** ptr_out) {
 }
 
 HeroResult hero_events_poll(void) {
+	HERO_ZERO_ELMT(&hero_window_sys.keyboard.scan_code_has_been_pressed_bitset);
+	HERO_ZERO_ELMT(&hero_window_sys.keyboard.scan_code_has_been_released_bitset);
+	HERO_ZERO_ELMT(&hero_window_sys.keyboard.key_code_has_been_pressed_bitset);
+	HERO_ZERO_ELMT(&hero_window_sys.keyboard.key_code_has_been_released_bitset);
+	HERO_ZERO_ELMT(&hero_window_sys.keyboard.key_mod_has_been_pressed);
+	HERO_ZERO_ELMT(&hero_window_sys.keyboard.key_mod_has_been_released);
+	HERO_ZERO_ELMT(&hero_window_sys.mouse.buttons_has_been_pressed);
+	HERO_ZERO_ELMT(&hero_window_sys.mouse.buttons_has_been_released);
 	hero_window_sys.event_queue.count = 0;
 	return hero_window_sys.vtable.events_poll_fn();
 }

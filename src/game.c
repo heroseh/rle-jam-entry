@@ -1,5 +1,8 @@
 #include "game.h"
 
+#define FNL_IMPL
+#include <deps/FastNoiseLite.h>
+
 // ===========================================
 //
 //
@@ -13,7 +16,7 @@ Game game;
 typedef struct GameVertex GameVertex;
 struct GameVertex {
 	Vec2 pos;
-	HeroColor color;
+	Vec2 uv;
 };
 
 static HeroVertexAttribInfo vertex_attribs[] = {
@@ -22,10 +25,10 @@ static HeroVertexAttribInfo vertex_attribs[] = {
 		.elmt_type = HERO_VERTEX_ELMT_TYPE_F32,
 		.vector_type = HERO_VERTEX_VECTOR_TYPE_2,
 	},
-	{ // GameVertex.color
+	{ // GameVertex.uv
 		.location = 1,
-		.elmt_type = HERO_VERTEX_ELMT_TYPE_U8_F32_NORMALIZE,
-		.vector_type = HERO_VERTEX_VECTOR_TYPE_4,
+		.elmt_type = HERO_VERTEX_ELMT_TYPE_F32,
+		.vector_type = HERO_VERTEX_VECTOR_TYPE_2,
 	},
 };
 
@@ -233,6 +236,38 @@ void game_init(void) {
 		HERO_RESULT_ASSERT(result);
 	}
 
+	{
+		HeroImageSetup setup = {
+			.type = HERO_IMAGE_TYPE_2D,
+			.internal_format = HERO_IMAGE_FORMAT_R32_SFLOAT,
+			.format = HERO_IMAGE_FORMAT_R32_SFLOAT,
+			.flags = HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS | HERO_IMAGE_FLAGS_SAMPLED,
+			.samples = HERO_SAMPLE_COUNT_1,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.width = 960,
+			.height = 960,
+			.depth = 1,
+			.mip_levels = 1,
+			.array_layers_count = 1,
+		};
+
+		result = hero_image_init(game.ldev, &setup, &game.noise_image_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroSamplerSetup setup = {0};
+		setup.mag_filter = HERO_FILTER_NEAREST,
+		setup.min_filter = HERO_FILTER_NEAREST,
+		setup.address_mode_u = HERO_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		setup.address_mode_v = HERO_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		setup.address_mode_w = HERO_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+
+		result = hero_sampler_init(game.ldev, &setup, &game.clamp_nearest_sampler_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
 	HeroShaderGlobalsId shader_globals_id;
 	{
 		HeroShaderGlobalsSetup setup = {
@@ -244,6 +279,9 @@ void game_init(void) {
 		HERO_RESULT_ASSERT(result);
 
 		result = hero_shader_globals_set_uniform_buffer(game.ldev, shader_globals_id, 0, 0, game.uniform_buffer_id, 0);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_set_image_sampler(game.ldev, shader_globals_id, 1, 0, game.noise_image_id, game.clamp_nearest_sampler_id);
 		HERO_RESULT_ASSERT(result);
 	}
 
@@ -422,6 +460,8 @@ void game_init(void) {
 		printf("VERTEX_ATTRIB { location: %u, elmt_type: %u, elmts_count: %u }\n", info->location, info->elmt_type, info->vector_type + 1);
 	}
 	*/
+	game.noise_state = fnlCreateState();
+	game.noise_state.fractal_type = 1;
 }
 
 void game_update(void) {
@@ -467,21 +507,65 @@ void game_render(void) {
 	HeroAabb aabb = {
 		.x = 80.f,
 		.y = 80.f,
-		.ex = swapchain->width - 80.f,
-		.ey = swapchain->height - 80.f,
+		.ex = 960.f + 80.f,
+		.ey = 960.f + 80.f,
 	};
 
-	GameVertex* vertices;
-	result = hero_buffer_write(game.ldev, game.vertex_buffer_id, 0, 4, (void**)&vertices);
-	HERO_RESULT_ASSERT(result);
-	vertices[0].pos = VEC2_INIT(aabb.x, aabb.y);
-	vertices[0].color = hero_color_init(0xff, 0x00, 0x00, 0xff);
-	vertices[1].pos = VEC2_INIT(aabb.ex, aabb.y);
-	vertices[1].color = hero_color_init(0x00, 0xff, 0x00, 0xff);
-	vertices[2].pos = VEC2_INIT(aabb.ex, aabb.ey);
-	vertices[2].color = hero_color_init(0x00, 0x00, 0xff, 0xff);
-	vertices[3].pos = VEC2_INIT(aabb.x, aabb.ey);
-	vertices[3].color = hero_color_init(0x00, 0xff, 0xff, 0xff);
+	{
+		GameVertex* vertices;
+		result = hero_buffer_write(game.ldev, game.vertex_buffer_id, 0, 4, (void**)&vertices);
+		HERO_RESULT_ASSERT(result);
+		vertices[0].pos = VEC2_INIT(aabb.x, aabb.y);
+		vertices[0].uv = VEC2_INIT(0.f, 0.f);
+		vertices[1].pos = VEC2_INIT(aabb.ex, aabb.y);
+		vertices[1].uv = VEC2_INIT(1.f, 0.f);
+		vertices[2].pos = VEC2_INIT(aabb.ex, aabb.ey);
+		vertices[2].uv = VEC2_INIT(1.f, 1.f);
+		vertices[3].pos = VEC2_INIT(aabb.x, aabb.ey);
+		vertices[3].uv = VEC2_INIT(0.f, 1.f);
+	}
+
+	if (hero_keyboard_key_code_has_been_pressed(HERO_KEY_CODE_MINUS)) {
+		game.noise_state.frequency -= 0.001f;
+	}
+	if (hero_keyboard_key_code_has_been_pressed(HERO_KEY_CODE_EQUALS)) {
+		game.noise_state.frequency += 0.001f;
+	}
+
+	if (hero_keyboard_key_code_has_been_pressed(HERO_KEY_CODE_LEFT_BRACKET)) {
+		game.noise_state.fractal_type -= 1;
+	}
+	if (hero_keyboard_key_code_has_been_pressed(HERO_KEY_CODE_RIGHT_BRACKET)) {
+		game.noise_state.fractal_type += 1;
+	}
+
+	if (hero_keyboard_key_code_has_been_pressed(HERO_KEY_CODE_APOSTROPHE)) {
+		game.noise_state.octaves -= 1;
+	}
+	if (hero_keyboard_key_code_has_been_pressed(HERO_KEY_CODE_BACKSLASH)) {
+		game.noise_state.octaves += 1;
+	}
+
+	if (hero_keyboard_key_code_has_been_pressed(HERO_KEY_CODE_1)) {
+		game.noise_state.lacunarity -= 0.1f;
+	}
+	if (hero_keyboard_key_code_has_been_pressed(HERO_KEY_CODE_2)) {
+		game.noise_state.lacunarity += 0.1f;
+	}
+
+	//noise_state.octaves = game.octaves;
+	//noise_state.lacunarity = game.lacunarity;
+	{
+		F32* pixels;
+		result = hero_image_write(game.ldev, game.noise_image_id, NULL, (void**)&pixels);
+
+		for_range(y, 0, 960) {
+			for_range(x, 0, 960) {
+				F32 height = fnlGetNoise2D(&game.noise_state, x, y) * 0.5f + 0.5f;
+				pixels[y * 960 + x] = height;
+			}
+		}
+	}
 
 	result = hero_logical_device_submit_start(game.ldev);
 	HERO_RESULT_ASSERT(result);
