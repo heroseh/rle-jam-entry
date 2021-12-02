@@ -1,0 +1,47 @@
+#ifndef _HERO_CORE_H_
+#error "core.h must be included before this file"
+#endif
+
+#ifndef HERO_HASH_TABLE_KEY_TYPE
+#error "HERO_HASH_TABLE_KEY_TYPE must be defined with the type of the hash table's key"
+#endif
+
+#ifndef HERO_HASH_TABLE_VALUE_TYPE
+#error "HERO_HASH_TABLE_VALUE_TYPE must be defined with the type of the hash table's value"
+#endif
+
+#ifndef HERO_HASH_TABLE_KEY_NAME
+#define HERO_HASH_TABLE_KEY_NAME HERO_HASH_TABLE_KEY_TYPE
+#endif
+
+#ifndef HERO_HASH_TABLE_VALUE_NAME
+#define HERO_HASH_TABLE_VALUE_NAME HERO_HASH_TABLE_VALUE_TYPE
+#endif
+
+#define HERO_HASH_TABLE_ENTRY HERO_CONCAT(HERO_CONCAT(HERO_CONCAT(HeroHashTableEntry_,HERO_HASH_TABLE_KEY_NAME),_),HERO_HASH_TABLE_VALUE_NAME)
+
+#define HERO_HASH_TABLE HERO_CONCAT(HERO_CONCAT(HERO_CONCAT(HeroHashTable_,HERO_HASH_TABLE_KEY_NAME),_),HERO_HASH_TABLE_VALUE_NAME)
+
+typedef struct HERO_HASH_TABLE_ENTRY HERO_HASH_TABLE_ENTRY;
+struct HERO_HASH_TABLE_ENTRY {
+	HERO_HASH_TABLE_KEY_TYPE key;
+	HERO_HASH_TABLE_VALUE_TYPE value;
+};
+
+typedef struct HERO_HASH_TABLE HERO_HASH_TABLE;
+struct HERO_HASH_TABLE {
+	HeroHash* hashes;
+	HERO_HASH_TABLE_ENTRY* entries;
+	Uptr count;
+	Uptr cap;
+};
+
+#undef HERO_HASH_TABLE_KEY_NAME
+#undef HERO_HASH_TABLE_VALUE_NAME
+#undef HERO_HASH_TABLE_ENTRY
+#undef HERO_HASH_TABLE
+
+#ifndef HERO_NO_UNDEF
+#undef HERO_HASH_TABLE_KEY_TYPE
+#undef HERO_HASH_TABLE_VALUE_TYPE
+#endif // HERO_NO_UNDEF
