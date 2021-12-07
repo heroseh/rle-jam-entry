@@ -83,6 +83,7 @@ HeroResult hero_logical_device_init(HeroPhysicalDevice* physical_device, HeroLog
 	ldev->physical_device = physical_device;
 	ldev->alctor = setup->alctor;
 	ldev->queue_support_flags = setup->queue_support_flags;
+	ldev->last_completed_frame_idx = -1;
 
 	*out = ldev;
 	return HERO_SUCCESS;
@@ -96,16 +97,16 @@ HeroResult hero_logical_device_frame_start(HeroLogicalDevice* ldev) {
 	return hero_gfx_sys.backend_vtable.logical_device_frame_start(ldev);
 }
 
-HeroResult hero_logical_device_submit_start(HeroLogicalDevice* ldev) {
-	return hero_gfx_sys.backend_vtable.logical_device_submit_start(ldev);
+HeroResult hero_logical_device_queue_transfer(HeroLogicalDevice* ldev) {
+	return hero_gfx_sys.backend_vtable.logical_device_queue_transfer(ldev);
 }
 
-HeroResult hero_logical_device_submit_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count) {
-	return hero_gfx_sys.backend_vtable.logical_device_submit_command_buffers(ldev, command_pool_id, command_pool_buffer_ids, command_pool_buffers_count);
+HeroResult hero_logical_device_queue_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count) {
+	return hero_gfx_sys.backend_vtable.logical_device_queue_command_buffers(ldev, command_pool_id, command_pool_buffer_ids, command_pool_buffers_count);
 }
 
-HeroResult hero_logical_device_submit_end(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count) {
-	return hero_gfx_sys.backend_vtable.logical_device_submit_end(ldev, swapchain_ids, swapchains_count);
+HeroResult hero_logical_device_submit(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count) {
+	return hero_gfx_sys.backend_vtable.logical_device_submit(ldev, swapchain_ids, swapchains_count);
 }
 
 // ===========================================
@@ -314,6 +315,27 @@ HeroResult hero_buffer_resize(HeroLogicalDevice* ldev, HeroBufferId id, U64 elmt
 	}
 
 	if (buffer->elmts_count == elmts_count) {
+		return HERO_SUCCESS;
+	}
+
+	result = hero_gfx_sys.backend_vtable.buffer_resize(ldev, buffer, elmts_count);
+	if (result < 0) {
+		return result;
+	}
+
+	buffer->elmts_count = elmts_count;
+
+	return HERO_SUCCESS;
+}
+
+HeroResult hero_buffer_reserve(HeroLogicalDevice* ldev, HeroBufferId id, U64 elmts_count) {
+	HeroBuffer* buffer;
+	HeroResult result = hero_buffer_get(ldev, id, &buffer);
+	if (result < 0) {
+		return result;
+	}
+
+	if (elmts_count <= buffer->elmts_count) {
 		return HERO_SUCCESS;
 	}
 
@@ -810,6 +832,16 @@ HeroResult hero_shader_globals_set_storage_buffer(HeroLogicalDevice* ldev, HeroS
 	return hero_gfx_sys.backend_vtable.shader_globals_set_descriptor(ldev, id, binding_idx, elmt_idx, HERO_DESCRIPTOR_TYPE_STORAGE_BUFFER, &data);
 }
 
+HeroResult hero_shader_globals_update(HeroLogicalDevice* ldev, HeroShaderGlobalsId id) {
+	HeroShaderGlobals* shader_globals;
+	HeroResult result = hero_shader_globals_get(ldev, id, &shader_globals);
+	if (result < 0) {
+		return result;
+	}
+
+	return hero_gfx_sys.backend_vtable.shader_globals_update(ldev, shader_globals);
+}
+
 // ===========================================
 //
 //
@@ -1105,11 +1137,15 @@ HeroResult hero_material_set_storage_buffer(HeroLogicalDevice* ldev, HeroMateria
 	return hero_gfx_sys.backend_vtable.material_set_descriptor(ldev, id, binding_idx, elmt_idx, HERO_DESCRIPTOR_TYPE_STORAGE_BUFFER, &data);
 }
 
-HeroResult hero_material_set_shader_globals(HeroLogicalDevice* ldev, HeroMaterialId id, HeroShaderGlobalsId shader_globals_id);
-HeroResult hero_material_set_sampler(HeroLogicalDevice* ldev, HeroMaterialId id, U16 binding_idx, U16 elmt_idx, HeroSamplerId sampler_id);
-HeroResult hero_material_set_image(HeroLogicalDevice* ldev, HeroMaterialId id, U16 binding_idx, U16 elmt_idx, HeroImageId image_id);
-HeroResult hero_material_set_uniform_buffer(HeroLogicalDevice* ldev, HeroMaterialId id, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
-HeroResult hero_material_set_storage_buffer(HeroLogicalDevice* ldev, HeroMaterialId id, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
+HeroResult hero_material_update(HeroLogicalDevice* ldev, HeroMaterialId id) {
+	HeroMaterial* material;
+	HeroResult result = hero_material_get(ldev, id, &material);
+	if (result < 0) {
+		return result;
+	}
+
+	return hero_gfx_sys.backend_vtable.material_update(ldev, material);
+}
 
 // ===========================================
 //
@@ -1264,20 +1300,12 @@ HeroResult hero_cmd_draw_end_indexed(HeroCommandRecorder* command_recorder, Hero
 	return HERO_SUCCESS;
 }
 
-HeroResult hero_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroBufferId buffer_id, U32 binding) {
+HeroResult hero_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroBufferId buffer_id, U32 binding, U64 offset) {
 	if (command_recorder->material_id.raw == 0) {
 		return HERO_ERROR(NOT_STARTED);
 	}
 
-	return hero_gfx_sys.backend_vtable.cmd_draw_set_vertex_buffers(command_recorder, &buffer_id, binding, 1);
-}
-
-HeroResult hero_cmd_draw_set_vertex_buffers(HeroCommandRecorder* command_recorder, HeroBufferId* vertex_buffer_ids, U32 binding_start, U32 buffers_count) {
-	if (command_recorder->material_id.raw == 0) {
-		return HERO_ERROR(NOT_STARTED);
-	}
-
-	return hero_gfx_sys.backend_vtable.cmd_draw_set_vertex_buffers(command_recorder, vertex_buffer_ids, binding_start, buffers_count);
+	return hero_gfx_sys.backend_vtable.cmd_draw_set_vertex_buffer(command_recorder, buffer_id, binding, offset);
 }
 
 HeroResult hero_cmd_draw_set_push_constants(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size);
@@ -1468,6 +1496,7 @@ enum {
 	_HERO_SPIR_V_OP_CODE_CONSTANT           = 43,
 	_HERO_SPIR_V_OP_CODE_FUNCTION           = 54,
 	_HERO_SPIR_V_OP_CODE_VARIABLE           = 59,
+	_HERO_SPIR_V_OP_CODE_LOAD               = 61,
 	_HERO_SPIR_V_OP_CODE_ACCESS_CHAIN       = 65,
 	_HERO_SPIR_V_OP_CODE_DECORATE           = 71,
 };
@@ -2183,6 +2212,7 @@ HeroResult _hero_vulkan_shader_metadata_spir_v_inspect(U32* code, U32 code_size,
 				}
 				break;
 			};
+			case _HERO_SPIR_V_OP_CODE_LOAD:
 			case _HERO_SPIR_V_OP_CODE_ACCESS_CHAIN: {
 				U32 target_type_id = endian_decode_word_fn(code, code_op_count, &idx);
 				U32 target_id = endian_decode_word_fn(code, code_op_count, &idx);
@@ -3397,6 +3427,122 @@ HeroResult _hero_vulkan_logical_device_init(HeroPhysicalDevice* physical_device,
 		ldev_vulkan->staging_buffer_sys.command_pool = vk_command_pool;
 	}
 
+	//
+	// create the null descriptor handles so we can initialize the descriptor sets with these.
+	// this allows the users to not have to set them when they create there shader globals and materials.
+	{
+		{
+			VkSamplerCreateInfo vk_create_info = {0};
+			vk_create_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+
+			vk_result = ldev_vulkan->vkCreateSampler(ldev_vulkan->handle, &vk_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_sampler);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+		}
+
+		{
+			VkImageCreateInfo vk_image_create_info = {0};
+			vk_image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			vk_image_create_info.extent.width = 1;
+			vk_image_create_info.extent.height = 1;
+			vk_image_create_info.extent.depth = 1;
+			vk_image_create_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+			vk_image_create_info.format = VK_FORMAT_R8_UNORM;
+			vk_image_create_info.imageType = VK_IMAGE_TYPE_2D;
+			vk_image_create_info.samples = 1;
+			vk_image_create_info.mipLevels = 1;
+			vk_image_create_info.arrayLayers = 1;
+
+			vk_result = ldev_vulkan->vkCreateImage(ldev_vulkan->handle, &vk_image_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_image_2d);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+
+			VkDeviceMemory vk_device_memory;
+			{
+				VkMemoryRequirements mem_req;
+				ldev_vulkan->vkGetImageMemoryRequirements(ldev_vulkan->handle, ldev_vulkan->null_image_2d, &mem_req);
+
+				_HeroVulkanAllocSetup alloc_setup = {
+					.size = mem_req.size,
+					.align = mem_req.alignment,
+					.memory_type_bits = mem_req.memoryTypeBits,
+					.memory_location = HERO_MEMORY_LOCATION_SHARED,
+					.type = _HERO_VULKAN_ALLOC_TYPE_IMAGE,
+				};
+
+				result = _hero_vulkan_device_memory_alloc(ldev_vulkan, &alloc_setup, &vk_device_memory);
+				if (result < 0) {
+					return result;
+				}
+			}
+
+			VkDeviceSize vk_device_memory_offset = 0;
+			vk_result = ldev_vulkan->vkBindImageMemory(ldev_vulkan->handle, ldev_vulkan->null_image_2d, vk_device_memory, vk_device_memory_offset);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+
+
+			VkImageViewCreateInfo vk_image_view_create_info = {0};
+			vk_image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+			vk_image_view_create_info.image = ldev_vulkan->null_image_2d;
+			vk_image_view_create_info.format = VK_FORMAT_R8_UNORM;
+			vk_image_view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			vk_image_view_create_info.components.r = VK_COMPONENT_SWIZZLE_R;
+			vk_image_view_create_info.components.g = VK_COMPONENT_SWIZZLE_G;
+			vk_image_view_create_info.components.b = VK_COMPONENT_SWIZZLE_B;
+			vk_image_view_create_info.components.a = VK_COMPONENT_SWIZZLE_A;
+			vk_image_view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			vk_image_view_create_info.subresourceRange.levelCount = 1;
+			vk_image_view_create_info.subresourceRange.layerCount = 1;
+
+			vk_result = ldev_vulkan->vkCreateImageView(ldev_vulkan->handle, &vk_image_view_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_image_view_2d);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+		}
+
+		{
+			VkBufferCreateInfo vk_create_info = {0};
+			vk_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+			vk_create_info.size = 1;
+			vk_create_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+
+			vk_result = ldev_vulkan->vkCreateBuffer(ldev_vulkan->handle, &vk_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_buffer);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+
+			VkDeviceMemory vk_device_memory;
+			void* mapped_memory;
+			{
+				VkMemoryRequirements mem_req;
+				ldev_vulkan->vkGetBufferMemoryRequirements(ldev_vulkan->handle, ldev_vulkan->null_buffer, &mem_req);
+
+				_HeroVulkanAllocSetup alloc_setup = {
+					.size = mem_req.size,
+					.align = mem_req.alignment,
+					.memory_type_bits = mem_req.memoryTypeBits,
+					.memory_location = HERO_MEMORY_LOCATION_SHARED,
+					.type = _HERO_VULKAN_ALLOC_TYPE_BUFFER,
+				};
+
+				result = _hero_vulkan_device_memory_alloc(ldev_vulkan, &alloc_setup, &vk_device_memory);
+				if (result < 0) {
+					return result;
+				}
+			}
+
+			VkDeviceSize vk_device_memory_offset = 0;
+			vk_result = ldev_vulkan->vkBindBufferMemory(ldev_vulkan->handle, ldev_vulkan->null_buffer, vk_device_memory, vk_device_memory_offset);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+		}
+	}
+
 	*out = &ldev_vulkan->public_;
 
 	return HERO_SUCCESS;
@@ -3616,17 +3762,11 @@ HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev) {
 	return HERO_SUCCESS;
 }
 
-HeroResult _hero_vulkan_logical_device_submit_start(HeroLogicalDevice* ldev) {
+HeroResult _hero_vulkan_logical_device_queue_transfer(HeroLogicalDevice* ldev) {
 	HeroResult result;
 	VkResult vk_result;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
 
-	for_range (i, 0, ldev_vulkan->submit_descritor_set_updates.count) {
-		HeroDescriptorSetUpdate* set_update = &ldev_vulkan->submit_descritor_set_updates.data[i];
-		ldev_vulkan->vkUpdateDescriptorSetWithTemplate(ldev_vulkan->handle, set_update->descriptor_set, set_update->update_template, set_update->data);
-	}
-
-	ldev_vulkan->submit_descritor_set_updates.count = 0;
 
 	_HeroGfxStagingBufferSysVulkan* sys = &ldev_vulkan->staging_buffer_sys;
 	if (sys->staged_updates.count) {
@@ -3665,6 +3805,31 @@ HeroResult _hero_vulkan_logical_device_submit_start(HeroLogicalDevice* ldev) {
 			if (vk_result < 0) {
 				return _hero_vulkan_convert_from_result(vk_result);
 			}
+		}
+
+		static bool init_null_images = false;
+		if (!init_null_images) {
+			init_null_images = true;
+			VkImageMemoryBarrier memory_barrier = {
+				.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+				.pNext = NULL,
+				.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+				.dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+				.srcQueueFamilyIndex = ldev_vulkan->queue_family_idx_uber,
+				.dstQueueFamilyIndex = ldev_vulkan->queue_family_idx_uber,
+				.image = ldev_vulkan->null_image_2d,
+				.subresourceRange = {
+					.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+					.baseMipLevel = 0,
+					.levelCount = 1,
+					.baseArrayLayer = 0,
+					.layerCount = 1,
+				},
+			};
+
+			ldev_vulkan->vkCmdPipelineBarrier(vk_command_buffer, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0, 0, NULL, 0, NULL, 1, &memory_barrier);
 		}
 
 		for_range(i, 0, sys->staged_updates.count) {
@@ -3782,7 +3947,7 @@ HeroResult _hero_vulkan_logical_device_submit_start(HeroLogicalDevice* ldev) {
 	return HERO_SUCCESS;
 }
 
-HeroResult _hero_vulkan_logical_device_submit_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count) {
+HeroResult _hero_vulkan_logical_device_queue_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count) {
 	HeroResult result;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
 
@@ -3822,7 +3987,7 @@ HeroResult _hero_vulkan_logical_device_submit_command_buffers(HeroLogicalDevice*
 	return HERO_SUCCESS;
 }
 
-HeroResult _hero_vulkan_logical_device_submit_end(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count) {
+HeroResult _hero_vulkan_logical_device_submit(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count) {
 	HeroResult result;
 	VkResult vk_result;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
@@ -4737,12 +4902,18 @@ int descriptor_binding_sort_fn(const void* a, const void* b) {
 	const HeroSpirVDescriptorBinding* a_ = a;
 	const HeroSpirVDescriptorBinding* b_ = b;
 
-	if (a_->binding < b_->binding) {
+	if (a_->set < b_->set) {
 		return -1;
-	} else if (a_->binding > b_->binding) {
+	} else if (a_->set > b_->set) {
 		return 1;
 	} else {
-		return 0;
+		if (a_->binding < b_->binding) {
+			return -1;
+		} else if (a_->binding > b_->binding) {
+			return 1;
+		} else {
+			return 0;
+		}
 	}
 }
 
@@ -4811,6 +4982,7 @@ HeroResult _hero_vulkan_shader_metadata_calculate(HeroLogicalDevice* ldev, HeroS
 	hash_table_idx = 0;
 	while (hero_hash_table(_HeroSpirVDescriptorKey, _HeroSpirVDescriptor, iter_next)(&inspect.key_to_descriptor_map, &hash_table_idx, &entry) != HERO_SUCCESS_FINISHED) {
 		descriptor_bindings[i] = entry->value.binding;
+		descriptor_bindings[i].set = entry->key.set;
 		i += 1;
 	}
 
@@ -4857,6 +5029,7 @@ HeroResult _hero_vulkan_shader_init(HeroLogicalDevice* ldev, HeroShaderSetup* se
 	if (!update_template_entries) {
 		return HERO_ERROR(GFX_OUT_OF_MEMORY_DEVICE);
 	}
+	U32 descriptors_counts[HERO_GFX_DESCRIPTOR_SET_COUNT] = {0};
 	U32 descriptors_count = 0;
 	if (descriptor_bindings_count == 0) {
 		for_range(i, 0, HERO_GFX_DESCRIPTOR_SET_COUNT) {
@@ -4869,6 +5042,7 @@ HeroResult _hero_vulkan_shader_init(HeroLogicalDevice* ldev, HeroShaderSetup* se
 		}
 
 		U32 offset = 0;
+		U32 prev_set = 0;
 		for (U32 i = 0; i < descriptor_bindings_count; i += 1) {
 			HeroSpirVDescriptorBinding* binding = &descriptor_bindings[i];
 			VkDescriptorSetLayoutBinding* vk_binding = &vk_bindings[i];
@@ -4878,6 +5052,11 @@ HeroResult _hero_vulkan_shader_init(HeroLogicalDevice* ldev, HeroShaderSetup* se
 			vk_binding->pImmutableSamplers = NULL;
 			vk_binding->stageFlags = binding->stage_flags;
 
+			if (binding->set != prev_set) {
+				offset = 0;
+				prev_set = binding->set;
+			}
+
 			VkDescriptorUpdateTemplateEntry* update_template_entry = &update_template_entries[i];
 			update_template_entry->dstBinding = binding->binding;
 			update_template_entry->dstArrayElement = 0;
@@ -4886,6 +5065,7 @@ HeroResult _hero_vulkan_shader_init(HeroLogicalDevice* ldev, HeroShaderSetup* se
 			update_template_entry->offset = offset;
 			update_template_entry->stride = sizeof(HeroDescriptorUpdateDataVulkan);
 
+			descriptors_counts[binding->set] += binding->descriptor_count;
 			descriptors_count += binding->descriptor_count;
 			binding_update_data_indices[i] = offset / sizeof(HeroDescriptorUpdateDataVulkan);
 			offset += sizeof(HeroDescriptorUpdateDataVulkan) * binding->descriptor_count;
@@ -4984,6 +5164,7 @@ HeroResult _hero_vulkan_shader_init(HeroLogicalDevice* ldev, HeroShaderSetup* se
 	shader_vulkan->pipeline_layout = vk_pipeline_layout;
 	HERO_COPY_ARRAY(shader_vulkan->descriptor_set_layouts, descriptor_set_layouts);
 	HERO_COPY_ARRAY(shader_vulkan->descriptor_update_templates, descriptor_update_templates);
+	HERO_COPY_ARRAY(shader_vulkan->descriptors_counts, descriptors_counts);
 	shader_vulkan->descriptor_binding_update_data_indices = binding_update_data_indices;
 	shader_vulkan->descriptors_count = descriptors_count;
 	*out = &shader_vulkan->public_;
@@ -5397,19 +5578,58 @@ HeroResult _hero_vulkan_descriptor_set_init(HeroLogicalDevice* ldev, HeroShaderV
 		return result;
 	}
 
-	HeroDescriptorUpdateDataVulkan* descriptor_update_data = hero_alloc_array(HeroDescriptorUpdateDataVulkan, hero_system_alctor, 0, shader_vulkan->descriptors_count);
-	if (!descriptor_update_data) {
+	HeroShaderMetadata* metadata = shader_vulkan->public_.metadata;
+	U32 descriptors_count = shader_vulkan->descriptors_counts[set];
+	HeroDescriptorUpdateDataVulkan* descriptor_update_data = hero_alloc_array(HeroDescriptorUpdateDataVulkan, hero_system_alctor, 0, descriptors_count);
+	if (descriptors_count && !descriptor_update_data) {
 		return HERO_ERROR(GFX_OUT_OF_MEMORY_DEVICE);
 	}
-	HERO_ZERO_ELMT_MANY(descriptor_update_data, shader_vulkan->descriptors_count);
+
+	HeroSpirVDescriptorBinding* bindings = hero_shader_metadata_spir_v_descriptor_bindings(metadata);
+	U32 bindings_start_idx = 0;
+	for_range(i, 0, set) {
+		bindings_start_idx += metadata->spir_v.descriptor_bindings_counts[i];
+	}
+	bindings = &bindings[bindings_start_idx];
+	U32 data_idx = 0;
+	U32 bindings_count = metadata->spir_v.descriptor_bindings_counts[set];
+	for_range(i, 0, bindings_count) {
+		switch (bindings[i].descriptor_type) {
+			case HERO_DESCRIPTOR_TYPE_SAMPLER:
+			case HERO_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+			case HERO_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
+			case HERO_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+				for_range(j, data_idx, data_idx + bindings[i].descriptor_count) {
+					descriptor_update_data[j].image.sampler = ldev_vulkan->null_sampler;
+					descriptor_update_data[j].image.imageView = ldev_vulkan->null_image_view_2d;
+					descriptor_update_data[j].image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				}
+				break;
+			case HERO_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+			case HERO_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+			case HERO_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
+			case HERO_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC:
+				for_range(j, data_idx, data_idx + bindings[i].descriptor_count) {
+					descriptor_update_data[j].buffer.buffer = ldev_vulkan->null_buffer;
+					descriptor_update_data[j].buffer.offset = 0;
+					descriptor_update_data[j].buffer.range = 1;
+				}
+				break;
+			case HERO_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+			case HERO_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER:
+			case HERO_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+				HERO_ABORT("TODO");
+		}
+		data_idx += bindings[i].descriptor_count;
+	}
 
 	out->handle = vk_descriptor_set;
 	out->layout = vk_descriptor_set_layout;
 	out->update_template = shader_vulkan->descriptor_update_templates[set];
 	out->update_data = descriptor_update_data;
-	out->binding_update_data_indices = shader_vulkan->descriptor_binding_update_data_indices;
-	out->bindings_count = shader_vulkan->public_.metadata->spir_v.descriptor_bindings_counts[set];
-	out->last_submitted_frame_idx = ldev->last_completed_frame_idx - 1; // start one less, so we can queue the data the frmae it is created
+	out->binding_update_data_indices = &shader_vulkan->descriptor_binding_update_data_indices[bindings_start_idx];
+	out->descriptors_count = descriptors_count;
+	out->last_submitted_frame_idx = ldev->last_completed_frame_idx - 1; // start one less, so we can queue the data the frame it is created
 
 	return HERO_SUCCESS;
 }
@@ -5419,7 +5639,9 @@ HeroResult _hero_vulkan_descriptor_set_deinit(HeroLogicalDevice* ldev, HeroShade
 	VkResult vk_result;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
 
-	hero_dealloc_array(HeroDescriptorUpdateDataVulkan, hero_system_alctor, 0, descriptor_set->update_data, shader_vulkan->descriptors_count);
+	if (descriptor_set->descriptors_count) {
+		hero_dealloc_array(HeroDescriptorUpdateDataVulkan, hero_system_alctor, 0, descriptor_set->update_data, descriptor_set->descriptors_count);
+	}
 
 	result = _hero_vulkan_descriptor_pool_dealloc(ldev, descriptor_pool_vulkan, descriptor_set->layout, descriptor_set->handle, descriptor_set->last_submitted_frame_idx);
 	if (result < 0) {
@@ -5429,7 +5651,7 @@ HeroResult _hero_vulkan_descriptor_set_deinit(HeroLogicalDevice* ldev, HeroShade
 	return HERO_SUCCESS;
 }
 
-HeroResult _hero_vulkan_descriptor_set_update(HeroLogicalDevice* ldev, HeroDescriptorPoolId descriptor_pool_id, HeroDescriptorSetVulkan* set, U16 binding_idx, U16 elmt_idx, HeroDescriptorType type, HeroDescriptorData* data) {
+HeroResult _hero_vulkan_descriptor_set_set_descriptor(HeroLogicalDevice* ldev, HeroDescriptorPoolId descriptor_pool_id, HeroDescriptorSetVulkan* set, U16 binding_idx, U16 elmt_idx, HeroDescriptorType type, HeroDescriptorData* data) {
 	HeroResult result;
 	VkResult vk_result;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
@@ -5449,18 +5671,6 @@ HeroResult _hero_vulkan_descriptor_set_update(HeroLogicalDevice* ldev, HeroDescr
 		result = _hero_vulkan_descriptor_pool_alloc(ldev, descriptor_pool_vulkan, set->layout, &set->handle);
 		if (result < 0) {
 			return result;
-		}
-
-		{
-			HeroDescriptorSetUpdate* set_update;
-			result = hero_stack(HeroDescriptorSetUpdate, push)(&ldev_vulkan->submit_descritor_set_updates, hero_system_alctor, 0, &set_update);
-			if (result < 0) {
-				return result;
-			}
-
-			set_update->descriptor_set = set->handle;
-			set_update->update_template = set->update_template;
-			set_update->data = set->update_data;
 		}
 
 		set->last_submitted_frame_idx = ldev->last_submitted_frame_idx;
@@ -5515,6 +5725,18 @@ HeroResult _hero_vulkan_descriptor_set_update(HeroLogicalDevice* ldev, HeroDescr
 		case HERO_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
 			HERO_ABORT("TODO");
 	};
+
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_descriptor_set_update(HeroLogicalDevice* ldev, HeroDescriptorSetVulkan* descriptor_set) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	if (descriptor_set->descriptors_count) {
+		ldev_vulkan->vkUpdateDescriptorSetWithTemplate(ldev_vulkan->handle, descriptor_set->handle, descriptor_set->update_template, descriptor_set->update_data);
+	}
 
 	return HERO_SUCCESS;
 }
@@ -5606,7 +5828,16 @@ HeroResult _hero_vulkan_shader_globals_set_descriptor(HeroLogicalDevice* ldev, H
 		return result;
 	}
 
-	return _hero_vulkan_descriptor_set_update(ldev, shader_globals_vulkan->public_.descriptor_pool_id, &shader_globals_vulkan->descriptor_set, binding_idx, elmt_idx, type, data);
+	return _hero_vulkan_descriptor_set_set_descriptor(ldev, shader_globals_vulkan->public_.descriptor_pool_id, &shader_globals_vulkan->descriptor_set, binding_idx, elmt_idx, type, data);
+}
+
+HeroResult _hero_vulkan_shader_globals_update(HeroLogicalDevice* ldev, HeroShaderGlobals* shader_globals) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroShaderGlobalsVulkan* shader_globals_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroShaderGlobalsVulkan, shader_globals);
+
+	return _hero_vulkan_descriptor_set_update(ldev, &shader_globals_vulkan->descriptor_set);
 }
 
 HeroResult _hero_vulkan_render_pass_init_handle(HeroLogicalDevice* ldev, HeroAttachmentLayout* attachment_layouts, HeroAttachmentInfo* attachment_infos, U32 attachments_count, VkRenderPass* out) {
@@ -6364,7 +6595,16 @@ HeroResult _hero_vulkan_material_set_descriptor(HeroLogicalDevice* ldev, HeroMat
 		return result;
 	}
 
-	return _hero_vulkan_descriptor_set_update(ldev, material_vulkan->public_.descriptor_pool_id, &material_vulkan->descriptor_set, binding_idx, elmt_idx, type, data);
+	return _hero_vulkan_descriptor_set_set_descriptor(ldev, material_vulkan->public_.descriptor_pool_id, &material_vulkan->descriptor_set, binding_idx, elmt_idx, type, data);
+}
+
+HeroResult _hero_vulkan_material_update(HeroLogicalDevice* ldev, HeroMaterial* material) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroMaterialVulkan* material_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroMaterialVulkan, material);
+
+	return _hero_vulkan_descriptor_set_update(ldev, &material_vulkan->descriptor_set);
 }
 
 HeroResult _hero_vulkan_swapchain_reinit(HeroLogicalDevice* ldev, HeroSwapchainVulkan* swapchain_vulkan) {
@@ -7134,6 +7374,7 @@ HeroResult _hero_vulkan_cmd_render_pass_start(HeroCommandRecorder* command_recor
 	}
 	for_range(i, 0, HERO_BUFFER_BINDINGS_CAP) {
 		command_recorder_vulkan->bound_vertex_buffers[i] = VK_NULL_HANDLE;
+		command_recorder_vulkan->bound_vertex_buffer_offsets[i] = 0;
 	}
 
 	return HERO_SUCCESS;
@@ -7258,12 +7499,11 @@ HeroResult _hero_vulkan_cmd_draw_end(HeroLogicalDeviceVulkan* ldev_vulkan, HeroC
 	// if any of the vertex buffers have changed, lets bind them.
 	if (command_recorder_vulkan->vertex_buffer_binding_start < command_recorder_vulkan->vertex_buffer_binding_end) {
 		U32 buffers_count = command_recorder_vulkan->vertex_buffer_binding_end - command_recorder_vulkan->vertex_buffer_binding_start;
-		static VkDeviceSize unused_but_must_exist_vertex_buffer_offsets[HERO_BUFFER_BINDINGS_CAP] = {0};
 		ldev_vulkan->vkCmdBindVertexBuffers(vk_command_buffer,
 			command_recorder_vulkan->vertex_buffer_binding_start,
 			buffers_count,
 			&command_recorder_vulkan->bound_vertex_buffers[command_recorder_vulkan->vertex_buffer_binding_start],
-			unused_but_must_exist_vertex_buffer_offsets);
+			&command_recorder_vulkan->bound_vertex_buffer_offsets[command_recorder_vulkan->vertex_buffer_binding_start]);
 	}
 
 	return HERO_SUCCESS;
@@ -7323,29 +7563,32 @@ HeroResult _hero_vulkan_cmd_draw_end_indexed(HeroCommandRecorder* command_record
 	return HERO_SUCCESS;
 }
 
-HeroResult _hero_vulkan_cmd_draw_set_vertex_buffers(HeroCommandRecorder* command_recorder, HeroBufferId* vertex_buffer_ids, U32 binding_start, U32 buffers_count) {
+HeroResult _hero_vulkan_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroBufferId buffer_id, U32 binding, U64 offset) {
 	HeroCommandRecorderVulkan* command_recorder_vulkan = (HeroCommandRecorderVulkan*)command_recorder;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
 
-	for_range(i, 0, buffers_count) {
-		HeroBufferVulkan* buffer_vulkan;
-		HeroResult result = hero_object_pool(HeroBufferVulkan, get)(&ldev_vulkan->buffer_pool, vertex_buffer_ids[i], &buffer_vulkan);
-		if (result < 0) {
-			return result;
-		}
+	HeroBufferVulkan* buffer_vulkan;
+	HeroResult result = hero_object_pool(HeroBufferVulkan, get)(&ldev_vulkan->buffer_pool, buffer_id, &buffer_vulkan);
+	if (result < 0) {
+		return result;
+	}
 
-		if (buffer_vulkan->public_.type != HERO_BUFFER_TYPE_VERTEX) {
-			return HERO_ERROR(GFX_EXPECTED_VERTEX_BUFFER);
-		}
+	if (buffer_vulkan->public_.type != HERO_BUFFER_TYPE_VERTEX) {
+		return HERO_ERROR(GFX_EXPECTED_VERTEX_BUFFER);
+	}
 
-		U32 idx = binding_start + i;
-		HERO_ASSERT_ARRAY_BOUNDS(idx, HERO_BUFFER_BINDINGS_CAP);
+	offset *= buffer_vulkan->public_.elmt_size;
 
-		if (command_recorder_vulkan->bound_vertex_buffers[idx] != buffer_vulkan->handle) {
-			command_recorder_vulkan->bound_vertex_buffers[idx] = buffer_vulkan->handle;
-			command_recorder_vulkan->vertex_buffer_binding_start = HERO_MIN(command_recorder_vulkan->vertex_buffer_binding_start, idx);
-			command_recorder_vulkan->vertex_buffer_binding_end = HERO_MAX(command_recorder_vulkan->vertex_buffer_binding_end, idx + 1);
-		}
+	HERO_ASSERT_ARRAY_BOUNDS(binding, HERO_BUFFER_BINDINGS_CAP);
+
+	if (
+		command_recorder_vulkan->bound_vertex_buffers[binding] != buffer_vulkan->handle ||
+		command_recorder_vulkan->bound_vertex_buffer_offsets[binding] != offset
+	) {
+		command_recorder_vulkan->bound_vertex_buffers[binding] = buffer_vulkan->handle;
+		command_recorder_vulkan->bound_vertex_buffer_offsets[binding] = offset;
+		command_recorder_vulkan->vertex_buffer_binding_start = HERO_MIN(command_recorder_vulkan->vertex_buffer_binding_start, binding);
+		command_recorder_vulkan->vertex_buffer_binding_end = HERO_MAX(command_recorder_vulkan->vertex_buffer_binding_end, binding + 1);
 	}
 
 	return HERO_SUCCESS;
@@ -7392,9 +7635,9 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.logical_device_init = _hero_vulkan_logical_device_init;
 			hero_gfx_sys.backend_vtable.logical_device_deinit = _hero_vulkan_logical_device_deinit;
 			hero_gfx_sys.backend_vtable.logical_device_frame_start = _hero_vulkan_logical_device_frame_start;
-			hero_gfx_sys.backend_vtable.logical_device_submit_start = _hero_vulkan_logical_device_submit_start;
-			hero_gfx_sys.backend_vtable.logical_device_submit_command_buffers = _hero_vulkan_logical_device_submit_command_buffers;
-			hero_gfx_sys.backend_vtable.logical_device_submit_end = _hero_vulkan_logical_device_submit_end;
+			hero_gfx_sys.backend_vtable.logical_device_queue_transfer = _hero_vulkan_logical_device_queue_transfer;
+			hero_gfx_sys.backend_vtable.logical_device_queue_command_buffers = _hero_vulkan_logical_device_queue_command_buffers;
+			hero_gfx_sys.backend_vtable.logical_device_submit = _hero_vulkan_logical_device_submit;
 			hero_gfx_sys.backend_vtable.vertex_layout_register = _hero_vulkan_vertex_layout_register;
 			hero_gfx_sys.backend_vtable.vertex_layout_deregister = _hero_vulkan_vertex_layout_deregister;
 			hero_gfx_sys.backend_vtable.vertex_layout_get = _hero_vulkan_vertex_layout_get;
@@ -7429,6 +7672,7 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.shader_globals_deinit = _hero_vulkan_shader_globals_deinit;
 			hero_gfx_sys.backend_vtable.shader_globals_get = _hero_vulkan_shader_globals_get;
 			hero_gfx_sys.backend_vtable.shader_globals_set_descriptor = _hero_vulkan_shader_globals_set_descriptor;
+			hero_gfx_sys.backend_vtable.shader_globals_update = _hero_vulkan_shader_globals_update;
 			hero_gfx_sys.backend_vtable.render_pass_layout_init = _hero_vulkan_render_pass_layout_init;
 			hero_gfx_sys.backend_vtable.render_pass_layout_deinit = _hero_vulkan_render_pass_layout_deinit;
 			hero_gfx_sys.backend_vtable.render_pass_layout_get = _hero_vulkan_render_pass_layout_get;
@@ -7447,6 +7691,7 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.material_deinit = _hero_vulkan_material_deinit;
 			hero_gfx_sys.backend_vtable.material_get = _hero_vulkan_material_get;
 			hero_gfx_sys.backend_vtable.material_set_descriptor = _hero_vulkan_material_set_descriptor;
+			hero_gfx_sys.backend_vtable.material_update = _hero_vulkan_material_update;
 			hero_gfx_sys.backend_vtable.swapchain_init = _hero_vulkan_swapchain_init;
 			hero_gfx_sys.backend_vtable.swapchain_deinit = _hero_vulkan_swapchain_deinit;
 			hero_gfx_sys.backend_vtable.swapchain_get = _hero_vulkan_swapchain_get;
@@ -7462,7 +7707,7 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.cmd_draw_start = _hero_vulkan_cmd_draw_start;
 			hero_gfx_sys.backend_vtable.cmd_draw_end_vertexed = _hero_vulkan_cmd_draw_end_vertexed;
 			hero_gfx_sys.backend_vtable.cmd_draw_end_indexed = _hero_vulkan_cmd_draw_end_indexed;
-			hero_gfx_sys.backend_vtable.cmd_draw_set_vertex_buffers = _hero_vulkan_cmd_draw_set_vertex_buffers;
+			hero_gfx_sys.backend_vtable.cmd_draw_set_vertex_buffer = _hero_vulkan_cmd_draw_set_vertex_buffer;
 			hero_gfx_sys.backend_vtable.cmd_draw_set_push_constants = _hero_vulkan_cmd_draw_set_push_constants;
 			hero_gfx_sys.backend_vtable.cmd_draw_set_instances = _hero_vulkan_cmd_draw_set_instances;
 			result = _hero_vulkan_init(setup);

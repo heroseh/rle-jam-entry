@@ -12,14 +12,14 @@
 
 #define BUF_SIZE 1024
 
-int compile_shader(const char* name) {
+int compile_shader(const char* src_dir, const char* name) {
 	char buf[BUF_SIZE];
 
-	snprintf(buf, BUF_SIZE, "glslangValidator -V -DVERTEX -DHERO_GLSL -S vert --source-entrypoint main -e vertex -o build/%s.vertex.spv src/shaders/%s.glsl", name, name);
+	snprintf(buf, BUF_SIZE, "glslangValidator -V -DVERTEX -DHERO_GLSL -S vert --source-entrypoint main -e vertex -o build/%s.vertex.spv %s/%s.glsl", name, src_dir, name);
 	int exe_res = system(buf);
 	if (exe_res != 0) { return exe_res; }
 
-	snprintf(buf, BUF_SIZE, "glslangValidator -V -DFRAGMENT -DHERO_GLSL -S frag --source-entrypoint main -e fragment -o build/%s.fragment.spv src/shaders/%s.glsl", name, name);
+	snprintf(buf, BUF_SIZE, "glslangValidator -V -DFRAGMENT -DHERO_GLSL -S frag --source-entrypoint main -e fragment -o build/%s.fragment.spv %s/%s.glsl", name, src_dir, name);
 	exe_res = system(buf);
 	if (exe_res != 0) { return exe_res; }
 
@@ -113,7 +113,10 @@ int main(int argc, char** argv) {
 	if (exe_res != 0) { return exe_res; }
 
 	if (compile_shaders) {
-		exe_res = compile_shader("basic");
+		exe_res = compile_shader("src/shaders", "basic");
+		if (exe_res != 0) { return exe_res; }
+
+		exe_res = compile_shader("deps/hero", "ui");
 		if (exe_res != 0) { return exe_res; }
 	}
 

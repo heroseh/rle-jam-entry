@@ -1,0 +1,9 @@
+
+- make an export button that prints out the state of the terrain gen.
+- add button that changes to the next seed
+
+- we found great look maps when we
+- reduced the frequency
+- high fall off smoothness
+- small fall off edge offset
+

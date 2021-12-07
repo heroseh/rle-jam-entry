@@ -20,6 +20,7 @@
 #define UVec4 uvec4
 #define Mat4x4 mat4x4
 #define HERO_UNIFORM_BUFFER(NAME, set_, binding_) layout(std140, set = set_, binding = binding_) uniform NAME
+#define HERO_UNIFORM_BUFFER_END(name) } name
 #define hero_cast(T, expr) (T(expr))
 #define INFINITY (1.0 / 0.0)
 #define HERO_INLINE
@@ -29,10 +30,16 @@
 	typedef struct NAME NAME; \
 	struct NAME \
 	/* end */
+#define HERO_UNIFORM_BUFFER_END(name) }
 
 #define hero_cast(T, expr) ((T)(expr))
 #define HERO_INLINE static inline
 #endif // HERO_GLSL
+
+#define HERO_GFX_DESCRIPTOR_SET_GLOBAL   0
+#define HERO_GFX_DESCRIPTOR_SET_MATERIAL 1
+#define HERO_GFX_DESCRIPTOR_SET_DRAW_CMD 2
+#define HERO_GFX_DESCRIPTOR_SET_COUNT    3
 
 // ===========================================
 //
@@ -139,6 +146,120 @@ HERO_INLINE F32 f32_round_down_to_multiple(F32 v, F32 multiple) {
 // ===========================================
 //
 //
+// Bitfields
+//
+//
+// ===========================================
+
+#ifndef HERO_GLSL
+HERO_INLINE U8 hero_bitfield_extract_u8(U8 bits, U32 bit_shift, U32 bits_size) {
+	U8 mask = (hero_cast(U8, 1) << bits_size) - 1;
+	return (bits >> bit_shift) & mask;
+}
+
+HERO_INLINE U16 hero_bitfield_extract_u16(U16 bits, U32 bit_shift, U32 bits_size) {
+	U16 mask = (hero_cast(U16, 1) << bits_size) - 1;
+	return (bits >> bit_shift) & mask;
+}
+
+HERO_INLINE U64 hero_bitfield_extract_u64(U64 bits, U32 bit_shift, U32 bits_size) {
+	U64 mask = (hero_cast(U64, 1) << bits_size) - 1;
+	return (bits >> bit_shift) & mask;
+}
+#endif
+
+HERO_INLINE U32 hero_bitfield_extract_u32(U32 bits, U32 bit_shift, U32 bits_size) {
+	U32 mask = (hero_cast(U32, 1) << bits_size) - 1;
+	return (bits >> bit_shift) & mask;
+}
+
+#ifndef HERO_GLSL
+HERO_INLINE S8 hero_bitfield_extract_s8(U8 bits, U32 bit_shift, U32 bits_size) {
+	U8 mask = (hero_cast(U8, 1) << bits_size) - 1;
+	U8 sign_mask = hero_cast(U8, 1) << (bits_size - 1);
+	U8 value = (bits >> bit_shift) & mask;
+	return (value ^ sign_mask) - sign_mask;
+}
+
+HERO_INLINE S16 hero_bitfield_extract_s16(U16 bits, U32 bit_shift, U32 bits_size) {
+	U16 mask = (hero_cast(U16, 1) << bits_size) - 1;
+	U16 sign_mask = hero_cast(U16, 1) << (bits_size - 1);
+	U16 value = (bits >> bit_shift) & mask;
+	return (value ^ sign_mask) - sign_mask;
+}
+#endif
+
+HERO_INLINE S32 hero_bitfield_extract_s32(U32 bits, U32 bit_shift, U32 bits_size) {
+	U32 mask = (hero_cast(U32, 1) << bits_size) - 1;
+	U32 sign_mask = hero_cast(U32, 1) << (bits_size - 1);
+	U32 value = (bits >> bit_shift) & mask;
+	return hero_cast(int, (value ^ sign_mask) - sign_mask);
+}
+
+#ifndef HERO_GLSL
+HERO_INLINE S64 hero_bitfield_extract_s64(U64 bits, U32 bit_shift, U32 bits_size) {
+	U64 mask = (hero_cast(U64, 1) << bits_size) - 1;
+	U64 sign_mask = hero_cast(U64, 1) << (bits_size - 1);
+	U64 value = (bits >> bit_shift) & mask;
+	return (value ^ sign_mask) - sign_mask;
+}
+
+HERO_INLINE void hero_bitfield_insert_u8(U8* bits, U8 value, U32 bit_shift, U32 bits_size) {
+	U8 mask = (hero_cast(U8, 1) << bits_size) - 1;
+	*bits &= ~(mask << bit_shift); // clear the value
+	*bits |= ((value & mask) << bit_shift); // set the value
+}
+
+HERO_INLINE void hero_bitfield_insert_u16(U16* bits, U16 value, U32 bit_shift, U32 bits_size) {
+	U16 mask = (hero_cast(U16, 1) << bits_size) - 1;
+	*bits &= ~(mask << bit_shift); // clear the value
+	*bits |= ((value & mask) << bit_shift); // set the value
+}
+
+HERO_INLINE void hero_bitfield_insert_u32(U32* bits, U32 value, U32 bit_shift, U32 bits_size) {
+	U32 mask = (hero_cast(U32, 1) << bits_size) - 1;
+	*bits &= ~(mask << bit_shift); // clear the value
+	*bits |= ((value & mask) << bit_shift); // set the value
+}
+
+HERO_INLINE void hero_bitfield_insert_u64(U64* bits, U64 value, U32 bit_shift, U32 bits_size) {
+	U64 mask = (hero_cast(U64, 1) << bits_size) - 1;
+	*bits &= ~(mask << bit_shift); // clear the value
+	*bits |= ((value & mask) << bit_shift); // set the value
+}
+
+HERO_INLINE void hero_bitfield_insert_s8(U8* bits, S8 value, U32 bit_shift, U32 bits_size) {
+	U8 sign_mask = hero_cast(U8, 1) << (sizeof(U8) - 1);
+	U8 shifted_sign = (value & sign_mask) >> (sizeof(U8) - (bit_shift + bits_size) - 1);
+	U8 value_ = value | shifted_sign;
+	hero_bitfield_insert_u8(bits, value_, bit_shift, bits_size);
+}
+
+HERO_INLINE void hero_bitfield_insert_s16(U16* bits, S16 value, U32 bit_shift, U32 bits_size) {
+	U16 sign_mask = hero_cast(U16, 1) << (sizeof(U16) - 1);
+	U16 shifted_sign = (value & sign_mask) >> (sizeof(U16) - (bit_shift + bits_size) - 1);
+	U16 value_ = value | shifted_sign;
+	hero_bitfield_insert_u16(bits, value_, bit_shift, bits_size);
+}
+
+HERO_INLINE void hero_bitfield_insert_s32(U32* bits, S32 value, U32 bit_shift, U32 bits_size) {
+	U32 sign_mask = hero_cast(U32, 1) << (sizeof(U32) - 1);
+	U32 shifted_sign = (value & sign_mask) >> (sizeof(U32) - (bit_shift + bits_size) - 1);
+	U32 value_ = value | shifted_sign;
+	hero_bitfield_insert_u32(bits, value_, bit_shift, bits_size);
+}
+
+HERO_INLINE void hero_bitfield_insert_s64(U64* bits, S64 value, U32 bit_shift, U32 bits_size) {
+	U64 sign_mask = hero_cast(U64, 1) << (sizeof(U64) - 1);
+	U64 shifted_sign = (value & sign_mask) >> (sizeof(U64) - (bit_shift + bits_size) - 1);
+	U64 value_ = value | shifted_sign;
+	hero_bitfield_insert_u64(bits, value_, bit_shift, bits_size);
+}
+#endif
+
+// ===========================================
+//
+//
 // Color
 //
 //
@@ -162,10 +283,10 @@ HERO_INLINE F32 f32_round_down_to_multiple(F32 v, F32 multiple) {
 #define hero_color_chan_get(color, chan) (((color) >> (chan)) & 0xff)
 #define hero_color_chan_set(color, chan, value) (hero_color_chan_clear(color) | (v << (chan)))
 #define hero_color_chan_clear(color, chan) ((color) & ~(0xff << chan))
-#define hero_color_r(color) ((color >> HERO_COLOR_CHAN_R) & 0xff)
-#define hero_color_g(color) ((color >> HERO_COLOR_CHAN_G) & 0xff)
-#define hero_color_b(color) ((color >> HERO_COLOR_CHAN_B) & 0xff)
-#define hero_color_a(color) ((color >> HERO_COLOR_CHAN_A) & 0xff)
+#define hero_color_r(color) (((color) >> HERO_COLOR_CHAN_R) & 0xff)
+#define hero_color_g(color) (((color) >> HERO_COLOR_CHAN_G) & 0xff)
+#define hero_color_b(color) (((color) >> HERO_COLOR_CHAN_B) & 0xff)
+#define hero_color_a(color) (((color) >> HERO_COLOR_CHAN_A) & 0xff)
 
 Vec4 hero_color_to_glsl(HeroColor color) {
 	Vec4 glsl;

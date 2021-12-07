@@ -1,7 +1,7 @@
 #ifndef _HERO_GFX_H_
 #define _HERO_GFX_H_
 
-#define HERO_GFX_VULKAN_DEBUG 1
+#define HERO_GFX_VULKAN_DEBUG 0
 #define HERO_BUFFER_BINDINGS_CAP 3
 #define HERO_VULKAN_STAGING_BUFFER_MIN_SIZE (64 * 1024 * 1024)
 
@@ -186,6 +186,15 @@ HERO_TYPEDEF_OBJECT_ID(HeroMaterialId);
 HERO_TYPEDEF_OBJECT_ID(HeroSwapchainId);
 HERO_TYPEDEF_OBJECT_ID(HeroCommandPoolId);
 HERO_TYPEDEF_OBJECT_ID(HeroCommandPoolBufferId);
+
+#define HERO_STACK_ELMT_TYPE HeroImageId
+#include "stack_gen.inl"
+
+#define HERO_STACK_ELMT_TYPE HeroBufferId
+#include "stack_gen.inl"
+
+#define HERO_STACK_ELMT_TYPE HeroMaterialId
+#include "stack_gen.inl"
 
 typedef struct HeroSurface HeroSurface;
 struct HeroSurface {
@@ -477,9 +486,9 @@ HeroResult hero_logical_device_deinit(HeroLogicalDevice* ldev);
 
 HeroResult hero_logical_device_frame_start(HeroLogicalDevice* ldev);
 
-HeroResult hero_logical_device_submit_start(HeroLogicalDevice* ldev);
-HeroResult hero_logical_device_submit_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count);
-HeroResult hero_logical_device_submit_end(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count);
+HeroResult hero_logical_device_queue_transfer(HeroLogicalDevice* ldev);
+HeroResult hero_logical_device_queue_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count);
+HeroResult hero_logical_device_submit(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count);
 
 // ===========================================
 //
@@ -617,6 +626,7 @@ HeroResult hero_buffer_deinit(HeroLogicalDevice* ldev, HeroBufferId id);
 HeroResult hero_buffer_get(HeroLogicalDevice* ldev, HeroBufferId id, HeroBuffer** out);
 
 HeroResult hero_buffer_resize(HeroLogicalDevice* ldev, HeroBufferId id, U64 elmts_count);
+HeroResult hero_buffer_reserve(HeroLogicalDevice* ldev, HeroBufferId id, U64 elmts_count);
 
 // only for buffers with a memory_location of HERO_MEMORY_LOCATION_SHARED or HERO_MEMORY_LOCATION_SHARED_CACHED
 // the mapped memory is only returned when HERO_GFX_FRAME_IDX_LESS_THAN_OR_EQUAL(HeroBuffer.last_submitted_frame_idx, HeroLogicalDevice.last_completed_frame_idx)
@@ -875,6 +885,7 @@ typedef struct HeroSpirVDescriptorBinding HeroSpirVDescriptorBinding;
 struct HeroSpirVDescriptorBinding {
 	U32 stage_flags; // VkShaderStageFlags
 	HeroDescriptorType descriptor_type;
+	U16 set;
 	U16 binding;
 	U16 descriptor_count;
 	U32 elmt_size;
@@ -934,13 +945,6 @@ enum {
 	HERO_SHADER_STAGE_FLAGS_TASK                    = 0x40,
 	HERO_SHADER_STAGE_FLAGS_MESH                    = 0x80,
 	HERO_SHADER_STAGE_FLAGS_ALL_GRAPHICS_MESH       = HERO_SHADER_STAGE_FLAGS_TASK | HERO_SHADER_STAGE_FLAGS_MESH | HERO_SHADER_STAGE_FLAGS_FRAGMENT,
-};
-
-enum {
-	HERO_GFX_DESCRIPTOR_SET_GLOBAL      = 0,
-	HERO_GFX_DESCRIPTOR_SET_MATERIAL    = 1,
-	HERO_GFX_DESCRIPTOR_SET_DRAW_CMD    = 2,
-	HERO_GFX_DESCRIPTOR_SET_COUNT       = 3,
 };
 
 #define HERO_SHADER_METADATA_VERSION 0
@@ -1113,6 +1117,7 @@ HeroResult hero_shader_globals_set_image(HeroLogicalDevice* ldev, HeroShaderGlob
 HeroResult hero_shader_globals_set_image_sampler(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroImageId image_id, HeroSamplerId sampler_id);
 HeroResult hero_shader_globals_set_uniform_buffer(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
 HeroResult hero_shader_globals_set_storage_buffer(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
+HeroResult hero_shader_globals_update(HeroLogicalDevice* ldev, HeroShaderGlobalsId id);
 
 // ===========================================
 //
@@ -1306,6 +1311,7 @@ HeroResult hero_material_set_image(HeroLogicalDevice* ldev, HeroMaterialId id, U
 HeroResult hero_material_set_image_sampler(HeroLogicalDevice* ldev, HeroMaterialId id, U16 binding_idx, U16 elmt_idx, HeroImageId image_id, HeroSamplerId sampler_id);
 HeroResult hero_material_set_uniform_buffer(HeroLogicalDevice* ldev, HeroMaterialId id, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
 HeroResult hero_material_set_storage_buffer(HeroLogicalDevice* ldev, HeroMaterialId id, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
+HeroResult hero_material_update(HeroLogicalDevice* ldev, HeroMaterialId id);
 
 // ===========================================
 //
@@ -1392,8 +1398,7 @@ HeroResult hero_cmd_draw_start(HeroCommandRecorder* command_recorder, HeroMateri
 HeroResult hero_cmd_draw_end_vertexed(HeroCommandRecorder* command_recorder, U32 vertices_start_idx, U32 vertices_count);
 HeroResult hero_cmd_draw_end_indexed(HeroCommandRecorder* command_recorder, HeroBufferId index_buffer_id, U32 indices_start_idx, U32 indices_count, U32 vertices_start_idx);
 
-HeroResult hero_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroBufferId buffer_id, U32 binding);
-HeroResult hero_cmd_draw_set_vertex_buffers(HeroCommandRecorder* command_recorder, HeroBufferId* vertex_buffer_ids, U32 binding_start, U32 buffers_count);
+HeroResult hero_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroBufferId buffer_id, U32 binding, U64 offset);
 
 HeroResult hero_cmd_draw_set_push_constants(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size);
 HeroResult hero_cmd_draw_set_instances(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count);
@@ -1632,9 +1637,9 @@ typedef HeroResult (*HeroGfxLogicalDeviceInitFn)(HeroPhysicalDevice* physical_de
 typedef HeroResult (*HeroGfxLogicalDeviceDeinitFn)(HeroLogicalDevice* ldev);
 
 typedef HeroResult (*HeroLogicalDeviceFrameStartFn)(HeroLogicalDevice* ldev);
-typedef HeroResult (*HeroLogicalDeviceSubmitStartFn)(HeroLogicalDevice* ldev);
-typedef HeroResult (*HeroLogicalDeviceSubmitCommandBuffersFn)(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count);
-typedef HeroResult (*HeroLogicalDeviceSubmitEndFn)(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count);
+typedef HeroResult (*HeroLogicalDeviceQueueTransferFn)(HeroLogicalDevice* ldev);
+typedef HeroResult (*HeroLogicalDeviceQueueCommandBuffersFn)(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count);
+typedef HeroResult (*HeroLogicalDeviceSubmitFn)(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count);
 
 typedef HeroResult (*HeroVertexLayoutRegisterFn)(HeroVertexLayout* vl, HeroVertexLayoutId* id_out, HeroVertexLayout** out);
 typedef HeroResult (*HeroVertexLayoutDeregisterFn)(HeroVertexLayoutId id, HeroVertexLayout* vertex_layout);
@@ -1678,6 +1683,7 @@ typedef HeroResult (*HeroShaderGlobalsInitFn)(HeroLogicalDevice* ldev, HeroShade
 typedef HeroResult (*HeroShaderGlobalsDeinitFn)(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, HeroShaderGlobals* shader_globals);
 typedef HeroResult (*HeroShaderGlobalsGetFn)(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, HeroShaderGlobals** out);
 typedef HeroResult (*HeroShaderGlobalsSetDescriptorFn)(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroDescriptorType type, HeroDescriptorData* data);
+typedef HeroResult (*HeroShaderGlobalsUpdateFn)(HeroLogicalDevice* ldev, HeroShaderGlobals* shader_globals);
 
 typedef HeroResult (*HeroRenderPassLayoutInitFn)(HeroLogicalDevice* ldev, HeroRenderPassLayoutSetup* setup, HeroRenderPassLayoutId* id_out, HeroRenderPassLayout** out);
 typedef HeroResult (*HeroRenderPassLayoutDeinitFn)(HeroLogicalDevice* ldev, HeroRenderPassLayoutId id, HeroRenderPassLayout* render_pass_layout);
@@ -1702,6 +1708,7 @@ typedef HeroResult (*HeroMaterialInitFn)(HeroLogicalDevice* ldev, HeroMaterialSe
 typedef HeroResult (*HeroMaterialDeinitFn)(HeroLogicalDevice* ldev, HeroMaterialId id, HeroMaterial* material);
 typedef HeroResult (*HeroMaterialGetFn)(HeroLogicalDevice* ldev, HeroMaterialId id, HeroMaterial** out);
 typedef HeroResult (*HeroMaterialSetDescriptorFn)(HeroLogicalDevice* ldev, HeroMaterialId id, U16 binding_idx, U16 elmt_idx, HeroDescriptorType type, HeroDescriptorData* data);
+typedef HeroResult (*HeroMaterialUpdateFn)(HeroLogicalDevice* ldev, HeroMaterial* material);
 
 typedef HeroResult (*HeroSwapchainInitFn)(HeroLogicalDevice* ldev, HeroSwapchainSetup* setup, HeroSwapchainId* id_out, HeroSwapchain** out);
 typedef HeroResult (*HeroSwapchainDeinitFn)(HeroLogicalDevice* ldev, HeroSwapchainId id, HeroSwapchain* swapchain);
@@ -1720,7 +1727,7 @@ typedef HeroResult (*HeroCmdRenderPassEndFn)(HeroCommandRecorder* command_record
 typedef HeroResult (*HeroCmdDrawStartFn)(HeroCommandRecorder* command_recorder, HeroMaterialId material_id);
 typedef HeroResult (*HeroCmdDrawEndVertexedFn)(HeroCommandRecorder* command_recorder, U32 vertices_start_idx, U32 vertices_count);
 typedef HeroResult (*HeroCmdDrawEndIndexedFn)(HeroCommandRecorder* command_recorder, HeroBufferId index_buffer_id, U32 indices_start_idx, U32 indices_count, U32 vertices_start_idx);
-typedef HeroResult (*HeroCmdDrawSetVertexBuffersFn)(HeroCommandRecorder* command_recorder, HeroBufferId* vertex_buffer_ids, U32 binding_start, U32 buffers_count);
+typedef HeroResult (*HeroCmdDrawSetVertexBufferFn)(HeroCommandRecorder* command_recorder, HeroBufferId buffer_id, U32 binding, U64 offset);
 typedef HeroResult (*HeroCmdDrawSetPushConstantsFn)(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size);
 typedef HeroResult (*HeroCmdDrawSetInstancesFn)(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count);
 
@@ -1730,9 +1737,9 @@ struct HeroGfxBackendVTable {
 	HeroGfxLogicalDeviceInitFn                          logical_device_init;
 	HeroGfxLogicalDeviceDeinitFn                        logical_device_deinit;
 	HeroLogicalDeviceFrameStartFn                       logical_device_frame_start;
-	HeroLogicalDeviceSubmitStartFn                      logical_device_submit_start;
-	HeroLogicalDeviceSubmitCommandBuffersFn             logical_device_submit_command_buffers;
-	HeroLogicalDeviceSubmitEndFn                        logical_device_submit_end;
+	HeroLogicalDeviceQueueTransferFn                    logical_device_queue_transfer;
+	HeroLogicalDeviceQueueCommandBuffersFn              logical_device_queue_command_buffers;
+	HeroLogicalDeviceSubmitFn                           logical_device_submit;
 	HeroVertexLayoutRegisterFn                          vertex_layout_register;
 	HeroVertexLayoutDeregisterFn                        vertex_layout_deregister;
 	HeroVertexLayoutGetFn                               vertex_layout_get;
@@ -1767,6 +1774,7 @@ struct HeroGfxBackendVTable {
 	HeroShaderGlobalsDeinitFn                           shader_globals_deinit;
 	HeroShaderGlobalsGetFn                              shader_globals_get;
 	HeroShaderGlobalsSetDescriptorFn                    shader_globals_set_descriptor;
+	HeroShaderGlobalsUpdateFn                           shader_globals_update;
 	HeroRenderPassLayoutInitFn                          render_pass_layout_init;
 	HeroRenderPassLayoutDeinitFn                        render_pass_layout_deinit;
 	HeroRenderPassLayoutGetFn                           render_pass_layout_get;
@@ -1785,6 +1793,7 @@ struct HeroGfxBackendVTable {
 	HeroMaterialDeinitFn                                material_deinit;
 	HeroMaterialGetFn                                   material_get;
 	HeroMaterialSetDescriptorFn                         material_set_descriptor;
+	HeroMaterialUpdateFn                                material_update;
 	HeroSwapchainInitFn                                 swapchain_init;
 	HeroSwapchainDeinitFn                               swapchain_deinit;
 	HeroSwapchainGetFn                                  swapchain_get;
@@ -1800,7 +1809,7 @@ struct HeroGfxBackendVTable {
 	HeroCmdDrawStartFn                                  cmd_draw_start;
 	HeroCmdDrawEndVertexedFn                            cmd_draw_end_vertexed;
 	HeroCmdDrawEndIndexedFn                             cmd_draw_end_indexed;
-	HeroCmdDrawSetVertexBuffersFn                       cmd_draw_set_vertex_buffers;
+	HeroCmdDrawSetVertexBufferFn                        cmd_draw_set_vertex_buffer;
 	HeroCmdDrawSetPushConstantsFn                       cmd_draw_set_push_constants;
 	HeroCmdDrawSetInstancesFn                           cmd_draw_set_instances;
 };

@@ -285,16 +285,6 @@ union HeroDescriptorUpdateDataVulkan {
 	VkDescriptorBufferInfo buffer;
 };
 
-typedef struct HeroDescriptorSetUpdate HeroDescriptorSetUpdate;
-struct HeroDescriptorSetUpdate {
-    VkDescriptorSet descriptor_set;
-    VkDescriptorUpdateTemplate update_template;
-	HeroDescriptorUpdateDataVulkan* data;
-};
-
-#define HERO_STACK_ELMT_TYPE HeroDescriptorSetUpdate
-#include "stack_gen.inl"
-
 struct HeroLogicalDeviceVulkan {
 	HeroLogicalDevice public_;
 	HeroObjectPool(HeroBufferVulkan)              buffer_pool;
@@ -324,6 +314,10 @@ struct HeroLogicalDeviceVulkan {
 	VkQueue                 queue_async_transfer;
 	VkSemaphore             semaphore_present;
 
+	VkSampler null_sampler;
+	VkImage null_image_2d;
+	VkImageView null_image_view_2d;
+	VkBuffer null_buffer;
 	VkDescriptorSetLayout null_descriptor_set_layout; // a descriptor set layout with no descriptors
 
 	HeroStack(VkDescriptorPool)        descriptor_pools_to_deallocate; // a VK_NULL_HANDLE is used to seperate submits
@@ -334,7 +328,6 @@ struct HeroLogicalDeviceVulkan {
 	HeroStack(U32)                     submit_swapchain_image_indices;
 	HeroStack(VkFence)                 submit_free_fences;
 	HeroStack(_HeroGfxSubmitVulkan)    submits;
-	HeroStack(HeroDescriptorSetUpdate) submit_descritor_set_updates;
 
 	_HeroGfxStagingBufferSysVulkan staging_buffer_sys;
 
@@ -397,6 +390,7 @@ struct HeroShaderVulkan {
 	VkDescriptorSetLayout descriptor_set_layouts[HERO_GFX_DESCRIPTOR_SET_COUNT];
 	VkDescriptorUpdateTemplate descriptor_update_templates[HERO_GFX_DESCRIPTOR_SET_COUNT];
 	U32* descriptor_binding_update_data_indices;
+	U32 descriptors_counts[HERO_GFX_DESCRIPTOR_SET_COUNT];
 	U32 descriptors_count;
 };
 
@@ -441,7 +435,7 @@ struct HeroDescriptorSetVulkan {
 	VkDescriptorUpdateTemplate update_template;
 	HeroDescriptorUpdateDataVulkan* update_data;
 	U32* binding_update_data_indices;
-	U32 bindings_count;
+	U32 descriptors_count;
 	HeroGfxFrameIdx last_submitted_frame_idx;
 };
 
@@ -518,6 +512,7 @@ struct HeroCommandRecorderVulkan {
 	VkPipeline bound_pipeline;
 	VkDescriptorSet bound_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_COUNT];
 	VkBuffer bound_vertex_buffers[HERO_BUFFER_BINDINGS_CAP];
+	U64 bound_vertex_buffer_offsets[HERO_BUFFER_BINDINGS_CAP];
 	U32 vertex_buffer_binding_start;
 	U32 vertex_buffer_binding_end;
 	U32 instances_start_idx;
@@ -620,9 +615,9 @@ HeroResult _hero_vulkan_logical_device_deinit(HeroLogicalDevice* ldev);
 
 HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev);
 
-HeroResult _hero_vulkan_logical_device_submit_start(HeroLogicalDevice* ldev);
-HeroResult _hero_vulkan_logical_device_submit_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count);
-HeroResult _hero_vulkan_logical_device_submit_end(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count);
+HeroResult _hero_vulkan_logical_device_queue_transfer(HeroLogicalDevice* ldev);
+HeroResult _hero_vulkan_logical_device_queue_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count);
+HeroResult _hero_vulkan_logical_device_submit(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count);
 
 HeroResult _hero_vulkan_stage_buffer_update(HeroLogicalDeviceVulkan* ldev_vulkan, bool is_image, _HeroGfxStagedUpdateData* data, void** destination_out);
 
@@ -712,7 +707,7 @@ HeroResult _hero_vulkan_cmd_draw_start(HeroCommandRecorder* command_recorder, He
 HeroResult _hero_vulkan_cmd_draw_end_vertexed(HeroCommandRecorder* command_recorder, U32 vertices_start_idx, U32 vertices_count);
 HeroResult _hero_vulkan_cmd_draw_end_indexed(HeroCommandRecorder* command_recorder, HeroBufferId index_buffer_id, U32 indices_start_idx, U32 indices_count, U32 vertices_start_idx);
 
-HeroResult _hero_vulkan_cmd_draw_set_vertex_buffers(HeroCommandRecorder* command_recorder, HeroBufferId* vertex_buffer_ids, U32 binding_start, U32 buffers_count);
+HeroResult _hero_vulkan_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroBufferId buffer_id, U32 binding, U64 offset);
 HeroResult _hero_vulkan_cmd_draw_set_push_constants(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size);
 HeroResult _hero_vulkan_cmd_draw_set_instances(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count);
 

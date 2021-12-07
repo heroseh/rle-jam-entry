@@ -1,7 +1,16 @@
 #version 450
 #extension GL_GOOGLE_include_directive: require
 
-#include "basic_shared.h"
+#include "../../deps/hero/core_glsl_shared.h"
+
+#define BASIC_BINDING_GLOBAL_UBO 0
+#define BASIC_BINDING_GLYPH_ATLAS 1
+
+HERO_UNIFORM_BUFFER(GameGlobalUBO, 0, BASIC_BINDING_GLOBAL_UBO) {
+	Mat4x4 mvp;
+};
+
+layout(set = 0, binding = BASIC_BINDING_GLYPH_ATLAS) uniform sampler2D u_glyph_atlas;
 
 // ===========================================
 //
@@ -65,23 +74,10 @@ layout (location = 0) out vec4 out_frag_color;
 // ===========================================
 
 void main() {
-	float height = texture(u_noise_texture, f_uv).r;
-	vec3 color;
-	if (show_falloff_map == 1) {
-		color = vec3(height);
-	} else {
-		if (height <= sea_max) {
-			color = vec3(0.0, 0.41, 0.58);
-		} else if (height >= mountain_min) {
-			color = vec3(0.7);
-		} else {
-			color = vec3(0.33, 0.49, 0.27);
-		}
-	}
-
-	out_frag_color = vec4(color, 1.0);
+	out_frag_color = texture(u_glyph_atlas, f_uv).r;
 }
 
 #endif // FRAGMENT
+
 
 

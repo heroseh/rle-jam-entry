@@ -81,7 +81,7 @@ typedef int S32;
 #define HERO_S32_MIN -2147483648
 #define HERO_S32_MAX 2147483647
 
-typedef S32 hero_codept;
+typedef S32 Codept;
 
 typedef unsigned long U64;
 typedef long S64;
@@ -199,6 +199,7 @@ enum {
 
 	HERO_ERROR_WINDOW_START = 1000,
 	HERO_ERROR_GFX_START = 2000,
+	HERO_ERROR_UI_START = 3000,
 
 	HERO_ERROR_COUNT,
 };
@@ -1111,6 +1112,18 @@ struct Vec2 {
 	F32 y;
 };
 
+typedef struct UVec2 UVec2;
+struct UVec2 {
+	U32 x;
+	U32 y;
+};
+
+typedef struct SVec2 SVec2;
+struct SVec2 {
+	S32 x;
+	S32 y;
+};
+
 typedef struct Vec2F16 Vec2F16;
 struct Vec2F16 {
 	F16 x;
@@ -1139,8 +1152,8 @@ struct Vec4 {
 	F32 w;
 };
 
-typedef struct HeroUVec4 HeroUVec4;
-struct HeroUVec4 {
+typedef struct UVec4 UVec4;
+struct UVec4 {
 	U32 x;
 	U32 y;
 	U32 z;
@@ -1370,6 +1383,22 @@ static inline Vec2 hero_aabb_half_size(HeroAabb* aabb) {
 	return vec2_div_scalar(hero_aabb_size(aabb), 2.f);
 }
 
+static inline Vec2 hero_aabb_top_left(HeroAabb* aabb) {
+	return VEC2_INIT(aabb->x, aabb->y);
+}
+
+static inline Vec2 hero_aabb_top_right(HeroAabb* aabb) {
+	return VEC2_INIT(aabb->ex, aabb->y);
+}
+
+static inline Vec2 hero_aabb_bottom_right(HeroAabb* aabb) {
+	return VEC2_INIT(aabb->ex, aabb->ey);
+}
+
+static inline Vec2 hero_aabb_bottom_left(HeroAabb* aabb) {
+	return VEC2_INIT(aabb->x, aabb->ey);
+}
+
 HeroAabb hero_aabb_cut_left(HeroAabb* parent, float len);
 HeroAabb hero_aabb_cut_right(HeroAabb* parent, float len);
 HeroAabb hero_aabb_cut_top(HeroAabb* parent, float len);
@@ -1377,6 +1406,9 @@ HeroAabb hero_aabb_cut_bottom(HeroAabb* parent, float len);
 HeroAabb hero_aabb_cut_center(HeroAabb* parent, float len);
 HeroAabb hero_aabb_cut_center_horizontal(HeroAabb* parent, float len);
 HeroAabb hero_aabb_cut_center_vertical(HeroAabb* parent, float len);
+
+HeroAabb hero_aabb_keep_overlapping(HeroAabb* a, HeroAabb* b);
+bool hero_aabb_intersects_pt(HeroAabb* a, Vec2 pt);
 
 void hero_aabb_print(HeroAabb* aabb, const char* name);
 
@@ -1444,7 +1476,7 @@ static inline U32 hero_utf8_codept_size(char first_byte) {
 	return lengths[first_byte >> 3];
 }
 
-static inline U32 hero_utf8_codept_decode(const U8* str, hero_codept* codept_out) {
+static inline U32 hero_utf8_codept_decode(const U8* str, Codept* codept_out) {
 	U32 size = hero_utf8_codept_size(str[0]);
 	switch (size) {
 		case 4:
@@ -1464,7 +1496,7 @@ static inline U32 hero_utf8_codept_decode(const U8* str, hero_codept* codept_out
 	return size;
 }
 
-static inline U32 hero_utf8_codept_iter(HeroString string, Uptr* idx_mut, hero_codept* codept_out) {
+static inline U32 hero_utf8_codept_iter(HeroString string, Uptr* idx_mut, Codept* codept_out) {
 	if (*idx_mut >= string.size) {
 		return 0;
 	}

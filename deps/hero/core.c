@@ -2560,6 +2560,27 @@ HeroAabb hero_aabb_cut_center_vertical(HeroAabb* parent, float len) {
 	return (HeroAabb){ parent->x, y, parent->ex, ey };
 }
 
+HeroAabb hero_aabb_keep_overlapping(HeroAabb* a, HeroAabb* b) {
+    if (
+        a->x >= b->ex || a->y >= b->ey ||
+        b->x >= a->ex || b->y >= a->ey
+    ) {
+        return ((HeroAabb){0});
+    }
+
+    return ((HeroAabb){
+		.x = HERO_MAX(a->x, b->x),
+		.y = HERO_MAX(a->y, b->y),
+		.ex = HERO_MIN(a->ex, b->ex),
+		.ey = HERO_MIN(a->ey, b->ey),
+	});
+}
+
+bool hero_aabb_intersects_pt(HeroAabb* a, Vec2 pt) {
+	return a->x <= pt.x && a->ex >= pt.x &&
+		a->y <= pt.y && a->ey >= pt.y;
+}
+
 void hero_aabb_print(HeroAabb* aabb, const char* name) {
 	printf("%s: { x: %f, y: %f, ex: %f, ey: %f\n", name, aabb->x, aabb->y, aabb->ex, aabb->ey);
 }
