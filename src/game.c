@@ -19,10 +19,39 @@ HeroUIImageId game_ui_ascii_image(U8 byte) {
 }
 
 void game_logic_init(void) {
-	game.global_ubo.mountain_min = 0.69;
-	game.global_ubo.sea_max = 0.3;
-	game.falloff_map_smooth_size = 3.f;
-	game.falloff_map_edge_offset = 2.2f;
+	game.noise_state = fnlCreateState();
+	switch (1) {
+		case 0:
+		game.noise_state.frequency = 0.001000;
+		game.noise_state.fractal_type = 1;
+		game.noise_state.octaves = 7;
+		game.noise_state.lacunarity = 2.160000;
+		game.global_ubo.deep_sea_max = 0.100000;
+		game.global_ubo.sea_max = 0.200000;
+		game.global_ubo.ground_max = 0.490000;
+		game.falloff_map_intensity = 50.000000;
+		break;
+		case 1:
+		game.noise_state.frequency = 0.001000;
+		game.noise_state.fractal_type = 2;
+		game.noise_state.octaves = 7;
+		game.noise_state.lacunarity = 1.900000;
+		game.global_ubo.deep_sea_max = 0.100000;
+		game.global_ubo.sea_max = 0.200000;
+		game.global_ubo.ground_max = 0.540000;
+		game.falloff_map_intensity = 10.0;
+		break;
+		case 2:
+		game.noise_state.frequency = 0.001000;
+		game.noise_state.fractal_type = 1;
+		game.noise_state.octaves = 7;
+		game.noise_state.lacunarity = 2.160000;
+		game.global_ubo.deep_sea_max = 0.100000;
+		game.global_ubo.sea_max = 0.200000;
+		game.global_ubo.ground_max = 0.490000;
+		game.falloff_map_intensity = 50.000000;
+		break;
+	}
 }
 
 Vec2 game_ui_text_size(HeroUIWindow* window, HeroString string, F32 wrap_at_width, HeroUIWidgetStyle* style) {
@@ -146,15 +175,8 @@ void game_ui_value_adjuster_i(HeroUIWindow* window, HeroUIWidgetSibId sib_id, He
 	hero_ui_box_end(window);
 }
 
-//
-// max must be in the range of 0.f to 1.f
-F32 game_falloff_map_generate_at(F32 max) {
-	F32 edge = game.falloff_map_smooth_size;
-	F32 offset = game.falloff_map_edge_offset;
-
-	F32 pow_edge = powf(max, edge);
-
-	return pow_edge / (pow_edge + powf(offset - (offset * max), edge));
+float signed_distance_circle(Vec2 coord, float radius) {
+	return vec2_len(coord) - radius;
 }
 
 void game_logic_update(void) {
@@ -163,26 +185,42 @@ void game_logic_update(void) {
 	HeroUIWindow* window = hero_ui_window_start(game.ui_window_id, game.gfx.render_width, game.gfx.render_height);
 
 	fnl_state noise_state = game.noise_state;
-	F32 falloff_map_smooth_size = game.falloff_map_smooth_size;
-	F32 falloff_map_edge_offset = game.falloff_map_edge_offset;
-	int show_falloff_map = game.global_ubo.show_falloff_map;
+	F32 falloff_map_intensity = game.falloff_map_intensity;
 
 	hero_ui_box_start(window, __LINE__, HERO_UI_CUT_RIGHT, HERO_UI_LEN_AUTO, NULL);
 
+		game_ui_value_adjuster_i(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("seed"), &game.noise_state.seed, 1);
 		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("frequency"), &game.noise_state.frequency, 0.001f);
 		game_ui_value_adjuster_i(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("fractal type"), (int*)&game.noise_state.fractal_type, 1);
 		game_ui_value_adjuster_i(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("octaves"), &game.noise_state.octaves, 1);
-		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("lacunarity"), &game.noise_state.lacunarity, 0.1f);
+		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("lacunarity"), &game.noise_state.lacunarity, 0.01f);
 
-		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("mountain min"), &game.global_ubo.mountain_min, 0.1f);
-		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("sea max"), &game.global_ubo.sea_max, 0.1f);
-
-		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("falloff smooth size"), &game.falloff_map_smooth_size, 0.25f);
-		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("falloff edge offset"), &game.falloff_map_edge_offset, 0.25f);
+		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("deep sea max"), &game.global_ubo.deep_sea_max, 0.01f);
+		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("sea max"), &game.global_ubo.sea_max, 0.01f);
+		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("ground_max"), &game.global_ubo.ground_max, 0.01f);
+		game_ui_value_adjuster_f(window, __LINE__, HERO_UI_CUT_TOP, hero_string_lit("falloff intensity"), &game.falloff_map_intensity, 10.f);
 
 		HeroUIWidgetId widget_id;
-		widget_id = hero_ui_text_toggle_button(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_string_lit("show falloff map"), hero_ui_ss.button);
-		game.global_ubo.show_falloff_map = !!(hero_ui_widget_state(window, widget_id) & HERO_UI_WIDGET_STATE_ACTIVE);
+		widget_id = hero_ui_text_toggle_button(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_string_lit("show height map"), hero_ui_ss.button);
+		game.global_ubo.show_height_map = !!(hero_ui_widget_state(window, widget_id) & HERO_UI_WIDGET_STATE_ACTIVE);
+
+		widget_id = hero_ui_text_toggle_button(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_string_lit("show grid"), hero_ui_ss.button);
+		game.global_ubo.show_grid = !!(hero_ui_widget_state(window, widget_id) & HERO_UI_WIDGET_STATE_ACTIVE);
+	hero_ui_box_end(window);
+
+	hero_ui_box_start(window, __LINE__, HERO_UI_CUT_RIGHT, HERO_UI_LEN_AUTO, NULL);
+		widget_id = hero_ui_text_button(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_string_lit("print"), hero_ui_ss.button);
+		if (hero_ui_focus_state(window, widget_id) & HERO_UI_FOCUS_STATE_RELEASED) {
+			printf("game.noise_state.seed = %u\n", game.noise_state.seed);
+			printf("game.noise_state.frequency = %f\n", game.noise_state.frequency);
+			printf("game.noise_state.fractal_type = %u\n", game.noise_state.fractal_type);
+			printf("game.noise_state.octaves = %u\n", game.noise_state.octaves);
+			printf("game.noise_state.lacunarity = %f\n", game.noise_state.lacunarity);
+			printf("game.global_ubo.ground_max = %f\n", game.global_ubo.ground_max);
+			printf("game.global_ubo.sea_max = %f\n", game.global_ubo.sea_max);
+			printf("game.falloff_map_intensity = %f\n", game.falloff_map_intensity);
+			printf("\n");
+		}
 	hero_ui_box_end(window);
 
 	hero_ui_window_end(window);
@@ -194,9 +232,7 @@ void game_logic_update(void) {
 	if (
 		!init ||
 		!HERO_CMP_ELMT(&noise_state, &game.noise_state) ||
-		falloff_map_smooth_size != game.falloff_map_smooth_size ||
-		falloff_map_edge_offset != game.falloff_map_edge_offset ||
-		show_falloff_map != game.global_ubo.show_falloff_map
+		falloff_map_intensity != game.falloff_map_intensity
 	) {
 		init += 1;
 		F32* pixels;
@@ -204,15 +240,11 @@ void game_logic_update(void) {
 
 		for_range(y, 0, 960) {
 			for_range(x, 0, 960) {
-				F32 height = 0.f;
-				F32 falloff_x = (((F32)x / 960.f) * 2.f) - 1.f;
-				F32 falloff_y = (((F32)y / 960.f) * 2.f) - 1.f;
-				if (game.global_ubo.show_falloff_map) {
-					height = game_falloff_map_generate_at(HERO_MAX(fabsf(falloff_x), fabsf(falloff_y)));
-				} else {
-					height = fnlGetNoise2D(&game.noise_state, x, y) * 0.5f + 0.5f; // convert to 0.0 - 1.0 from -1.0 - 1.0
-					height -= game_falloff_map_generate_at(HERO_MAX(fabsf(falloff_x), fabsf(falloff_y)));
-				}
+				//F32 falloff_height = game_falloff_map_generate_at(HERO_MAX(falloff_x, falloff_y));
+				float scale = 1.f / 960.f;
+				F32 falloff_height = (vec2_len(vec2_sub(VEC2_INIT(x, y), VEC2_INIT(480.f, 480.f))) + game.falloff_map_intensity) * scale;
+				F32 height = fnlGetNoise2D(&game.noise_state, x, y) * 0.5f + 0.5f; // convert to 0.0 - 1.0 from -1.0 - 1.0
+				height -= falloff_height;
 
 				pixels[y * 960 + x] = height;
 			}
@@ -907,9 +939,6 @@ void game_init(void) {
 	}
 
 	game_logic_init();
-
-	game.noise_state = fnlCreateState();
-	game.noise_state.fractal_type = 1;
 }
 
 int main(int argc, char** argv) {

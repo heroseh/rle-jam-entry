@@ -65,17 +65,40 @@ layout (location = 0) out vec4 out_frag_color;
 // ===========================================
 
 void main() {
+	if (show_grid == 1) {
+		float grid_thickness = 4.f;
+		float grid_cell_size = 960.f / 32.f;
+		vec2 v = f_uv * 960.f;
+		v /= grid_cell_size;
+		float half_grid_thickness = grid_thickness / 2.f;
+		vec2 diff = (v - floor(v)) * grid_cell_size;
+		if (any(greaterThan(diff, vec2(-half_grid_thickness))) && any(lessThan(diff, vec2(half_grid_thickness)))) {
+			out_frag_color = vec4(0.0,0.0,0.0, 1.0);
+			return;
+		}
+	}
+
 	float height = texture(u_noise_texture, f_uv).r;
 	vec3 color;
-	if (show_falloff_map == 1) {
+	if (show_height_map == 1) {
 		color = vec3(height);
 	} else {
-		if (height <= sea_max) {
-			color = vec3(0.0, 0.41, 0.58);
-		} else if (height >= mountain_min) {
-			color = vec3(0.7);
+		if (height <= deep_sea_max) {
+			vec3 low = vec3(0.0, 0.20, 0.34);
+			vec3 high = vec3(0.0, 0.26, 0.38);
+			color = mix(low, high, smoothstep(0.f, deep_sea_max, height));
+		} else if (height <= sea_max) {
+			vec3 low = vec3(0.0, 0.24, 0.42);
+			vec3 high = vec3(0.0, 0.51, 0.68);
+			color = mix(low, high, smoothstep(deep_sea_max, sea_max, height));
+		} else if (height <= ground_max) {
+			vec3 low = vec3(0.23, 0.39, 0.17);
+			vec3 high = vec3(0.33, 0.49, 0.27);
+			color = mix(low, high, smoothstep(sea_max, ground_max, height));
 		} else {
-			color = vec3(0.33, 0.49, 0.27);
+			vec3 low = vec3(0.5);
+			vec3 high = vec3(0.7);
+			color = mix(low, high, smoothstep(ground_max, 1.0, height));
 		}
 	}
 

@@ -8,9 +8,11 @@
 
 HERO_UNIFORM_BUFFER(GameBasicGlobalUBO, HERO_GFX_DESCRIPTOR_SET_GLOBAL, GAME_BASIC_GLOBAL_BINDING_GLOBAL_UBO) {
 	Mat4x4 mvp;
-	float mountain_min;
+	float deep_sea_max;
 	float sea_max;
-	int show_falloff_map;
+	float ground_max;
+	int show_height_map;
+	int show_grid;
 };
 
 #ifdef HERO_GLSL

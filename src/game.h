@@ -106,8 +106,7 @@ struct Game {
 	GameGfx gfx;
 	fnl_state noise_state;
 	GameBasicGlobalUBO global_ubo;
-	F32 falloff_map_smooth_size;
-	F32 falloff_map_edge_offset;
+	F32 falloff_map_intensity;
 };
 
 extern Game game;
