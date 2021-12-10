@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
 	if (exe_res != 0) { return exe_res; }
 
 	if (compile_shaders) {
-		exe_res = compile_shader("src/shaders", "basic");
+		exe_res = compile_shader("src/shaders", "island_gen_debug");
 		if (exe_res != 0) { return exe_res; }
 
 		exe_res = compile_shader("deps/hero", "ui");

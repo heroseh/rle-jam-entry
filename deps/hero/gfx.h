@@ -266,6 +266,8 @@ enum {
 	HERO_IMAGE_FORMAT_B8G8R8_UNORM,
 	HERO_IMAGE_FORMAT_B8G8R8A8_UNORM,
 
+    HERO_IMAGE_FORMAT_R32_UINT,
+    HERO_IMAGE_FORMAT_R32_SINT,
 	HERO_IMAGE_FORMAT_R32_SFLOAT,
 
 	//
@@ -689,12 +691,13 @@ enum {
 typedef U8 HeroImageFlags;
 enum {
 	HERO_IMAGE_FLAGS_SAMPLED                  = 0x1,
-	HERO_IMAGE_FLAGS_COLOR_ATTACHMENT         = 0x2,
-	HERO_IMAGE_FLAGS_DEPTH_STENCIL_ATTACHMENT = 0x4,
-	HERO_IMAGE_FLAGS_INPUT_ATTACHMENT         = 0x8,
-	HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS        = 0x10,
-	HERO_IMAGE_FLAGS_USED_FOR_COMPUTE         = 0x20,
-	HERO_IMAGE_FLAGS_SWAPCHAIN                = 0x40,
+	HERO_IMAGE_FLAGS_STORAGE                  = 0x2,
+	HERO_IMAGE_FLAGS_COLOR_ATTACHMENT         = 0x4,
+	HERO_IMAGE_FLAGS_DEPTH_STENCIL_ATTACHMENT = 0x8,
+	HERO_IMAGE_FLAGS_INPUT_ATTACHMENT         = 0x10,
+	HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS        = 0x20,
+	HERO_IMAGE_FLAGS_USED_FOR_COMPUTE         = 0x40,
+	HERO_IMAGE_FLAGS_SWAPCHAIN                = 0x80,
 };
 
 typedef struct HeroImage HeroImage;
@@ -1114,6 +1117,7 @@ HeroResult hero_shader_globals_get(HeroLogicalDevice* ldev, HeroShaderGlobalsId 
 HeroResult hero_shader_globals_set_descriptor(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroDescriptorType type, HeroDescriptorData* data);
 HeroResult hero_shader_globals_set_sampler(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroSamplerId sampler_id);
 HeroResult hero_shader_globals_set_image(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroImageId image_id);
+HeroResult hero_shader_globals_set_image_storage(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroImageId image_id);
 HeroResult hero_shader_globals_set_image_sampler(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroImageId image_id, HeroSamplerId sampler_id);
 HeroResult hero_shader_globals_set_uniform_buffer(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
 HeroResult hero_shader_globals_set_storage_buffer(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
@@ -1127,11 +1131,18 @@ HeroResult hero_shader_globals_update(HeroLogicalDevice* ldev, HeroShaderGlobals
 //
 // ===========================================
 
+typedef U8 HeroAttachementPostUsage;
+enum {
+	HERO_ATTACHEMENT_POST_USAGE_NONE,
+	HERO_ATTACHEMENT_POST_USAGE_PRESENT,
+	HERO_ATTACHEMENT_POST_USAGE_SAMPLED,
+};
+
 typedef struct HeroAttachmentLayout HeroAttachmentLayout;
 struct HeroAttachmentLayout {
 	HeroImageFormat format;
 	HeroSampleCount samples_count;
-	bool present;
+	HeroAttachementPostUsage post_usage;
 };
 
 typedef struct HeroRenderPassLayout HeroRenderPassLayout;

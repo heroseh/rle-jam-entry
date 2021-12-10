@@ -1,7 +1,7 @@
 #version 450
 #extension GL_GOOGLE_include_directive: require
 
-#include "basic_shared.h"
+#include "island_gen_debug_shared.h"
 
 // ===========================================
 //
@@ -67,8 +67,8 @@ layout (location = 0) out vec4 out_frag_color;
 void main() {
 	if (show_grid == 1) {
 		float grid_thickness = 4.f;
-		float grid_cell_size = 960.f / 32.f;
-		vec2 v = f_uv * 960.f;
+		float grid_cell_size = float(GAME_ISLAND_AXIS_TILES_COUNT) / 32.f;
+		vec2 v = f_uv * float(GAME_ISLAND_AXIS_TILES_COUNT);
 		v /= grid_cell_size;
 		float half_grid_thickness = grid_thickness / 2.f;
 		vec2 diff = (v - floor(v)) * grid_cell_size;
@@ -78,7 +78,9 @@ void main() {
 		}
 	}
 
-	float height = texture(u_noise_texture, f_uv).r;
+	ivec2 coord = ivec2(floor(f_uv * float(GAME_ISLAND_AXIS_TILES_COUNT)));
+	U32 tile = imageLoad(u_tile_map, coord).r;
+	F32 height = GAME_TILE_HEIGHT(tile) / 255.0;
 	vec3 color;
 	if (show_height_map == 1) {
 		color = vec3(height);

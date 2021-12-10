@@ -765,7 +765,8 @@ HeroResult _hero_object_pool_iter_next(HeroObjectPool* object_pool, HeroObjectId
 
 	//
 	// get the next object
-	object = *ptr_out;
+	U32 idx = _hero_object_id_raw_idx(*raw_id_mut, idx_bits_count);
+	object = HERO_PTR_ADD(object_pool->data, (Uptr)idx * elmt_size);
 	U32 next_idx = _hero_object_id_raw_idx(object->next_id, idx_bits_count);
 	if (HERO_UNLIKELY(next_idx == object_pool->cap)) {
 		//
@@ -779,7 +780,7 @@ HeroResult _hero_object_pool_iter_next(HeroObjectPool* object_pool, HeroObjectId
 	// get the identifier of the next object and pass back out the object's pointer
 	HeroObjectHeader* next = (HeroObjectHeader*)HERO_PTR_ADD(object_pool->data, next_idx * elmt_size);
 	*raw_id_mut = _hero_object_id_raw_init(next_idx, _hero_object_id_raw_counter(next->next_id, idx_bits_count), idx_bits_count);
-	*ptr_out = object;
+	*ptr_out = next;
 	return HERO_SUCCESS;
 }
 
@@ -803,7 +804,8 @@ HeroResult _hero_object_pool_iter_prev(HeroObjectPool* object_pool, HeroObjectId
 
 	//
 	// get the previous object
-	object = *ptr_out;
+	U32 idx = _hero_object_id_raw_idx(*raw_id_mut, idx_bits_count);
+	object = HERO_PTR_ADD(object_pool->data, (Uptr)idx * elmt_size);
 	if (HERO_UNLIKELY(object->prev_idx == object_pool->cap)) {
 		//
 		// there is no previous object we have reached the end of the allocated list
@@ -816,7 +818,7 @@ HeroResult _hero_object_pool_iter_prev(HeroObjectPool* object_pool, HeroObjectId
 	// get the identifier of the previous object and pass back out the object's pointer
 	HeroObjectHeader* prev = (HeroObjectHeader*)HERO_PTR_ADD(object_pool->data, object->prev_idx * elmt_size);
 	*raw_id_mut = _hero_object_id_raw_init(object->prev_idx, _hero_object_id_raw_counter(prev->next_id, idx_bits_count), idx_bits_count);
-	*ptr_out = object;
+	*ptr_out = prev;
 	return HERO_SUCCESS;
 }
 

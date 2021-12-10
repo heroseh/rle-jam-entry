@@ -30,6 +30,8 @@ U8 hero_image_format_bytes_per_pixel[HERO_IMAGE_FORMAT_COUNT] = {
 	[HERO_IMAGE_FORMAT_R8G8B8A8_UNORM] = 4,
 	[HERO_IMAGE_FORMAT_B8G8R8_UNORM] = 3,
 	[HERO_IMAGE_FORMAT_B8G8R8A8_UNORM] = 4,
+	[HERO_IMAGE_FORMAT_R32_UINT] = 4,
+	[HERO_IMAGE_FORMAT_R32_SINT] = 4,
 	[HERO_IMAGE_FORMAT_R32_SFLOAT] = 4,
 	[HERO_IMAGE_FORMAT_D16] = 2,
 	[HERO_IMAGE_FORMAT_D32] = 3,
@@ -809,6 +811,12 @@ HeroResult hero_shader_globals_set_image(HeroLogicalDevice* ldev, HeroShaderGlob
 	HeroDescriptorData data;
 	data.image.id = image_id;
 	return hero_gfx_sys.backend_vtable.shader_globals_set_descriptor(ldev, id, binding_idx, elmt_idx, HERO_DESCRIPTOR_TYPE_SAMPLED_IMAGE, &data);
+}
+
+HeroResult hero_shader_globals_set_image_storage(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroImageId image_id) {
+	HeroDescriptorData data;
+	data.image.id = image_id;
+	return hero_gfx_sys.backend_vtable.shader_globals_set_descriptor(ldev, id, binding_idx, elmt_idx, HERO_DESCRIPTOR_TYPE_STORAGE_IMAGE, &data);
 }
 
 HeroResult hero_shader_globals_set_image_sampler(HeroLogicalDevice* ldev, HeroShaderGlobalsId id, U16 binding_idx, U16 elmt_idx, HeroImageId image_id, HeroSamplerId sampler_id) {
@@ -2465,6 +2473,8 @@ static VkFormat _hero_vulkan_convert_to_format[HERO_IMAGE_FORMAT_COUNT] = {
 	[HERO_IMAGE_FORMAT_R8G8B8A8_UNORM] = VK_FORMAT_R8G8B8A8_UNORM,
 	[HERO_IMAGE_FORMAT_B8G8R8_UNORM] = VK_FORMAT_B8G8R8_UNORM,
 	[HERO_IMAGE_FORMAT_B8G8R8A8_UNORM] = VK_FORMAT_B8G8R8A8_UNORM,
+	[HERO_IMAGE_FORMAT_R32_UINT] = VK_FORMAT_R32_UINT,
+	[HERO_IMAGE_FORMAT_R32_SINT] = VK_FORMAT_R32_SINT,
 	[HERO_IMAGE_FORMAT_R32_SFLOAT] = VK_FORMAT_R32_SFLOAT,
 	[HERO_IMAGE_FORMAT_D16] = VK_FORMAT_D16_UNORM,
 	[HERO_IMAGE_FORMAT_D32] = VK_FORMAT_D32_SFLOAT,
@@ -2483,6 +2493,8 @@ static HeroImageFormat _hero_vulkan_convert_from_format(VkFormat vk) {
 		case VK_FORMAT_R8G8B8A8_UNORM: fmt = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM; break;
 		case VK_FORMAT_B8G8R8_UNORM: fmt = HERO_IMAGE_FORMAT_B8G8R8_UNORM; break;
 		case VK_FORMAT_B8G8R8A8_UNORM: fmt = HERO_IMAGE_FORMAT_B8G8R8A8_UNORM; break;
+		case VK_FORMAT_R32_UINT: fmt = HERO_IMAGE_FORMAT_R32_UINT; break;
+		case VK_FORMAT_R32_SINT: fmt = HERO_IMAGE_FORMAT_R32_SINT; break;
 		case VK_FORMAT_R32_SFLOAT: fmt = HERO_IMAGE_FORMAT_R32_SFLOAT; break;
 		case VK_FORMAT_D16_UNORM: fmt = HERO_IMAGE_FORMAT_D16; break;
 		case VK_FORMAT_D32_SFLOAT: fmt = HERO_IMAGE_FORMAT_D32; break;
@@ -3884,7 +3896,7 @@ HeroResult _hero_vulkan_logical_device_queue_transfer(HeroLogicalDevice* ldev) {
 				ldev_vulkan->vkCmdCopyBufferToImage(vk_command_buffer, update->src_buffer, update->data.image.dst_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
 
 				memory_barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-				memory_barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				memory_barrier.newLayout = update->data.image.layout;
 				memory_barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 				memory_barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 				ldev_vulkan->vkCmdPipelineBarrier(vk_command_buffer, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0, 0, NULL, 0, NULL, 1, &memory_barrier);
@@ -4539,6 +4551,7 @@ HeroResult _hero_vulkan_image_reinit(HeroLogicalDevice* ldev, HeroImageVulkan* i
 
 	VkImageUsageFlags vk_usage_flags = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
 	if (flags & HERO_IMAGE_FLAGS_SAMPLED) vk_usage_flags |= VK_IMAGE_USAGE_SAMPLED_BIT;
+	if (flags & HERO_IMAGE_FLAGS_STORAGE) vk_usage_flags |= VK_IMAGE_USAGE_STORAGE_BIT;
 	if (flags & HERO_IMAGE_FLAGS_COLOR_ATTACHMENT) vk_usage_flags |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	if (flags & HERO_IMAGE_FLAGS_DEPTH_STENCIL_ATTACHMENT) vk_usage_flags |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
 	if (flags & HERO_IMAGE_FLAGS_INPUT_ATTACHMENT) vk_usage_flags |= VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT;
@@ -4757,6 +4770,9 @@ HeroResult _hero_vulkan_image_write(HeroLogicalDevice* ldev, HeroImage* image, H
 	data.image.dst_image = image_vulkan->handle;
 	data.image.format = image_vulkan->public_.internal_format;
 	data.image.area = *area;
+	data.image.layout = (image_vulkan->public_.flags & HERO_IMAGE_FLAGS_STORAGE)
+		? VK_IMAGE_LAYOUT_GENERAL
+		: VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
 	result = _hero_vulkan_stage_buffer_update(ldev_vulkan, true, &data, destination_out);
 	if (result < 0) {
@@ -5599,12 +5615,15 @@ HeroResult _hero_vulkan_descriptor_set_init(HeroLogicalDevice* ldev, HeroShaderV
 			case HERO_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
 			case HERO_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
 			case HERO_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+			{
+				bool is_storage = bindings[i].descriptor_type == HERO_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 				for_range(j, data_idx, data_idx + bindings[i].descriptor_count) {
 					descriptor_update_data[j].image.sampler = ldev_vulkan->null_sampler;
 					descriptor_update_data[j].image.imageView = ldev_vulkan->null_image_view_2d;
-					descriptor_update_data[j].image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+					descriptor_update_data[j].image.imageLayout = is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 				}
 				break;
+			};
 			case HERO_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
 			case HERO_DESCRIPTOR_TYPE_STORAGE_BUFFER:
 			case HERO_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC:
@@ -5701,8 +5720,9 @@ HeroResult _hero_vulkan_descriptor_set_set_descriptor(HeroLogicalDevice* ldev, H
 				return result;
 			}
 
+			bool is_storage = type == HERO_DESCRIPTOR_TYPE_STORAGE_IMAGE;
 			vulkan_data->image.imageView = image_vulkan->view_handle;
-			vulkan_data->image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			vulkan_data->image.imageLayout = is_storage ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 			break;
 		};
 		case HERO_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
@@ -5881,7 +5901,17 @@ HeroResult _hero_vulkan_render_pass_init_handle(HeroLogicalDevice* ldev, HeroAtt
 			if (is_depth) {
 				vk->finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 			} else {
-				vk->finalLayout = hero->present ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+				switch (hero->post_usage) {
+					case HERO_ATTACHEMENT_POST_USAGE_PRESENT:
+						vk->finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+						break;
+					case HERO_ATTACHEMENT_POST_USAGE_SAMPLED:
+						vk->finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+						break;
+					case HERO_ATTACHEMENT_POST_USAGE_NONE:
+						vk->finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+						break;
+				}
 			}
 
 			VkAttachmentReference* ref;

@@ -323,15 +323,27 @@ struct HeroUIWindowBuild {
 
 HERO_TYPEDEF_OBJECT_ID(HeroUIWindowId);
 
-typedef struct HeroUIWindowRender HeroUIWindowRender;
-struct HeroUIWindowRender {
+typedef struct HeroUIWindowRenderData HeroUIWindowRenderData;
+struct HeroUIWindowRenderData {
 	HeroStack(HeroUIDrawCmd)      draw_cmds;
 	HeroStack(HeroUIImageAtlasId) unique_image_atlas_ids;
 	U32                           aabbs_count;
 	U32                           circles_count;
 	U32                           materials_count;
-	U32                           image_group_idx;
+	U32                           window_width;
+	U32                           window_height;
+};
 
+typedef struct HeroUIWindowUpdate HeroUIWindowUpdate;
+struct HeroUIWindowUpdate {
+	HeroUIWindowRenderData        render_data;
+	U32                           image_group_idx;
+};
+
+typedef struct HeroUIWindowRender HeroUIWindowRender;
+struct HeroUIWindowRender {
+	HeroUIWindowRenderData        render_data;
+	U32                           image_group_idx;
 	HeroBufferId                  vertex_buffer_id;
 	HeroBufferId                  index_buffer_id;
 	HeroBufferId                  global_uniform_buffer_id;
@@ -351,6 +363,7 @@ struct HeroUIWindow {
 	HeroUIWindowBuild            build;
 	HeroUIWidgetId               mouse_focused_id;
 	HeroUIWidgetId               keyboard_focused_id;
+	HeroUIWindowUpdate           update;
 	HeroUIWindowRender           render;
 	HeroAabb                     clip_rect;
 	HeroWindowId                 window_id;
@@ -365,9 +378,12 @@ struct HeroUIWindowSetup {
 
 HeroResult hero_ui_window_init(HeroUIWindowSetup* setup, HeroUIWindowId* id_out);
 HeroResult hero_ui_window_deinit(HeroUIWindowId id);
+HeroResult hero_ui_window_get(HeroUIWindowId id, HeroUIWindow** out);
 
 HeroUIWindow* hero_ui_window_start(HeroUIWindowId id, U32 render_width, U32 render_height);
 void hero_ui_window_end(HeroUIWindow* window);
+HeroResult hero_ui_window_update(HeroUIWindowId id);
+HeroResult hero_ui_window_update_render_data(HeroUIWindowId id);
 HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, HeroCommandRecorder* command_recorder);
 
 // ===========================================

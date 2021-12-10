@@ -242,6 +242,7 @@ union _HeroGfxStagedUpdateData {
 		VkImage dst_image;
 		HeroImageFormat format;
 		HeroImageArea area;
+		VkImageLayout layout;
 	} image;
 };
 

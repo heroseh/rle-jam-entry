@@ -454,7 +454,7 @@ void _hero_ui_widget_render_children(HeroUIWindow* window, HeroUIWidget* widget)
 // ===========================================
 
 HeroResult _hero_ui_widget_draw_push(HeroUIWindow* window, HeroUIDrawCmd** draw_cmd_out) {
-	return hero_stack(HeroUIDrawCmd, push)(&window->render.draw_cmds, hero_system_alctor, 0, draw_cmd_out);
+	return hero_stack(HeroUIDrawCmd, push)(&window->update.render_data.draw_cmds, hero_system_alctor, 0, draw_cmd_out);
 }
 
 HeroResult hero_ui_widget_draw_aabb(HeroUIWindow* window, HeroAabb* aabb, F32 radius, HeroColor color) {
@@ -464,10 +464,10 @@ HeroResult hero_ui_widget_draw_aabb(HeroUIWindow* window, HeroAabb* aabb, F32 ra
 		return result;
 	}
 
-	if (window->render.aabbs_count && window->render.aabbs_count % HERO_UI_AABBS_CAP == 0) {
-		window->render.materials_count += 1;
+	if (window->update.render_data.aabbs_count && window->update.render_data.aabbs_count % HERO_UI_AABBS_CAP == 0) {
+		window->update.render_data.materials_count += 1;
 	}
-	window->render.aabbs_count += 1;
+	window->update.render_data.aabbs_count += 1;
 
 	draw_cmd->type = HERO_UI_DRAW_CMD_TYPE_AABB;
 	draw_cmd->data.aabb.aabb = *aabb;
@@ -484,10 +484,10 @@ HeroResult hero_ui_widget_draw_aabb_border(HeroUIWindow* window, HeroAabb* aabb,
 		return result;
 	}
 
-	if (window->render.aabbs_count && window->render.aabbs_count % HERO_UI_AABBS_CAP == 0) {
-		window->render.materials_count += 1;
+	if (window->update.render_data.aabbs_count && window->update.render_data.aabbs_count % HERO_UI_AABBS_CAP == 0) {
+		window->update.render_data.materials_count += 1;
 	}
-	window->render.aabbs_count += 1;
+	window->update.render_data.aabbs_count += 1;
 
 	draw_cmd->type = HERO_UI_DRAW_CMD_TYPE_AABB_BORDER;
 	draw_cmd->data.aabb.aabb = *aabb;
@@ -505,17 +505,17 @@ HeroResult _hero_ui_widget_draw_image_push(HeroUIWindow* window, HeroUIImageId i
 	}
 
 	U32 image_idx = -1;
-	for_range(i, 0, window->render.unique_image_atlas_ids.count) {
+	for_range(i, 0, window->update.render_data.unique_image_atlas_ids.count) {
 		if (
-			window->render.unique_image_atlas_ids.data[i].raw == image_id.atlas_id.raw
+			window->update.render_data.unique_image_atlas_ids.data[i].raw == image_id.atlas_id.raw
 		) {
 			image_idx = i;
 			break;
 		}
 	}
 	if (image_idx == -1) {
-		image_idx = window->render.unique_image_atlas_ids.count;
-		result = hero_stack(HeroUIImageAtlasId, push_value)(&window->render.unique_image_atlas_ids, hero_system_alctor, 0, image_id.atlas_id);
+		image_idx = window->update.render_data.unique_image_atlas_ids.count;
+		result = hero_stack(HeroUIImageAtlasId, push_value)(&window->update.render_data.unique_image_atlas_ids, hero_system_alctor, 0, image_id.atlas_id);
 		if (result < 0) {
 			return result;
 		}
@@ -525,7 +525,7 @@ HeroResult _hero_ui_widget_draw_image_push(HeroUIWindow* window, HeroUIImageId i
 	image_idx %= HERO_UI_TEXTURES_CAP;
 
 	if (window->render.image_group_idx != image_group_idx) {
-		window->render.materials_count += 1;
+		window->update.render_data.materials_count += 1;
 	}
 
 	(*draw_cmd_out)->data.image.image_group_idx = image_group_idx;
@@ -572,10 +572,10 @@ HeroResult hero_ui_widget_draw_circle(HeroUIWindow* window, Vec2 center_pos, F32
 		return result;
 	}
 
-	if (window->render.circles_count && window->render.circles_count % HERO_UI_CIRCLES_CAP == 0) {
-		window->render.materials_count += 1;
+	if (window->update.render_data.circles_count && window->update.render_data.circles_count % HERO_UI_CIRCLES_CAP == 0) {
+		window->update.render_data.materials_count += 1;
 	}
-	window->render.circles_count += 1;
+	window->update.render_data.circles_count += 1;
 
 	draw_cmd->type = HERO_UI_DRAW_CMD_TYPE_CIRCLE;
 	draw_cmd->data.circle.center_pos = center_pos;
@@ -592,10 +592,10 @@ HeroResult hero_ui_widget_draw_circle_border(HeroUIWindow* window, Vec2 center_p
 		return result;
 	}
 
-	if (window->render.circles_count && window->render.circles_count % HERO_UI_CIRCLES_CAP == 0) {
-		window->render.materials_count += 1;
+	if (window->update.render_data.circles_count && window->update.render_data.circles_count % HERO_UI_CIRCLES_CAP == 0) {
+		window->update.render_data.materials_count += 1;
 	}
-	window->render.circles_count += 1;
+	window->update.render_data.circles_count += 1;
 
 	draw_cmd->type = HERO_UI_DRAW_CMD_TYPE_CIRCLE_BORDER;
 	draw_cmd->data.circle.center_pos = center_pos;
@@ -782,6 +782,10 @@ void _hero_ui_widget_find_mouse_focused(HeroUIWindow* window, HeroUIWidget* widg
 	window->clip_rect = parent_clip_rect;
 }
 
+HeroResult hero_ui_window_get(HeroUIWindowId id, HeroUIWindow** out) {
+	return hero_object_pool(HeroUIWindow, get)(&hero_ui_sys.window_pool, id, out);
+}
+
 HeroUIWindow* hero_ui_window_start(HeroUIWindowId id, U32 render_width, U32 render_height) {
 	HeroUIWindow* window;
 	HeroResult result = hero_object_pool(HeroUIWindow, get)(&hero_ui_sys.window_pool, id, &window);
@@ -834,13 +838,79 @@ void hero_ui_window_end(HeroUIWindow* window) {
 	build->sibling_prev_id = HERO_UI_WIDGET_ID_NULL;
 }
 
+HeroResult hero_ui_window_update(HeroUIWindowId id) {
+	HeroUIWindow* window;
+	HeroResult result = hero_object_pool(HeroUIWindow, get)(&hero_ui_sys.window_pool, id, &window);
+	if (result < 0) {
+		return result;
+	}
+	HeroUIWindowUpdate* update = &window->update;
+
+	//
+	// generate the HeroUIDrawCmd structures by traversing the UI tree.
+	// also collect some metrics so we know how much GPU data is needed after this.
+	{
+		update->render_data.draw_cmds.count = 0;
+		update->render_data.aabbs_count = 0;
+		update->render_data.circles_count = 0;
+		update->render_data.materials_count = 1;
+		update->render_data.unique_image_atlas_ids.count = 0;
+		update->image_group_idx = 0;
+
+		HeroUIWidget* root_widget;
+		result = hero_ui_widget_get(window, HERO_UI_ROOT_WIDGET_ID, &root_widget);
+		HERO_RESULT_ASSERT(result);
+
+		_hero_ui_widget_render_children(window, root_widget);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult hero_ui_window_update_render_data(HeroUIWindowId id) {
+	HeroUIWindow* window;
+	HeroResult result = hero_object_pool(HeroUIWindow, get)(&hero_ui_sys.window_pool, id, &window);
+	if (result < 0) {
+		return result;
+	}
+	HeroUIWindowUpdate* update = &window->update;
+	HeroUIWindowRender* render = &window->render;
+
+	{
+		HeroStack(HeroUIDrawCmd) tmp = render->render_data.draw_cmds;
+		render->render_data.draw_cmds = update->render_data.draw_cmds;
+		update->render_data.draw_cmds = tmp;
+	}
+
+	{
+		HeroStack(HeroUIImageAtlasId) tmp = render->render_data.unique_image_atlas_ids;
+		render->render_data.unique_image_atlas_ids = update->render_data.unique_image_atlas_ids;
+		update->render_data.unique_image_atlas_ids = tmp;
+	}
+
+	render->render_data.aabbs_count = update->render_data.aabbs_count;
+	render->render_data.circles_count = update->render_data.circles_count;
+	render->render_data.materials_count = update->render_data.materials_count;
+
+	{
+		HeroUIWidget* root_widget;
+		result = hero_ui_widget_get(window, HERO_UI_ROOT_WIDGET_ID, &root_widget);
+		HERO_RESULT_ASSERT(result);
+
+		render->render_data.window_width = (U32)root_widget->area.ex;
+		render->render_data.window_height = (U32)root_widget->area.ey;
+	}
+
+	return HERO_SUCCESS;
+}
+
 HeroResult _hero_window_ui_render_new_material(HeroUIWindow* window, HeroLogicalDevice* ldev) {
 	HeroResult result;
 
 	HeroUIWindowRender* render = &window->render;
 
-	HeroMaterialId material_id = render->material_ids.data[render->materials_count];
-	render->materials_count += 1;
+	HeroMaterialId material_id = render->material_ids.data[render->render_data.materials_count];
+	render->render_data.materials_count += 1;
 
 	result = hero_material_set_uniform_buffer(ldev, material_id, HERO_UI_MATERIAL_BINDING_COLOR_UBO, 0, render->color_uniform_buffer_ids.data[render->color_uniform_buffer_idx], 0);
 	if (result < 0) {
@@ -859,10 +929,10 @@ HeroResult _hero_window_ui_render_new_material(HeroUIWindow* window, HeroLogical
 
 	U32 image_start_idx = render->image_group_idx * HERO_UI_TEXTURES_CAP;
 	U32 image_end_idx = image_start_idx + HERO_UI_TEXTURES_CAP;
-	image_end_idx = HERO_MIN(image_end_idx, render->unique_image_atlas_ids.count);
+	image_end_idx = HERO_MIN(image_end_idx, render->render_data.unique_image_atlas_ids.count);
 
 	for_range(i, image_start_idx, image_end_idx) {
-		HeroUIImageAtlasId atlas_id = render->unique_image_atlas_ids.data[i];
+		HeroUIImageAtlasId atlas_id = render->render_data.unique_image_atlas_ids.data[i];
 
 		HeroUIImageAtlas* atlas;
 		result = hero_ui_image_atlas_get(atlas_id, &atlas);
@@ -885,35 +955,16 @@ HeroResult _hero_window_ui_render_new_material(HeroUIWindow* window, HeroLogical
 HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, HeroCommandRecorder* command_recorder) {
 	HeroUIWindow* window;
 	HeroResult result = hero_object_pool(HeroUIWindow, get)(&hero_ui_sys.window_pool, id, &window);
+	if (result < 0) {
+		return result;
+	}
 	HeroUIWindowRender* render = &window->render;
 
-	//
-	// generate the HeroUIDrawCmd structures by traversing the UI tree.
-	// also collect some metrics so we know how much GPU data is needed after this.
 	{
-		render->draw_cmds.count = 0;
-		render->unique_image_atlas_ids.count = 0;
-		render->aabbs_count = 0;
-		render->circles_count = 0;
-		render->materials_count = 1;
-		render->image_group_idx = 0;
-
-		HeroUIWidget* root_widget;
-		result = hero_ui_widget_get(window, HERO_UI_ROOT_WIDGET_ID, &root_widget);
+		HeroUIGlobalUBO* ubo;
+		result = hero_buffer_write(ldev, render->global_uniform_buffer_id, 0, 1, (void**)&ubo);
 		HERO_RESULT_ASSERT(result);
-
-		_hero_ui_widget_render_children(window, root_widget);
-
-		{
-			HeroUIGlobalUBO* ubo;
-			result = hero_buffer_write(ldev, render->global_uniform_buffer_id, 0, 1, (void**)&ubo);
-			HERO_RESULT_ASSERT(result);
-			mat4x4_ortho(&ubo->mvp, 0.f, root_widget->area.ex, root_widget->area.ey, 0.f, -1.f, 1.f);
-		}
-	}
-
-	if (render->draw_cmds.count == 0) {
-		return HERO_SUCCESS;
+		mat4x4_ortho(&ubo->mvp, 0.f, render->render_data.window_width, render->render_data.window_height, 0.f, -1.f, 1.f);
 	}
 
 	//
@@ -924,16 +975,16 @@ HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, Her
 
 	//
 	// resize buffers & allocate all the GPU resources
-	U32 vertices_count = render->draw_cmds.count * 4;
-	U32 indices_count = render->draw_cmds.count * 6;
+	U32 vertices_count = render->render_data.draw_cmds.count * 4;
+	U32 indices_count = render->render_data.draw_cmds.count * 6;
 	{
 
 		hero_buffer_reserve(ldev, render->vertex_buffer_id, vertices_count);
 		hero_buffer_reserve(ldev, render->index_buffer_id, indices_count);
 
-		U32 color_uniform_buffers_count = (render->draw_cmds.count / HERO_UI_COLORS_CAP) + 1;
-		U32 aabb_uniform_buffers_count = (render->aabbs_count / HERO_UI_AABBS_CAP) + 1;
-		U32 circle_uniform_buffers_count = (render->circles_count / HERO_UI_CIRCLES_CAP) + 1;
+		U32 color_uniform_buffers_count = (render->render_data.draw_cmds.count / HERO_UI_COLORS_CAP) + 1;
+		U32 aabb_uniform_buffers_count = (render->render_data.aabbs_count / HERO_UI_AABBS_CAP) + 1;
+		U32 circle_uniform_buffers_count = (render->render_data.circles_count / HERO_UI_CIRCLES_CAP) + 1;
 
 		for_range(i, render->color_uniform_buffer_ids.count, color_uniform_buffers_count) {
 			HeroBufferId* dst;
@@ -974,7 +1025,7 @@ HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, Her
 			}
 		}
 
-		for_range(i, render->material_ids.count, render->materials_count) {
+		for_range(i, render->material_ids.count, render->render_data.materials_count) {
 			HeroMaterialId* dst;
 			result = hero_stack(HeroMaterialId, push)(&render->material_ids, hero_system_alctor, 0, &dst);
 			if (result < 0) {
@@ -1002,9 +1053,9 @@ HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, Her
 	HeroColor* colors;
 	Vec4* aabbs;
 	Vec2* circle_positions;
-	U32 remaining_colors_count = render->draw_cmds.count;
-	U32 remaining_aabbs_count = render->aabbs_count;
-	U32 remaining_circles_count = render->circles_count;
+	U32 remaining_colors_count = render->render_data.draw_cmds.count;
+	U32 remaining_aabbs_count = render->render_data.aabbs_count;
+	U32 remaining_circles_count = render->render_data.circles_count;
 	{
 		result =  hero_buffer_write(ldev, render->vertex_buffer_id, 0, vertices_count, (void**)&vertices);
 		if (result < 0) {
@@ -1048,7 +1099,7 @@ HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, Her
 	render->aabb_uniform_buffer_idx = 0;
 	render->circle_uniform_buffer_idx = 0;
 	render->image_group_idx = 0;
-	render->materials_count = 0;
+	render->render_data.materials_count = 0;
 	U32 prev_draw_call_vertices_idx = 0;
 	U32 prev_draw_call_indices_idx = 0;
 	U32 prev_draw_call_colors_count = 0;
@@ -1063,8 +1114,8 @@ HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, Her
 	// we will up the vertices and indices buffers until the material changes that triggers another draw call
 	// to be recordered into the GPU command buffer.
 	U32 cmd_idx = 0;
-	for (; cmd_idx < render->draw_cmds.count; cmd_idx += 1) {
-		HeroUIDrawCmd* cmd = &render->draw_cmds.data[cmd_idx];
+	for (; cmd_idx < render->render_data.draw_cmds.count; cmd_idx += 1) {
+		HeroUIDrawCmd* cmd = &render->render_data.draw_cmds.data[cmd_idx];
 		HeroAabb aabb;
 		HeroAabb* aabb_ptr;
 
@@ -1247,7 +1298,7 @@ HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, Her
 		vertex_idx += 4;
 		index_idx += 6;
 
-		if (materials_count != render->materials_count) {
+		if (materials_count != render->render_data.materials_count) {
 RECORD_DRAW:
 			result = hero_cmd_draw_start(command_recorder, render->material_ids.data[materials_count - 1]);
 			if (result < 0) {
@@ -1265,7 +1316,7 @@ RECORD_DRAW:
 				return result;
 			}
 
-			materials_count = render->materials_count;
+			materials_count = render->render_data.materials_count;
 			prev_draw_call_vertices_idx = vertex_idx;
 			prev_draw_call_indices_idx = index_idx;
 			prev_draw_call_colors_count = colors_count;
