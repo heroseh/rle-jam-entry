@@ -234,6 +234,9 @@ HERO_NORETURN void _hero_abort(const char* file, int line, const char* message, 
 
 static inline F32 hero_lerp(F32 from, F32 to, F32 t) { return (to - from) * t + from; }
 static inline F32 hero_lerp_inv(F32 from, F32 to, F32 value) { return (value - from) / (to - from); }
+static inline F32 hero_bilerp(F32 tl, F32 tr, F32 bl, F32 br, F32 tx, F32 ty){
+	return hero_lerp(hero_lerp(tl, tr, tx), hero_lerp(bl, br, tx), ty);
+}
 static inline bool hero_approx_eq(F32 a, F32 b) { return fabs(a - b) <= HERO_EPSILON; }
 static inline F32 hero_sign(F32 v) { return copysignf(1.f, v); }
 
@@ -310,8 +313,7 @@ struct HeroIAlctor {
 };
 
 #define HERO_ALLOC_TAG(major, minor) (((HeroAllocTag)(minor) << 32) | (HeroAllocTag)major)
-#define HERO_ALLOC_TAG_GROUP(tag) ((U32)(HERO_ENUM_GROUP((tag) & 0xffffffff)))
-#define HERO_ALLOC_TAG_MAJOR(tag) ((U32)(HERO_ENUM_VALUE((tag) & 0xffffffff)))
+#define HERO_ALLOC_TAG_MAJOR(tag) ((U32)((tag) & 0xffffffff))
 #define HERO_ALLOC_TAG_MINOR(tag) ((U32)((tag) >> 32))
 
 static inline void* hero_alloc(HeroIAlctor alctor, HeroAllocTag tag, Uptr size, Uptr align) {
@@ -1240,6 +1242,13 @@ F32 vec3_len(Vec3 v);
 Vec3 vec3_norm(Vec3 v);
 F32 vec3_dot(Vec3 a, Vec3 b);
 
+#define VEC3_UP       (Vec3) {  0.0,  1.0,  0.0 }
+#define VEC3_DOWN     (Vec3) {  0.0, -1.0,  0.0 }
+#define VEC3_LEFT     (Vec3) { -1.0,  0.0,  0.0 }
+#define VEC3_RIGHT    (Vec3) {  1.0,  0.0,  0.0 }
+#define VEC3_FORWARD  (Vec3) {  0.0,  0.0,  1.0 }
+#define VEC3_BACKWARD (Vec3) {  0.0,  0.0, -1.0 }
+
 Vec3 vec3_cross(Vec3 a, Vec3 b);
 
 Vec3 vec3_perp_forward(Vec3 v);
@@ -1287,8 +1296,13 @@ Quat quat_sub(Quat a, Quat b);
 Quat quat_add_scalar(Quat q, F32 by);
 Quat quat_sub_scalar(Quat q, F32 by);
 Quat quat_mul(Quat a, Quat b);
+Vec3 quat_mul_vec3(Quat q, Vec3 vec);
 Quat quat_conj(Quat q);
-Quat quat_rotate(float angle, Vec3 axis);
+Quat quat_rotate(float angle, Vec3 axis); // axis must be normalized
+F32 quat_euler_roll(Quat q);
+F32 quat_euler_pitch(Quat q);
+F32 quat_euler_yaw(Quat q);
+Quat quat_from_euler(F32 roll, F32 pitch, F32 yaw);
 
 // ===========================================
 //
@@ -1300,7 +1314,7 @@ Quat quat_rotate(float angle, Vec3 axis);
 
 typedef union Mat3x2 Mat3x2;
 union Mat3x2 {
-	Vec2 row[3];
+	Vec2 col[3];
 	F32 a[6];
 };
 
@@ -1317,18 +1331,24 @@ Vec2 mat3x2_mul_vector(Mat3x2* m, Vec2 vector);
 
 typedef union Mat4x4 Mat4x4;
 union Mat4x4 {
-	Vec4 row[4];
+	Vec4 col[4];
 	F32 a[16];
 };
 
 void mat4x4_identity(Mat4x4* out);
 void mat4x4_identity_scale(Mat4x4* out, Vec3 v);
 void mat4x4_identity_rotate(Mat4x4* out, Vec3 v, F32 angle);
+void mat4x4_identity_rotate_x(Mat4x4* out, F32 angle);
+void mat4x4_identity_rotate_y(Mat4x4* out, F32 angle);
+void mat4x4_identity_rotate_z(Mat4x4* out, F32 angle);
 void mat4x4_identity_translate(Mat4x4* out, Vec3 v);
 void mat4x4_from_quat(Mat4x4* out, Quat quat);
 
 void mat4x4_scale(Mat4x4* m, Vec3 v);
 void mat4x4_rotate(Mat4x4* m, Vec3 v, F32 angle);
+void mat4x4_rotate_x(Mat4x4* m, F32 angle);
+void mat4x4_rotate_y(Mat4x4* m, F32 angle);
+void mat4x4_rotate_z(Mat4x4* m, F32 angle);
 void mat4x4_translate(Mat4x4* m, Vec3 v);
 
 void mat4x4_from_3x2(Mat4x4* out, Mat3x2* m);
@@ -1337,6 +1357,7 @@ Vec4 mat4x4_column(Mat4x4* m, U32 column_idx);
 void mat4x4_ortho(Mat4x4* out, F32 left, F32 right, F32 bottom, F32 top, F32 near, F32 far);
 void mat4x4_perspective(Mat4x4* out, F32 fovy, F32 aspect_ratio, F32 z_near, F32 z_far);
 void mat4x4_mul(Mat4x4* out, Mat4x4* a, Mat4x4* b);
+void mat4x4_mul_quat(Mat4x4* out, Mat4x4* m, Quat q); // must be an orthoganal matrix
 Vec3 mat4x4_mul_point(Mat4x4* m, Vec3 pt);
 Vec3 mat4x4_mul_vector(Mat4x4* m, Vec3 v);
 

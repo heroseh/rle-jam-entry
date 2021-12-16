@@ -979,8 +979,10 @@ HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, Her
 	U32 indices_count = render->render_data.draw_cmds.count * 6;
 	{
 
-		hero_buffer_reserve(ldev, render->vertex_buffer_id, vertices_count);
-		hero_buffer_reserve(ldev, render->index_buffer_id, indices_count);
+		result = hero_buffer_reserve(ldev, render->vertex_buffer_id, vertices_count);
+		HERO_RESULT_ASSERT(result);
+		result = hero_buffer_reserve(ldev, render->index_buffer_id, indices_count);
+		HERO_RESULT_ASSERT(result);
 
 		U32 color_uniform_buffers_count = (render->render_data.draw_cmds.count / HERO_UI_COLORS_CAP) + 1;
 		U32 aabb_uniform_buffers_count = (render->render_data.aabbs_count / HERO_UI_AABBS_CAP) + 1;

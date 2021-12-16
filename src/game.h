@@ -14,10 +14,22 @@
 #include <deps/FastNoiseLite.h>
 
 #include "shaders/island_gen_debug_shared.h"
+#include "shaders/play_shared.h"
 
 #define GAME_WINDOW_TITLE "RLE"
 #define GAME_WINDOW_WIDTH 1280
 #define GAME_WINDOW_HEIGHT 720
+
+// ===========================================
+//
+//
+// UI
+//
+//
+// ===========================================
+
+void game_ui_value_adjuster_f(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroString name, float* value, float step);
+void game_ui_value_adjuster_u(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroString name, U32* value, int step);
 
 // ===========================================
 //
@@ -49,7 +61,7 @@ enum {
 
 extern GameIslandGenConfig game_island_gen_configs[GAME_ISLAND_GEN_CONFIG_COUNT];
 
-void game_island_gen(GameIslandGenConfig* config, GameTile* tile_map_out);
+void game_island_gen(GameIslandGenConfig* config, F32* tile_height_map_out);
 
 // ===========================================
 //
@@ -62,6 +74,7 @@ void game_island_gen(GameIslandGenConfig* config, GameTile* tile_map_out);
 typedef U8 GameSceneType;
 enum {
 	GAME_SCENE_TYPE_ISLAND_GEN_DEBUG,
+	GAME_SCENE_TYPE_PLAY,
 };
 
 #define HERO_STACK_ELMT_TYPE GameSceneType
@@ -128,7 +141,7 @@ static inline HeroResult game_scene_update_render_data(GameScene* scene) {
 
 typedef struct GameSceneIslandGenDebugRenderData GameSceneIslandGenDebugRenderData;
 struct GameSceneIslandGenDebugRenderData {
-	GameTile* tile_map;
+	F32* tile_height_map;
 	F32 deep_sea_max;
 	F32 sea_max;
 	F32 ground_max;
@@ -148,6 +161,36 @@ struct GameSceneIslandGenDebug {
 };
 
 HeroResult game_scene_island_gen_debug_init(GameScene** scene_out);
+
+// ===========================================
+//
+//
+// Scene: Play
+//
+//
+// ===========================================
+
+typedef struct GameScenePlayRenderData GameScenePlayRenderData;
+struct GameScenePlayRenderData {
+	F32* tile_height_map;
+	Vec3 camera_position;
+	Quat camera_rotation;
+};
+
+typedef struct GameScenePlay GameScenePlay;
+struct GameScenePlay {
+	GameScene scene;
+	F32* tile_height_map;
+	GameScenePlayRenderData render_data;
+	HeroUIImageAtlasId ui_image_atlas_id;
+	Vec3 camera_forward;
+	Vec3 camera_position;
+	Quat camera_rotation;
+	F32 camera_yaw;
+	F32 camera_pitch;
+};
+
+HeroResult game_scene_play_init(GameScene** scene_out);
 
 // ===========================================
 //
@@ -196,12 +239,59 @@ struct GameGfxIslandGenDebug {
 	HeroRenderPassId       render_pass_id;
 	HeroFrameBufferId      frame_buffer_id;
 	HeroImageId            attachment_image_id;
-	HeroImageId            tile_map_image_id;
+	HeroImageId            tile_height_map_image_id;
 };
 
 HeroResult game_gfx_island_gen_debug_init();
 HeroResult game_gfx_island_gen_debug_deinit();
 HeroResult game_gfx_island_gen_debug_render(HeroCommandRecorder* command_recorder);
+
+// ===========================================
+//
+//
+// Graphics Scene: Play
+//
+//
+// ===========================================
+
+typedef struct GameGfxPlay GameGfxPlay;
+struct GameGfxPlay {
+	GameScenePlayRenderData scene_render_data;
+
+	HeroVertexLayoutId     terrain_tile_vertex_layout_id;
+	HeroBufferId           terrain_tile_vertex_buffer_id;
+	HeroBufferId           terrain_tile_index_buffer_id;
+	HeroShaderId           terrain_tile_shader_id;
+	HeroShaderGlobalsId    terrain_tile_shader_globals_id;
+	HeroPipelineId         terrain_tile_pipeline_id;
+	HeroMaterialId         terrain_tile_material_id;
+	HeroImageId            voxel_height_image_id;
+	HeroVertexLayoutId     model_vertex_layout_id;
+	HeroBufferId           model_vertex_buffer_id;
+	HeroBufferId           model_index_buffer_id;
+	HeroShaderId           model_shader_id;
+	HeroShaderGlobalsId    model_shader_globals_id;
+	HeroPipelineId         model_pipeline_id;
+	HeroMaterialId         model_material_id;
+	HeroVertexLayoutId     billboard_vertex_layout_id;
+	HeroBufferId           billboard_vertex_buffer_id;
+	HeroBufferId           billboard_index_buffer_id;
+	HeroShaderId           billboard_shader_id;
+	HeroShaderGlobalsId    billboard_shader_globals_id;
+	HeroPipelineId         billboard_pipeline_id;
+	HeroMaterialId         billboard_material_id;
+	HeroBufferId           uniform_buffer_id;
+	HeroDescriptorPoolId   descriptor_pool_id;
+	HeroRenderPassLayoutId render_pass_layout_id;
+	HeroRenderPassId       render_pass_id;
+	HeroFrameBufferId      frame_buffer_id;
+	HeroImageId            attachment_image_id;
+	HeroImageId            depth_image_id;
+};
+
+HeroResult game_gfx_play_init();
+HeroResult game_gfx_play_deinit();
+HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder);
 
 // ===========================================
 //
@@ -217,6 +307,7 @@ struct GameGfx {
 	HeroStack(GameSceneType) scene_queue;
 
 	GameGfxIslandGenDebug island_gen_debug;
+	GameGfxPlay play;
 
 	HeroSwapchainId swapchain_id;
 	HeroFrameBufferId* swapchain_frame_buffer_ids;
@@ -235,6 +326,7 @@ struct GameGfx {
 	HeroImageId noise_image_id;
 	HeroImageId font_ascii_image_id;
 	HeroSamplerId clamp_nearest_sampler_id;
+	HeroSamplerId clamp_linear_sampler_id;
 };
 
 void game_gfx_init(void);

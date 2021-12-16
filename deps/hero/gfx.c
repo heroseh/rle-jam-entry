@@ -378,6 +378,11 @@ HeroResult hero_buffer_write(HeroLogicalDevice* ldev, HeroBufferId id, U64 start
 		return result;
 	}
 
+	if (elmts_count == 0) {
+		*destination_out = NULL;
+		return HERO_SUCCESS;
+	}
+
 	return hero_gfx_sys.backend_vtable.buffer_write(ldev, buffer, start_idx, elmts_count, destination_out);
 }
 
@@ -5946,14 +5951,14 @@ HeroResult _hero_vulkan_render_pass_init_handle(HeroLogicalDevice* ldev, HeroAtt
 		}
 	}
 
-	VkSubpassDependency vk_dependencies[] = {
+	static VkSubpassDependency vk_dependencies[] = {
 		{
 			.srcSubpass      = VK_SUBPASS_EXTERNAL,
 			.dstSubpass      = 0,
-			.srcStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-			.dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-			.srcAccessMask   = VK_ACCESS_MEMORY_READ_BIT,
-			.dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+			.dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+			.srcAccessMask   = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			.dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
 			.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
 		},
 		{
@@ -5975,8 +5980,8 @@ HeroResult _hero_vulkan_render_pass_init_handle(HeroLogicalDevice* ldev, HeroAtt
 		.attachmentCount = attachments_count,
 		.pSubpasses = &vk_subpass,
 		.subpassCount = 1,
-		.pDependencies = NULL,
-		.dependencyCount = 0,
+		.pDependencies = vk_dependencies,
+		.dependencyCount = HERO_ARRAY_COUNT(vk_dependencies),
 	};
 
 	VkRenderPass vk_render_pass;

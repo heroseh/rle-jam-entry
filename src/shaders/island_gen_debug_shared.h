@@ -16,7 +16,7 @@ HERO_UNIFORM_BUFFER(GameIslandGenDebugGlobalUBO, HERO_GFX_DESCRIPTOR_SET_GLOBAL,
 };
 
 #ifdef HERO_GLSL
-layout(set = HERO_GFX_DESCRIPTOR_SET_GLOBAL, binding = GAME_ISLAND_GEN_DEBUG_GLOBAL_BINDING_TILE_MAP, r32ui) uniform readonly uimage2D u_tile_map;
+layout(set = HERO_GFX_DESCRIPTOR_SET_GLOBAL, binding = GAME_ISLAND_GEN_DEBUG_GLOBAL_BINDING_TILE_MAP) uniform sampler2D u_tile_height_map;
 #endif
 
 #endif // _HERO_UI_GLSL_SHARED_H_

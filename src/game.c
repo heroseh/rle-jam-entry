@@ -9,118 +9,10 @@
 // ===========================================
 //
 //
-// Island Generator
+// UI
 //
 //
 // ===========================================
-
-GameIslandGenConfig game_island_gen_configs[GAME_ISLAND_GEN_CONFIG_COUNT] = {
-	{
-		.seed = 1337,
-		.frequency = 0.001000,
-		.fractal_type = 1,
-		.octaves = 7,
-		.lacunarity = 2.160000,
-		.deep_sea_max = 0.100000,
-		.sea_max = 0.200000,
-		.ground_max = 0.490000,
-		.falloff_map_intensity = 50.000000,
-	},
-	{
-		.seed = 1337,
-		.frequency = 0.001000,
-		.fractal_type = 2,
-		.octaves = 7,
-		.lacunarity = 1.900000,
-		.deep_sea_max = 0.100000,
-		.sea_max = 0.200000,
-		.ground_max = 0.540000,
-		.falloff_map_intensity = 10.0,
-	},
-	{
-		.seed = 1337,
-		.frequency = 0.001000,
-		.fractal_type = 3,
-		.octaves = 7,
-		.lacunarity = 2.160000,
-		.deep_sea_max = 0.100000,
-		.sea_max = 0.200000,
-		.ground_max = 0.490000,
-		.falloff_map_intensity = 50.000000,
-	},
-};
-
-void game_island_gen(GameIslandGenConfig* config, GameTile* tile_map_out) {
-	fnl_state noise_state = fnlCreateState();
-	noise_state.seed = config->seed;
-	noise_state.frequency = config->frequency;
-	noise_state.fractal_type = config->fractal_type;
-	noise_state.octaves = config->octaves;
-	noise_state.lacunarity = config->lacunarity;
-
-	F32 half_size = (F32)(GAME_ISLAND_AXIS_TILES_COUNT / 2);
-	F32 map_to_norm_scale = 1.f / (F32)GAME_ISLAND_AXIS_TILES_COUNT;
-	for_range(y, 0, GAME_ISLAND_AXIS_TILES_COUNT) {
-		U32 row_start = y * GAME_ISLAND_AXIS_TILES_COUNT;
-		for_range(x, 0, GAME_ISLAND_AXIS_TILES_COUNT) {
-			Vec2 falloff_offset = VEC2_INIT(x - half_size, y - half_size);
-			F32 falloff_height = (vec2_len(falloff_offset) + config->falloff_map_intensity) * map_to_norm_scale;
-			F32 height = fnlGetNoise2D(&noise_state, x, y) * 0.5f + 0.5f; // convert to 0.0 - 1.0 from -1.0 - 1.0
-			height -= falloff_height;
-
-			U8 height_u8 = (U8)(HERO_MAX(height, 0.f) * 255.f);
-			GameTile tile = 0;
-			GAME_TILE_HEIGHT_SET(&tile, height_u8);
-			tile_map_out[row_start + x] = tile;
-		}
-	}
-}
-
-// ===========================================
-//
-//
-// Scene: Island Generator Debug
-//
-//
-// ===========================================
-
-HeroResult game_scene_island_gen_debug_load(GameScene* s) {
-	HERO_ASSERT(s->type == GAME_SCENE_TYPE_ISLAND_GEN_DEBUG, "expected a island gen debug scene");
-	GameSceneIslandGenDebug* scene = (GameSceneIslandGenDebug*)s;
-	HeroResult result;
-
-	scene->config = game_island_gen_configs[0];
-
-	GameTile* tile_map = hero_alloc_array(GameTile, hero_system_alctor, 0, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
-	if (tile_map == NULL) {
-		return HERO_ERROR(ALLOCATION_FAILURE);
-	}
-	scene->render_data.tile_map = tile_map;
-
-	{
-		HeroUIImageAtlasSetup setup = {
-			.image_id = game.gfx.island_gen_debug.attachment_image_id,
-			.sampler_id = game.gfx.clamp_nearest_sampler_id,
-			.images_count = 1,
-			.is_uniform = true,
-			.data.uniform.cell_width = GAME_ISLAND_AXIS_TILES_COUNT,
-			.data.uniform.cell_height = GAME_ISLAND_AXIS_TILES_COUNT,
-			.data.uniform.cells_count_x = 1,
-		};
-
-		result = hero_ui_image_atlas_init(game.gfx.ldev, &setup, &scene->colored_height_map_image_atlas_id);
-		HERO_RESULT_ASSERT(result);
-	}
-
-	return HERO_SUCCESS;
-}
-
-HeroResult game_scene_island_gen_debug_unload(GameScene* s) {
-	HERO_ASSERT(s->type == GAME_SCENE_TYPE_ISLAND_GEN_DEBUG, "expected a island gen debug scene");
-	GameSceneIslandGenDebug* scene = (GameSceneIslandGenDebug*)s;
-
-	return HERO_SUCCESS;
-}
 
 void game_ui_value_adjuster_f(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroString name, float* value, float step) {
 	hero_ui_box_start(window, sib_id, cut, HERO_UI_LEN_AUTO, hero_ui_ss.box);
@@ -162,6 +54,119 @@ void game_ui_value_adjuster_u(HeroUIWindow* window, HeroUIWidgetSibId sib_id, He
 		}
 
 	hero_ui_box_end(window);
+}
+
+// ===========================================
+//
+//
+// Island Generator
+//
+//
+// ===========================================
+
+GameIslandGenConfig game_island_gen_configs[GAME_ISLAND_GEN_CONFIG_COUNT] = {
+	{
+		.seed = 1337,
+		.frequency = 0.001000,
+		.fractal_type = 1,
+		.octaves = 7,
+		.lacunarity = 2.160000,
+		.deep_sea_max = 0.100000,
+		.sea_max = 0.200000,
+		.ground_max = 0.490000,
+		.falloff_map_intensity = 50.000000,
+	},
+	{
+		.seed = 1337,
+		.frequency = 0.001000,
+		.fractal_type = 2,
+		.octaves = 7,
+		.lacunarity = 1.900000,
+		.deep_sea_max = 0.100000,
+		.sea_max = 0.200000,
+		.ground_max = 0.540000,
+		.falloff_map_intensity = 10.0,
+	},
+	{
+		.seed = 1337,
+		.frequency = 0.001000,
+		.fractal_type = 3,
+		.octaves = 7,
+		.lacunarity = 2.160000,
+		.deep_sea_max = 0.100000,
+		.sea_max = 0.200000,
+		.ground_max = 0.490000,
+		.falloff_map_intensity = 50.000000,
+	},
+};
+
+void game_island_gen(GameIslandGenConfig* config, F32* tile_height_map_out) {
+	fnl_state noise_state = fnlCreateState();
+	noise_state.seed = config->seed;
+	noise_state.frequency = config->frequency;
+	noise_state.fractal_type = config->fractal_type;
+	noise_state.octaves = config->octaves;
+	noise_state.lacunarity = config->lacunarity;
+
+	F32 half_size = (F32)(GAME_ISLAND_AXIS_TILES_COUNT / 2);
+	F32 map_to_norm_scale = 1.f / (F32)GAME_ISLAND_AXIS_TILES_COUNT;
+	for_range(y, 0, GAME_ISLAND_AXIS_TILES_COUNT) {
+		U32 row_start = y * GAME_ISLAND_AXIS_TILES_COUNT;
+		for_range(x, 0, GAME_ISLAND_AXIS_TILES_COUNT) {
+			Vec2 falloff_offset = VEC2_INIT(x - half_size, y - half_size);
+			F32 falloff_height = (vec2_len(falloff_offset) + config->falloff_map_intensity) * map_to_norm_scale;
+			F32 height = fnlGetNoise2D(&noise_state, x, y) * 0.5f + 0.5f; // convert to 0.0 - 1.0 from -1.0 - 1.0
+			height -= falloff_height;
+
+			tile_height_map_out[row_start + x] = HERO_MAX(height, 0.01f);
+		}
+	}
+}
+
+// ===========================================
+//
+//
+// Scene: Island Generator Debug
+//
+//
+// ===========================================
+
+HeroResult game_scene_island_gen_debug_load(GameScene* s) {
+	HERO_ASSERT(s->type == GAME_SCENE_TYPE_ISLAND_GEN_DEBUG, "expected a island gen debug scene");
+	GameSceneIslandGenDebug* scene = (GameSceneIslandGenDebug*)s;
+	HeroResult result;
+
+	scene->config = game_island_gen_configs[0];
+
+	F32* tile_height_map = hero_alloc_array(F32, hero_system_alctor, 0, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+	if (tile_height_map == NULL) {
+		return HERO_ERROR(ALLOCATION_FAILURE);
+	}
+	scene->render_data.tile_height_map = tile_height_map;
+
+	{
+		HeroUIImageAtlasSetup setup = {
+			.image_id = game.gfx.island_gen_debug.attachment_image_id,
+			.sampler_id = game.gfx.clamp_nearest_sampler_id,
+			.images_count = 1,
+			.is_uniform = true,
+			.data.uniform.cell_width = GAME_ISLAND_AXIS_TILES_COUNT,
+			.data.uniform.cell_height = GAME_ISLAND_AXIS_TILES_COUNT,
+			.data.uniform.cells_count_x = 1,
+		};
+
+		result = hero_ui_image_atlas_init(game.gfx.ldev, &setup, &scene->colored_height_map_image_atlas_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult game_scene_island_gen_debug_unload(GameScene* s) {
+	HERO_ASSERT(s->type == GAME_SCENE_TYPE_ISLAND_GEN_DEBUG, "expected a island gen debug scene");
+	GameSceneIslandGenDebug* scene = (GameSceneIslandGenDebug*)s;
+
+	return HERO_SUCCESS;
 }
 
 HeroResult game_scene_island_gen_debug_update(GameScene* s, GameScene** replace_with_scene_out) {
@@ -243,7 +248,7 @@ HeroResult game_scene_island_gen_debug_update(GameScene* s, GameScene** replace_
 		config.falloff_map_intensity != scene->config.falloff_map_intensity
 	) {
 		first_frame_init += 1;
-		game_island_gen(&config, scene->render_data.tile_map);
+		game_island_gen(&config, scene->render_data.tile_height_map);
 		scene->render_data.has_been_updated = true;
 	}
 
@@ -257,22 +262,22 @@ HeroResult game_scene_island_gen_debug_update_render_data(GameScene* s) {
 	GameSceneIslandGenDebug* scene = (GameSceneIslandGenDebug*)s;
 	GameSceneIslandGenDebugRenderData* dst = &game.gfx.island_gen_debug.scene_render_data;
 
-	if (dst->tile_map == NULL) {
-		GameTile* tile_map = hero_alloc_array(GameTile, hero_system_alctor, 0, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
-		if (tile_map == NULL) {
+	if (dst->tile_height_map == NULL) {
+		F32* tile_height_map = hero_alloc_array(F32, hero_system_alctor, 0, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+		if (tile_height_map == NULL) {
 			return HERO_ERROR(ALLOCATION_FAILURE);
 		}
-		dst->tile_map = tile_map;
+		dst->tile_height_map = tile_height_map;
 	}
 
 	if (scene->render_data.has_been_updated) {
 		// copy the generated map into the new buffer we swap with every frame.
-		HERO_COPY_ELMT_MANY(dst->tile_map, scene->render_data.tile_map, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+		HERO_COPY_ELMT_MANY(dst->tile_height_map, scene->render_data.tile_height_map, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
 	}
 
-	GameTile* tile_map = dst->tile_map;
-	dst->tile_map = scene->render_data.tile_map;
-	scene->render_data.tile_map = tile_map;
+	F32* tile_height_map = dst->tile_height_map;
+	dst->tile_height_map = scene->render_data.tile_height_map;
+	scene->render_data.tile_height_map = tile_height_map;
 
 	dst->deep_sea_max = scene->render_data.deep_sea_max;
 	dst->sea_max = scene->render_data.sea_max;
@@ -304,6 +309,140 @@ HeroResult game_scene_island_gen_debug_init(GameScene** scene_out) {
 // ===========================================
 //
 //
+// Scene: Play
+//
+//
+// ===========================================
+
+HeroResult game_scene_play_load(GameScene* s) {
+	HERO_ASSERT(s->type == GAME_SCENE_TYPE_PLAY, "expected a play scene");
+	GameScenePlay* scene = (GameScenePlay*)s;
+	HeroResult result;
+
+	scene->camera_forward = VEC3_FORWARD;
+	scene->camera_position = VEC3_INIT(0.f, 128.f, 0.f);
+	scene->camera_rotation = QUAT_IDENTITY;
+
+	F32* tile_height_map = hero_alloc_array(F32, hero_system_alctor, 0, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+	if (tile_height_map == NULL) {
+		return HERO_ERROR(ALLOCATION_FAILURE);
+	}
+	scene->tile_height_map = tile_height_map;
+
+	GameIslandGenConfig config = game_island_gen_configs[0];
+	game_island_gen(&config, scene->tile_height_map);
+
+	{
+		HeroUIImageAtlasSetup setup = {
+			.image_id = game.gfx.play.attachment_image_id,
+			.sampler_id = game.gfx.clamp_nearest_sampler_id,
+			.images_count = 1,
+			.is_uniform = true,
+			.data.uniform.cell_width = 1920,
+			.data.uniform.cell_height = 1080,
+			.data.uniform.cells_count_x = 1,
+		};
+
+		result = hero_ui_image_atlas_init(game.gfx.ldev, &setup, &scene->ui_image_atlas_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult game_scene_play_unload(GameScene* s) {
+	HERO_ASSERT(s->type == GAME_SCENE_TYPE_PLAY, "expected a play scene");
+	GameScenePlay* scene = (GameScenePlay*)s;
+
+	return HERO_SUCCESS;
+}
+
+HeroResult game_scene_play_update(GameScene* s, GameScene** replace_with_scene_out) {
+	HERO_ASSERT(s->type == GAME_SCENE_TYPE_PLAY, "expected a play scene");
+	GameScenePlay* scene = (GameScenePlay*)s;
+	HeroResult result;
+
+	HeroUIWindow* window;
+	result = hero_ui_window_get(game.ui_window_id, &window);
+	if (result < 0) {
+		return result;
+	}
+
+	hero_ui_image(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_IMAGE_ID(scene->ui_image_atlas_id, 0), -1, 1.f, HERO_UI_IMAGE_SCALE_MODE_NONE, NULL);
+
+	if (hero_window_sys.mouse.rel_x || hero_window_sys.mouse.rel_y) {
+		scene->camera_yaw += 0.01 * (F32)hero_window_sys.mouse.rel_x;
+		scene->camera_pitch += 0.01 * (F32)hero_window_sys.mouse.rel_y;
+		Quat x_rotation = quat_rotate(scene->camera_yaw, VEC3_INIT(0.f, 1.f, 0.f));
+		Quat y_rotation = quat_rotate(scene->camera_pitch, VEC3_INIT(1.f, 0.f, 0.f));
+		scene->camera_rotation = quat_norm(quat_mul(x_rotation, y_rotation));
+		scene->camera_forward = quat_mul_vec3(scene->camera_rotation, VEC3_FORWARD);
+		printf("camera_forward = { %f, %f, %f }\n", scene->camera_forward.x, scene->camera_forward.y, scene->camera_forward.z);
+	}
+
+	if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_W)) {
+		Vec3 offset = vec3_mul_scalar(scene->camera_forward, 0.1);
+		scene->camera_position = vec3_add(scene->camera_position, offset);
+	}
+
+	if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_A)) {
+		Vec3 dir_vec = vec3_perp_z_left(scene->camera_forward);
+		dir_vec.y = 0.f;
+		Vec3 offset = vec3_mul_scalar(dir_vec, 0.1);
+		scene->camera_position = vec3_add(scene->camera_position, offset);
+	}
+
+	if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_S)) {
+		Vec3 offset = vec3_mul_scalar(scene->camera_forward, 0.1);
+		scene->camera_position = vec3_sub(scene->camera_position, offset);
+	}
+
+	if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_D)) {
+		Vec3 dir_vec = vec3_perp_z_right(scene->camera_forward);
+		dir_vec.y = 0.f;
+		Vec3 offset = vec3_mul_scalar(dir_vec, 0.1);
+		scene->camera_position = vec3_add(scene->camera_position, offset);
+	}
+
+	if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_SPACE)) {
+		scene->camera_position.y += 0.1;
+	}
+
+
+	return HERO_SUCCESS;
+}
+
+HeroResult game_scene_play_update_render_data(GameScene* s) {
+	HERO_ASSERT(s->type == GAME_SCENE_TYPE_PLAY, "expected a play scene");
+	GameScenePlay* scene = (GameScenePlay*)s;
+	GameScenePlayRenderData* dst = &game.gfx.play.scene_render_data;
+
+	dst->tile_height_map = scene->tile_height_map;
+	dst->camera_position = scene->camera_position;
+	dst->camera_rotation = scene->camera_rotation;
+
+	return HERO_SUCCESS;
+}
+
+HeroResult game_scene_play_init(GameScene** scene_out) {
+	GameScenePlay* scene = hero_alloc_elmt(GameScenePlay, hero_system_alctor, 0);
+	if (scene == NULL) {
+		return HERO_ERROR(ALLOCATION_FAILURE);
+	}
+	scene->scene.type = GAME_SCENE_TYPE_PLAY;
+	scene->scene.state = GAME_SCENE_STATE_UNLOADED;
+	scene->scene.load_fn = game_scene_play_load;
+	scene->scene.unload_fn = game_scene_play_unload;
+	scene->scene.update_fn = game_scene_play_update;
+	scene->scene.update_render_data_fn = game_scene_play_update_render_data;
+
+	*scene_out = (GameScene*)scene;
+	return HERO_SUCCESS;
+}
+
+// ===========================================
+//
+//
 // Logic
 //
 //
@@ -315,7 +454,16 @@ HeroUIImageId game_ui_ascii_image(U8 byte) {
 
 void game_logic_init(void) {
 	HeroResult result;
-	result = game_scene_island_gen_debug_init(&game.scene);
+
+	GameSceneType scene_type = GAME_SCENE_TYPE_PLAY;
+	switch (scene_type) {
+		case GAME_SCENE_TYPE_ISLAND_GEN_DEBUG:
+			result = game_scene_island_gen_debug_init(&game.scene);
+			break;
+		case GAME_SCENE_TYPE_PLAY:
+			result = game_scene_play_init(&game.scene);
+			break;
+	}
 	HERO_RESULT_ASSERT(result);
 
 	result = game_scene_load(game.scene);
@@ -663,9 +811,9 @@ HeroResult game_gfx_island_gen_debug_init() {
 	{
 		HeroImageSetup setup = {
 			.type = HERO_IMAGE_TYPE_2D,
-			.internal_format = HERO_IMAGE_FORMAT_R32_UINT,
-			.format = HERO_IMAGE_FORMAT_R32_UINT,
-			.flags = HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS | HERO_IMAGE_FLAGS_STORAGE,
+			.internal_format = HERO_IMAGE_FORMAT_R32_SFLOAT,
+			.format = HERO_IMAGE_FORMAT_R32_SFLOAT,
+			.flags = HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS | HERO_IMAGE_FLAGS_SAMPLED,
 			.samples = HERO_SAMPLE_COUNT_1,
 			.memory_location = HERO_MEMORY_LOCATION_SHARED,
 			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
@@ -676,7 +824,7 @@ HeroResult game_gfx_island_gen_debug_init() {
 			.array_layers_count = 1,
 		};
 
-		result = hero_image_init(ldev, &setup, &gfx->tile_map_image_id);
+		result = hero_image_init(ldev, &setup, &gfx->tile_height_map_image_id);
 		HERO_RESULT_ASSERT(result);
 	}
 
@@ -712,7 +860,7 @@ HeroResult game_gfx_island_gen_debug_init() {
 		result = hero_shader_globals_set_uniform_buffer(ldev, gfx->shader_globals_id, GAME_ISLAND_GEN_DEBUG_GLOBAL_BINDING_GLOBAL_UBO, 0, gfx->uniform_buffer_id, 0);
 		HERO_RESULT_ASSERT(result);
 
-		result = hero_shader_globals_set_image_storage(ldev, gfx->shader_globals_id, GAME_ISLAND_GEN_DEBUG_GLOBAL_BINDING_TILE_MAP, 0, gfx->tile_map_image_id);
+		result = hero_shader_globals_set_image_sampler(ldev, gfx->shader_globals_id, GAME_ISLAND_GEN_DEBUG_GLOBAL_BINDING_TILE_MAP, 0, gfx->tile_height_map_image_id, game.gfx.clamp_linear_sampler_id);
 		HERO_RESULT_ASSERT(result);
 
 		result = hero_shader_globals_update(ldev, gfx->shader_globals_id);
@@ -836,10 +984,10 @@ HeroResult game_gfx_island_gen_debug_render(HeroCommandRecorder* command_recorde
 	GameGfxIslandGenDebug* gfx = &game.gfx.island_gen_debug;
 
 	if (gfx->scene_render_data.has_been_updated) {
-		GameTile* tile_map;
-		result = hero_image_write(game.gfx.ldev, gfx->tile_map_image_id, NULL, (void**)&tile_map);
+		F32* tile_height_map;
+		result = hero_image_write(game.gfx.ldev, gfx->tile_height_map_image_id, NULL, (void**)&tile_height_map);
 		HERO_RESULT_ASSERT(result);
-		HERO_COPY_ELMT_MANY(tile_map, gfx->scene_render_data.tile_map, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+		HERO_COPY_ELMT_MANY(tile_height_map, gfx->scene_render_data.tile_height_map, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
 	}
 
 	GameIslandGenDebugGlobalUBO* global_ubo;
@@ -875,6 +1023,819 @@ HeroResult game_gfx_island_gen_debug_render(HeroCommandRecorder* command_recorde
 // ===========================================
 //
 //
+// Graphics Scene: Play
+//
+//
+// ===========================================
+
+typedef struct GameTerrainTileVertex GameTerrainTileVertex;
+struct GameTerrainTileVertex {
+	Vec3 pos;
+	Vec3 normal;
+};
+
+static HeroVertexAttribInfo game_gfx_terrain_tile_attribs[] = {
+	{ // GameTerrainTileVertex.pos
+		.location = 0,
+		.elmt_type = HERO_VERTEX_ELMT_TYPE_F32,
+		.vector_type = HERO_VERTEX_VECTOR_TYPE_3,
+	},
+	{ // GameTerrainTileVertex.normal
+		.location = 1,
+		.elmt_type = HERO_VERTEX_ELMT_TYPE_F32,
+		.vector_type = HERO_VERTEX_VECTOR_TYPE_3,
+	},
+};
+
+static HeroVertexBindingInfo game_gfx_terrain_tile_bindings[] = {
+	{
+		.attribs = game_gfx_terrain_tile_attribs,
+		.attribs_count = HERO_ARRAY_COUNT(game_gfx_terrain_tile_attribs),
+		.size = sizeof(GameTerrainTileVertex),
+	}
+};
+
+static HeroVertexLayout game_gfx_terrain_tile_layout = {
+	.bindings_count = HERO_ARRAY_COUNT(game_gfx_terrain_tile_bindings),
+	.bindings = game_gfx_terrain_tile_bindings,
+};
+
+typedef struct GameModelVertex GameModelVertex;
+struct GameModelVertex {
+	Vec2 pos;
+};
+
+static HeroVertexAttribInfo game_gfx_model_attribs[] = {
+	{ // GameModelVertex.pos
+		.location = 0,
+		.elmt_type = HERO_VERTEX_ELMT_TYPE_F32,
+		.vector_type = HERO_VERTEX_VECTOR_TYPE_2,
+	},
+};
+
+static HeroVertexBindingInfo game_gfx_model_bindings[] = {
+	{
+		.attribs = game_gfx_model_attribs,
+		.attribs_count = HERO_ARRAY_COUNT(game_gfx_model_attribs),
+		.size = sizeof(GameModelVertex),
+	}
+};
+
+static HeroVertexLayout game_gfx_model_layout = {
+	.bindings_count = HERO_ARRAY_COUNT(game_gfx_model_bindings),
+	.bindings = game_gfx_model_bindings,
+};
+
+typedef struct GameBillboardVertex GameBillboardVertex;
+struct GameBillboardVertex {
+	Vec2 pos;
+	Vec2 uv;
+};
+
+static HeroVertexAttribInfo game_gfx_billboard_attribs[] = {
+	{ // GameBillboardVertex.pos
+		.location = 0,
+		.elmt_type = HERO_VERTEX_ELMT_TYPE_F32,
+		.vector_type = HERO_VERTEX_VECTOR_TYPE_2,
+	},
+	{ // GameBillboardVertex.uv
+		.location = 1,
+		.elmt_type = HERO_VERTEX_ELMT_TYPE_F32,
+		.vector_type = HERO_VERTEX_VECTOR_TYPE_2,
+	},
+};
+
+static HeroVertexBindingInfo game_gfx_billboard_bindings[] = {
+	{
+		.attribs = game_gfx_billboard_attribs,
+		.attribs_count = HERO_ARRAY_COUNT(game_gfx_billboard_attribs),
+		.size = sizeof(GameBillboardVertex),
+	}
+};
+
+static HeroVertexLayout game_gfx_billboard_layout = {
+	.bindings_count = HERO_ARRAY_COUNT(game_gfx_billboard_bindings),
+	.bindings = game_gfx_billboard_bindings,
+};
+
+HeroResult _game_gfx_play_terrain_tile_init() {
+	GameGfxPlay* gfx = &game.gfx.play;
+	HeroLogicalDevice* ldev = game.gfx.ldev;
+	HeroResult result;
+
+	result = hero_vertex_layout_register(&game_gfx_terrain_tile_layout, true, &gfx->terrain_tile_vertex_layout_id);
+	HERO_RESULT_ASSERT(result);
+
+	{
+		HeroBufferSetup setup = {
+			.flags = HERO_BUFFER_FLAGS_USED_FOR_GRAPHICS,
+			.type = HERO_BUFFER_TYPE_VERTEX,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.elmts_count = GAME_PLAY_TILE_VOXELS_VERTICES_COUNT,
+			.typed.vertex.layout_id = gfx->terrain_tile_vertex_layout_id,
+			.typed.vertex.binding_idx = 0,
+		};
+
+		result = hero_buffer_init(ldev, &setup, &gfx->terrain_tile_vertex_buffer_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroBufferSetup setup = {
+			.flags = HERO_BUFFER_FLAGS_USED_FOR_GRAPHICS,
+			.type = HERO_BUFFER_TYPE_INDEX,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.elmts_count = GAME_PLAY_TILE_VOXELS_INDICES_COUNT,
+			.typed.index_type = HERO_INDEX_TYPE_U32,
+		};
+
+		result = hero_buffer_init(ldev, &setup, &gfx->terrain_tile_index_buffer_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	GameTerrainTileVertex* vertices;
+	result = hero_buffer_write(game.gfx.ldev, gfx->terrain_tile_vertex_buffer_id, 0, GAME_PLAY_TILE_VOXELS_VERTICES_COUNT, (void**)&vertices);
+	HERO_RESULT_ASSERT(result);
+
+	U32* indices;
+	result = hero_buffer_write(game.gfx.ldev, gfx->terrain_tile_index_buffer_id, 0, GAME_PLAY_TILE_VOXELS_INDICES_COUNT, (void**)&indices);
+	HERO_RESULT_ASSERT(result);
+
+	F32 pos_y = 0.f;
+	U32 vertices_start_idx = 0;
+	U32 indices_start_idx = 0;
+	for_range(vy, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+		F32 pos_x = 0.f;
+
+		for_range(vx, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+			//
+			// top
+			//
+			vertices[vertices_start_idx + 0] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x, 1.f, pos_y),
+				.normal = VEC3_UP,
+			};
+			vertices[vertices_start_idx + 1] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x, 1.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.normal = VEC3_UP,
+			};
+			vertices[vertices_start_idx + 2] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.normal = VEC3_UP,
+			};
+			vertices[vertices_start_idx + 3] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y),
+				.normal = VEC3_UP,
+			};
+
+			//
+			// backward
+			//
+			vertices[vertices_start_idx + 4] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x, 0.f, pos_y),
+				.normal = VEC3_BACKWARD,
+			};
+			vertices[vertices_start_idx + 5] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x, 1.f, pos_y),
+				.normal = VEC3_BACKWARD,
+			};
+			vertices[vertices_start_idx + 6] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y),
+				.normal = VEC3_BACKWARD,
+			};
+			vertices[vertices_start_idx + 7] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 0.f, pos_y),
+				.normal = VEC3_BACKWARD,
+			};
+
+			//
+			// left
+			//
+			vertices[vertices_start_idx + 8] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x, 0.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.normal = VEC3_LEFT,
+			};
+			vertices[vertices_start_idx + 9] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x, 1.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.normal = VEC3_LEFT,
+			};
+			vertices[vertices_start_idx + 10] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x, 1.f, pos_y),
+				.normal = VEC3_LEFT,
+			};
+			vertices[vertices_start_idx + 11] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x, 0.f, pos_y),
+				.normal = VEC3_LEFT,
+			};
+
+
+			//
+			// right
+			//
+			vertices[vertices_start_idx + 12] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 0.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.normal = VEC3_LEFT,
+			};
+			vertices[vertices_start_idx + 13] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.normal = VEC3_LEFT,
+			};
+			vertices[vertices_start_idx + 14] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y),
+				.normal = VEC3_LEFT,
+			};
+			vertices[vertices_start_idx + 15] = (GameTerrainTileVertex) {
+				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 0.f, pos_y),
+				.normal = VEC3_LEFT,
+			};
+
+
+			//
+			// top
+			//
+			indices[indices_start_idx + 0] = vertices_start_idx + 0;
+			indices[indices_start_idx + 1] = vertices_start_idx + 1;
+			indices[indices_start_idx + 2] = vertices_start_idx + 2;
+			indices[indices_start_idx + 3] = vertices_start_idx + 2;
+			indices[indices_start_idx + 4] = vertices_start_idx + 3;
+			indices[indices_start_idx + 5] = vertices_start_idx + 0;
+
+			//
+			// backward
+			//
+			indices[indices_start_idx + 6]  = vertices_start_idx + 4;
+			indices[indices_start_idx + 7]  = vertices_start_idx + 5;
+			indices[indices_start_idx + 8]  = vertices_start_idx + 6;
+			indices[indices_start_idx + 9]  = vertices_start_idx + 6;
+			indices[indices_start_idx + 10] = vertices_start_idx + 7;
+			indices[indices_start_idx + 11] = vertices_start_idx + 4;
+
+			//
+			// left
+			//
+			indices[indices_start_idx + 12] = vertices_start_idx + 8;
+			indices[indices_start_idx + 13] = vertices_start_idx + 9;
+			indices[indices_start_idx + 14] = vertices_start_idx + 10;
+			indices[indices_start_idx + 15] = vertices_start_idx + 10;
+			indices[indices_start_idx + 16] = vertices_start_idx + 11;
+			indices[indices_start_idx + 17] = vertices_start_idx + 8;
+
+			//
+			// right
+			//
+			indices[indices_start_idx + 18] = vertices_start_idx + 12;
+			indices[indices_start_idx + 19] = vertices_start_idx + 13;
+			indices[indices_start_idx + 20] = vertices_start_idx + 14;
+			indices[indices_start_idx + 21] = vertices_start_idx + 14;
+			indices[indices_start_idx + 22] = vertices_start_idx + 15;
+			indices[indices_start_idx + 23] = vertices_start_idx + 12;
+
+			vertices_start_idx += GAME_PLAY_VOXEL_VERTICES_COUNT;
+			indices_start_idx += GAME_PLAY_VOXEL_INDICES_COUNT;
+			pos_x += GAME_PLAY_TILE_VOXEL_STEP;
+		}
+
+		pos_y += GAME_PLAY_TILE_VOXEL_STEP;
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult game_gfx_play_init() {
+	GameGfxPlay* gfx = &game.gfx.play;
+	HeroLogicalDevice* ldev = game.gfx.ldev;
+	HeroResult result;
+
+	result = game_gfx_shader_init("play_terrain", &gfx->terrain_tile_shader_id);
+	HERO_RESULT_ASSERT(result);
+
+	result = game_gfx_shader_init("play_model", &gfx->model_shader_id);
+	HERO_RESULT_ASSERT(result);
+
+	result = game_gfx_shader_init("play_billboard", &gfx->billboard_shader_id);
+	HERO_RESULT_ASSERT(result);
+
+	{
+		HeroDescriptorShaderInfo shader_infos[] = {
+			{
+				.shader_id = gfx->terrain_tile_shader_id,
+				.advised_pool_counts = {
+					[HERO_GFX_DESCRIPTOR_SET_GLOBAL] = 32,
+					[HERO_GFX_DESCRIPTOR_SET_MATERIAL] = 32,
+					[HERO_GFX_DESCRIPTOR_SET_DRAW_CMD] = 32,
+				},
+			},
+			{
+				.shader_id = gfx->model_shader_id,
+				.advised_pool_counts = {
+					[HERO_GFX_DESCRIPTOR_SET_GLOBAL] = 32,
+					[HERO_GFX_DESCRIPTOR_SET_MATERIAL] = 32,
+					[HERO_GFX_DESCRIPTOR_SET_DRAW_CMD] = 32,
+				},
+			},
+			{
+				.shader_id = gfx->billboard_shader_id,
+				.advised_pool_counts = {
+					[HERO_GFX_DESCRIPTOR_SET_GLOBAL] = 32,
+					[HERO_GFX_DESCRIPTOR_SET_MATERIAL] = 32,
+					[HERO_GFX_DESCRIPTOR_SET_DRAW_CMD] = 32,
+				},
+			},
+		};
+		HeroDescriptorPoolSetup setup = {
+			.shader_infos = shader_infos,
+			.shader_infos_count = HERO_ARRAY_COUNT(shader_infos),
+		};
+		result = hero_descriptor_pool_init(ldev, &setup, &gfx->descriptor_pool_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	result = _game_gfx_play_terrain_tile_init();
+	HERO_RESULT_ASSERT(result);
+
+	result = hero_vertex_layout_register(&game_gfx_model_layout, true, &gfx->model_vertex_layout_id);
+	HERO_RESULT_ASSERT(result);
+
+	{
+		HeroBufferSetup setup = {
+			.flags = HERO_BUFFER_FLAGS_USED_FOR_GRAPHICS,
+			.type = HERO_BUFFER_TYPE_VERTEX,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.elmts_count = 24,
+			.typed.vertex.layout_id = gfx->model_vertex_layout_id,
+			.typed.vertex.binding_idx = 0,
+		};
+
+		result = hero_buffer_init(ldev, &setup, &gfx->model_vertex_buffer_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroBufferSetup setup = {
+			.flags = HERO_BUFFER_FLAGS_USED_FOR_GRAPHICS,
+			.type = HERO_BUFFER_TYPE_INDEX,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.elmts_count = 36,
+			.typed.index_type = HERO_INDEX_TYPE_U32,
+		};
+
+		result = hero_buffer_init(ldev, &setup, &gfx->model_index_buffer_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	result = hero_vertex_layout_register(&game_gfx_billboard_layout, true, &gfx->billboard_vertex_layout_id);
+	HERO_RESULT_ASSERT(result);
+
+	{
+		HeroBufferSetup setup = {
+			.flags = HERO_BUFFER_FLAGS_USED_FOR_GRAPHICS,
+			.type = HERO_BUFFER_TYPE_VERTEX,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.elmts_count = 24,
+			.typed.vertex.layout_id = gfx->billboard_vertex_layout_id,
+			.typed.vertex.binding_idx = 0,
+		};
+
+		result = hero_buffer_init(ldev, &setup, &gfx->billboard_vertex_buffer_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroBufferSetup setup = {
+			.flags = HERO_BUFFER_FLAGS_USED_FOR_GRAPHICS,
+			.type = HERO_BUFFER_TYPE_INDEX,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.elmts_count = 24,
+			.typed.index_type = HERO_INDEX_TYPE_U32,
+		};
+
+		result = hero_buffer_init(ldev, &setup, &gfx->billboard_index_buffer_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroBufferSetup setup = {
+			.flags = HERO_BUFFER_FLAGS_USED_FOR_GRAPHICS,
+			.type = HERO_BUFFER_TYPE_UNIFORM,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.elmts_count = 1,
+			.elmt_size = sizeof(GamePlayGlobalUBO),
+		};
+
+		result = hero_buffer_init(ldev, &setup, &gfx->uniform_buffer_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroImageSetup setup = {
+			.type = HERO_IMAGE_TYPE_2D,
+			.internal_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
+			.format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
+			.flags = HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS | HERO_IMAGE_FLAGS_COLOR_ATTACHMENT | HERO_IMAGE_FLAGS_SAMPLED,
+			.samples = HERO_SAMPLE_COUNT_1,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.width = 1920,
+			.height = 1080,
+			.depth = 1,
+			.mip_levels = 1,
+			.array_layers_count = 1,
+		};
+
+		result = hero_image_init(ldev, &setup, &gfx->attachment_image_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroImageSetup setup = {
+			.type = HERO_IMAGE_TYPE_2D,
+			.internal_format = HERO_IMAGE_FORMAT_D32,
+			.format = HERO_IMAGE_FORMAT_D32,
+			.flags = HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS | HERO_IMAGE_FLAGS_DEPTH_STENCIL_ATTACHMENT,
+			.samples = HERO_SAMPLE_COUNT_1,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.width = 1920,
+			.height = 1080,
+			.depth = 1,
+			.mip_levels = 1,
+			.array_layers_count = 1,
+		};
+
+		result = hero_image_init(ldev, &setup, &gfx->depth_image_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroImageSetup setup = {
+			.type = HERO_IMAGE_TYPE_2D,
+			.internal_format = HERO_IMAGE_FORMAT_R32_SFLOAT,
+			.format = HERO_IMAGE_FORMAT_R32_SFLOAT,
+			.flags = HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS | HERO_IMAGE_FLAGS_STORAGE,
+			.samples = HERO_SAMPLE_COUNT_1,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.width = GAME_PLAY_CELL_AXIS_VOXELS_COUNT,
+			.height = GAME_PLAY_CELL_AXIS_VOXELS_COUNT,
+			.depth = 1,
+			.mip_levels = 1,
+			.array_layers_count = 1,
+		};
+
+		result = hero_image_init(game.gfx.ldev, &setup, &gfx->voxel_height_image_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroShaderGlobalsSetup setup = {
+			.shader_id = gfx->terrain_tile_shader_id,
+			.descriptor_pool_id = gfx->descriptor_pool_id,
+		};
+
+		result = hero_shader_globals_init(ldev, &setup, &gfx->terrain_tile_shader_globals_id);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_set_uniform_buffer(ldev, gfx->terrain_tile_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_GLOBAL_UBO, 0, gfx->uniform_buffer_id, 0);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_set_image_storage(ldev, gfx->terrain_tile_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_VOXEL_HEIGHT_MAP, 0, gfx->voxel_height_image_id);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_update(ldev, gfx->terrain_tile_shader_globals_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroShaderGlobalsSetup setup = {
+			.shader_id = gfx->model_shader_id,
+			.descriptor_pool_id = gfx->descriptor_pool_id,
+		};
+
+		result = hero_shader_globals_init(ldev, &setup, &gfx->model_shader_globals_id);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_set_uniform_buffer(ldev, gfx->model_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_GLOBAL_UBO, 0, gfx->uniform_buffer_id, 0);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_update(ldev, gfx->model_shader_globals_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroShaderGlobalsSetup setup = {
+			.shader_id = gfx->billboard_shader_id,
+			.descriptor_pool_id = gfx->descriptor_pool_id,
+		};
+
+		result = hero_shader_globals_init(ldev, &setup, &gfx->billboard_shader_globals_id);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_set_uniform_buffer(ldev, gfx->billboard_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_GLOBAL_UBO, 0, gfx->uniform_buffer_id, 0);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_update(ldev, gfx->billboard_shader_globals_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroAttachmentLayout attachments[] = {
+			{
+				.format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
+				.samples_count = HERO_SAMPLE_COUNT_1,
+				.post_usage = HERO_ATTACHEMENT_POST_USAGE_SAMPLED,
+			},
+			{
+				.format = HERO_IMAGE_FORMAT_D32,
+				.samples_count = HERO_SAMPLE_COUNT_1,
+				.post_usage = HERO_ATTACHEMENT_POST_USAGE_NONE,
+			},
+		};
+
+		HeroRenderPassLayoutSetup setup = {
+			.attachments = attachments,
+			.attachments_count = HERO_ARRAY_COUNT(attachments),
+		};
+
+		result = hero_render_pass_layout_init(ldev, &setup, &gfx->render_pass_layout_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroRenderState render_state = {0};
+		render_state.topology = HERO_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		render_state.viewports_count = 1;
+
+		render_state.rasterization.polygon_mode = HERO_POLYGON_MODE_FILL;
+		render_state.rasterization.front_face = HERO_FRONT_FACE_CLOCKWISE;
+		render_state.rasterization.line_width = 1.f;
+
+		render_state.multisample.rasterization_samples_count = HERO_SAMPLE_COUNT_1;
+
+		static HeroRenderStateBlendAttachment blend_color_attachment = {0};
+		blend_color_attachment.color_write_mask = 0xf;
+
+		render_state.blend.attachments = &blend_color_attachment;
+		render_state.blend.attachments_count = 1;
+
+		render_state.depth_stencil.flags = HERO_DEPTH_STENCIL_FLAGS_ENABLE_DEPTH_TEST | HERO_DEPTH_STENCIL_FLAGS_ENABLE_DEPTH_WRITE;
+		render_state.depth_stencil.depth_compare_op = HERO_COMPARE_OP_LESS_OR_EQUAL;
+		render_state.depth_stencil.back.fail_op = HERO_STENCIL_OP_KEEP;
+		render_state.depth_stencil.back.pass_op = HERO_STENCIL_OP_KEEP;
+		render_state.depth_stencil.back.compare_op = HERO_COMPARE_OP_ALWAYS;
+		render_state.depth_stencil.front.fail_op = HERO_STENCIL_OP_KEEP;
+		render_state.depth_stencil.front.pass_op = HERO_STENCIL_OP_KEEP;
+		render_state.depth_stencil.front.compare_op = HERO_COMPARE_OP_ALWAYS;
+
+		HeroPipelineSetup setup = {
+			.render_state = &render_state,
+			.shader_id = gfx->model_shader_id,
+			.render_pass_layout_id = gfx->render_pass_layout_id,
+			.vertex_layout_id = gfx->model_vertex_layout_id,
+			.cache_id.raw = 0,
+		};
+
+		result = hero_pipeline_init(ldev, &setup, &gfx->model_pipeline_id);
+		HERO_RESULT_ASSERT(result);
+
+		setup.shader_id = gfx->terrain_tile_shader_id;
+		setup.vertex_layout_id = gfx->terrain_tile_vertex_layout_id;
+		result = hero_pipeline_init(ldev, &setup, &gfx->terrain_tile_pipeline_id);
+		HERO_RESULT_ASSERT(result);
+
+		setup.shader_id = gfx->billboard_shader_id;
+		setup.vertex_layout_id = gfx->billboard_vertex_layout_id;
+		result = hero_pipeline_init(ldev, &setup, &gfx->billboard_pipeline_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroMaterialSetup setup = {
+			.pipeline_id = gfx->terrain_tile_pipeline_id,
+			.shader_globals_id = gfx->terrain_tile_shader_globals_id,
+			.descriptor_pool_id = gfx->descriptor_pool_id,
+		};
+
+		result = hero_material_init(ldev, &setup, &gfx->terrain_tile_material_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroMaterialSetup setup = {
+			.pipeline_id = gfx->model_pipeline_id,
+			.shader_globals_id = gfx->model_shader_globals_id,
+			.descriptor_pool_id = gfx->descriptor_pool_id,
+		};
+
+		result = hero_material_init(ldev, &setup, &gfx->model_material_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroMaterialSetup setup = {
+			.pipeline_id = gfx->billboard_pipeline_id,
+			.shader_globals_id = gfx->billboard_shader_globals_id,
+			.descriptor_pool_id = gfx->descriptor_pool_id,
+		};
+
+		result = hero_material_init(ldev, &setup, &gfx->billboard_material_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroAttachmentInfo attachments[] = {
+			{
+				.load_op = HERO_ATTACHMENT_LOAD_OP_CLEAR,
+				.store_op = HERO_ATTACHMENT_STORE_OP_PRESERVE,
+				.stencil_load_op = HERO_ATTACHMENT_LOAD_OP_UNINITIALIZED,
+				.stencil_store_op = HERO_ATTACHMENT_STORE_OP_DISCARD,
+			},
+			{
+				.load_op = HERO_ATTACHMENT_LOAD_OP_CLEAR,
+				.store_op = HERO_ATTACHMENT_STORE_OP_PRESERVE,
+				.stencil_load_op = HERO_ATTACHMENT_LOAD_OP_UNINITIALIZED,
+				.stencil_store_op = HERO_ATTACHMENT_STORE_OP_DISCARD,
+			},
+		};
+
+		HeroClearValue clear_values[] = {
+			{ .color.float32 = { 1.f, 0.f, 0.f, 1.f } },
+			{
+				.depth_stencil.depth = 1.f,
+				.depth_stencil.stencil = 0,
+			}
+		};
+
+		HeroRenderPassSetup setup = {
+			.layout_id = gfx->render_pass_layout_id,
+			.draw_cmd_descriptor_pool_id = gfx->descriptor_pool_id,
+			.attachment_clear_values = clear_values,
+			.attachments = attachments,
+			.attachments_count = HERO_ARRAY_COUNT(attachments),
+		};
+
+		result = hero_render_pass_init(ldev, &setup, &gfx->render_pass_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroImageId attachments[] = {
+			gfx->attachment_image_id,
+			gfx->depth_image_id,
+		};
+
+		HeroFrameBufferSetup setup = {
+			.attachments = attachments,
+			.attachments_count = HERO_ARRAY_COUNT(attachments),
+			.layers = 1,
+			.render_pass_layout_id = gfx->render_pass_layout_id,
+			.width = 1920,
+			.height = 1080,
+
+		};
+
+		result = hero_frame_buffer_init(ldev, &setup, &gfx->frame_buffer_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult game_gfx_play_deinit() {
+	HERO_ABORT("unimplemented");
+	return HERO_SUCCESS;
+}
+
+HeroResult _game_gfx_play_init_voxel_height_map(U32 cell_x, U32 cell_y, F32* tile_height_map) {
+	GameGfxPlay* gfx = &game.gfx.play;
+
+	F32* voxel_height_map;
+	HeroResult result = hero_image_write(game.gfx.ldev, gfx->voxel_height_image_id, NULL, (void**)&voxel_height_map);
+	HERO_RESULT_ASSERT(result);
+
+	U32 tile_x = cell_x * GAME_ISLAND_CELL_AXIS_TILES_COUNT;
+	U32 tile_y = cell_y * GAME_ISLAND_CELL_AXIS_TILES_COUNT;
+	U32 row_start = tile_y * GAME_ISLAND_AXIS_TILES_COUNT + tile_x;
+	U32 next_row_start = row_start + GAME_ISLAND_AXIS_TILES_COUNT;
+
+	F32 tl = tile_height_map[row_start];
+	F32 tr = tile_height_map[row_start];
+	F32 bl = tile_height_map[next_row_start];
+	F32 br = tile_height_map[next_row_start + 1];
+	U32 voxel_start = 0;
+	for_range(y, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+		for_range(x, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+
+			F32 tvy = 0.f;
+			F32 tstep = 1.f / (F32)GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+			U32 voxel_idx = voxel_start;
+			for_range(vy, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+				F32 tvx = 0.f;
+				for_range(vx, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+					F32 voxel_height = hero_bilerp(tl, tr, bl, br, tvx, tvy);
+					voxel_height_map[voxel_idx] = voxel_height * 256.f;
+					tvx += tstep;
+					voxel_idx += 1;
+				}
+
+				tvy += tstep;
+
+				// increment to next row
+				voxel_idx += GAME_PLAY_CELL_AXIS_VOXELS_COUNT - GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+			}
+
+			// increment to next column
+			voxel_start += GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+
+			if (x + 1 < GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+				tl = tr;
+				bl = br;
+				tr = tile_height_map[row_start + x + 1];
+				br = tile_height_map[next_row_start + x + 1];
+			}
+		}
+
+		if (y + 1 < GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+			row_start += GAME_ISLAND_AXIS_TILES_COUNT;
+			tl = tile_height_map[row_start];
+			tr = tile_height_map[row_start + 1];
+
+			next_row_start = row_start + GAME_ISLAND_AXIS_TILES_COUNT;
+			bl = tile_height_map[next_row_start];
+			br = tile_height_map[next_row_start + 1];
+
+			// go to the next row
+			voxel_start = ((y + 1) * GAME_PLAY_CELL_AXIS_VOXELS_COUNT) * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+		}
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
+	GameGfxPlay* gfx = &game.gfx.play;
+	HeroResult result;
+
+	U32 cell_x = 12;
+	U32 cell_y = 12;
+
+	static int init = 0;
+	if (!init) {
+		init += 1;
+		_game_gfx_play_init_voxel_height_map(cell_x, cell_y, gfx->scene_render_data.tile_height_map);
+	}
+
+	GamePlayGlobalUBO* global_ubo;
+	result = hero_buffer_write(game.gfx.ldev, gfx->uniform_buffer_id, 0, 1, (void**)&global_ubo);
+	HERO_RESULT_ASSERT(result);
+
+	{
+		Mat4x4 view_to_ndc;
+		mat4x4_perspective(&view_to_ndc, HERO_DEGREES_TO_RADIANS(45.f), (float)1920 / (float)1080, 0.1f, 100.f);
+
+		// inverse Y & Z to make +Y go up and +Z go forward
+		mat4x4_scale(&view_to_ndc, VEC3_INIT(1.f, -1.f, -1.f));
+
+		Mat4x4 world_to_view;
+		mat4x4_identity(&world_to_view);
+
+		mat4x4_mul_quat(&world_to_view, &world_to_view, quat_conj(gfx->scene_render_data.camera_rotation));
+
+		mat4x4_translate(&world_to_view, vec3_neg(gfx->scene_render_data.camera_position));
+
+		mat4x4_mul(&global_ubo->mvp, &world_to_view, &view_to_ndc);
+	}
+
+	result = hero_cmd_render_pass_start(command_recorder, gfx->render_pass_id, gfx->frame_buffer_id, NULL, NULL);
+	HERO_RESULT_ASSERT(result);
+
+	result = hero_cmd_draw_start(command_recorder, gfx->terrain_tile_material_id);
+	HERO_RESULT_ASSERT(result);
+
+	result = hero_cmd_draw_set_vertex_buffer(command_recorder, gfx->terrain_tile_vertex_buffer_id, 0, 0);
+	HERO_RESULT_ASSERT(result);
+
+	result = hero_cmd_draw_set_instances(command_recorder, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT * GAME_ISLAND_CELL_AXIS_TILES_COUNT);
+	HERO_RESULT_ASSERT(result);
+
+	result = hero_cmd_draw_end_indexed(command_recorder, gfx->terrain_tile_index_buffer_id, 0, GAME_PLAY_TILE_VOXELS_INDICES_COUNT, 0);
+	HERO_RESULT_ASSERT(result);
+
+	result = hero_cmd_render_pass_end(command_recorder);
+	HERO_RESULT_ASSERT(result);
+
+	return HERO_SUCCESS;
+}
+
+// ===========================================
+//
+//
 // Graphics
 //
 //
@@ -887,7 +1848,7 @@ void game_gfx_init(void) {
 		.backend_type = HERO_GFX_BACKEND_TYPE_VULKAN,
 		.display_manager_type = HERO_GFX_DISPLAY_MANAGER_XLIB,
 		.application_name = "RLE",
-		.vertex_layouts_cap = 4,
+		.vertex_layouts_cap = 32,
 	};
 
 	result = hero_gfx_sys_init(&hero_gfx_sys_setup);
@@ -988,6 +1949,18 @@ void game_gfx_init(void) {
 	}
 
 	{
+		HeroSamplerSetup setup = {0};
+		setup.mag_filter = HERO_FILTER_LINEAR,
+		setup.min_filter = HERO_FILTER_LINEAR,
+		setup.address_mode_u = HERO_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		setup.address_mode_v = HERO_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+		setup.address_mode_w = HERO_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+
+		result = hero_sampler_init(game.gfx.ldev, &setup, &game.gfx.clamp_linear_sampler_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
 		HeroAttachmentLayout attachments[] = {
 			{
 				.format = HERO_SURFACE_IMAGE_FORMAT,
@@ -1053,6 +2026,9 @@ void game_gfx_init(void) {
 	}
 
 	result = game_gfx_island_gen_debug_init();
+	HERO_RESULT_ASSERT(result);
+
+	result = game_gfx_play_init();
 	HERO_RESULT_ASSERT(result);
 
 	/*
@@ -1122,7 +2098,14 @@ void game_gfx_render(void) {
 	result = hero_command_recorder_start(game.gfx.ldev, game.gfx.command_pool_id, &command_recorder);
 	HERO_RESULT_ASSERT(result);
 
-	result = game_gfx_island_gen_debug_render(command_recorder);
+	switch (game.scene->type) {
+		case GAME_SCENE_TYPE_ISLAND_GEN_DEBUG:
+			result = game_gfx_island_gen_debug_render(command_recorder);
+			break;
+		case GAME_SCENE_TYPE_PLAY:
+			result = game_gfx_play_render(command_recorder);
+			break;
+	}
 
 	{
 		result = hero_cmd_render_pass_start(command_recorder, game.gfx.render_pass_id, game.gfx.swapchain_frame_buffer_ids[game.gfx.swapchain_image_idx], NULL, NULL);
@@ -1168,8 +2151,6 @@ void game_init(void) {
 
 	result = hero_virt_mem_page_size_get(&hero_virt_mem_page_size, &hero_virt_mem_reserve_align);
 	HERO_RESULT_ASSERT(result);
-
-	//hero.last_update_time = hero_time_now(HERO_TIME_MODE_MONOTONIC);
 
 	HeroWindowSysSetup hero_window_sys_setup = {
 		.backend_type = HERO_WINDOW_SYS_BACKEND_TYPE_X11,
@@ -1233,6 +2214,10 @@ void game_init(void) {
 int main(int argc, char** argv) {
 	game_init();
 
+	HeroTime last_frame_start_time = hero_time_now(HERO_TIME_MODE_MONOTONIC);
+
+	F32 dt_acc_for_one_sec = 0.f;
+	U32 fps = 0;
 	while (1) {
 		HeroResult result = hero_events_poll();
 		HERO_RESULT_ASSERT(result);
@@ -1339,9 +2324,23 @@ int main(int argc, char** argv) {
 #endif
 		}
 
+		HeroTime frame_start_time = hero_time_now(HERO_TIME_MODE_MONOTONIC);
+		HeroDuration frame_duration = hero_time_diff(frame_start_time, last_frame_start_time);
+
+		F32 dt = hero_duration_to_f32_secs(frame_duration);
+		dt_acc_for_one_sec += dt;
+		if (dt_acc_for_one_sec >= 1.f) {
+			dt_acc_for_one_sec -= 1.f;
+			printf("fps = %u, ms_per_frame = %f\n", fps, 1.f / fps);
+			fps = 0;
+		}
+
 		game_logic_update();
 
 		game_gfx_render();
+
+		last_frame_start_time = frame_start_time;
+		fps += 1;
 	}
 
 	return 0;

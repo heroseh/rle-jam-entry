@@ -116,6 +116,15 @@ int main(int argc, char** argv) {
 		exe_res = compile_shader("src/shaders", "island_gen_debug");
 		if (exe_res != 0) { return exe_res; }
 
+		exe_res = compile_shader("src/shaders", "play_terrain");
+		if (exe_res != 0) { return exe_res; }
+
+		exe_res = compile_shader("src/shaders", "play_model");
+		if (exe_res != 0) { return exe_res; }
+
+		exe_res = compile_shader("src/shaders", "play_billboard");
+		if (exe_res != 0) { return exe_res; }
+
 		exe_res = compile_shader("deps/hero", "ui");
 		if (exe_res != 0) { return exe_res; }
 	}

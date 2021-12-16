@@ -78,9 +78,7 @@ void main() {
 		}
 	}
 
-	ivec2 coord = ivec2(floor(f_uv * float(GAME_ISLAND_AXIS_TILES_COUNT)));
-	U32 tile = imageLoad(u_tile_map, coord).r;
-	F32 height = GAME_TILE_HEIGHT(tile) / 255.0;
+	F32 height = texture(u_tile_height_map, f_uv).r;
 	vec3 color;
 	if (show_height_map == 1) {
 		color = vec3(height);

@@ -2154,10 +2154,12 @@ Vec3 vec3_cross(Vec3 a, Vec3 b) {
 	return VEC3_INIT((a.y * b.z) - (a.z * b.y), (a.z * b.x) - (a.x * b.z), (a.x * b.y) - (a.y * b.x));
 }
 
-Vec3 vec3_perp_forward(Vec3 v) { return VEC3_INIT(v.x, -v.z, v.y); }
-Vec3 vec3_perp_backward(Vec3 v) { return VEC3_INIT(v.x, v.z, v.y); }
-Vec3 vec3_perp_left(Vec3 v) { return VEC3_INIT(v.y, -v.x, v.z); }
-Vec3 vec3_perp_right(Vec3 v) { return VEC3_INIT(-v.y, v.x, v.z); }
+Vec3 vec3_perp_y_forward(Vec3 v) { return VEC3_INIT(v.x, -v.z, v.y); }
+Vec3 vec3_perp_y_backward(Vec3 v) { return VEC3_INIT(v.x, v.z, v.y); }
+Vec3 vec3_perp_y_left(Vec3 v) { return VEC3_INIT(v.y, -v.x, v.z); }
+Vec3 vec3_perp_y_right(Vec3 v) { return VEC3_INIT(-v.y, v.x, v.z); }
+Vec3 vec3_perp_z_left(Vec3 v) { return VEC3_INIT(-v.z, v.y, v.x); }
+Vec3 vec3_perp_z_right(Vec3 v) { return VEC3_INIT(v.z, v.y, -v.x); }
 
 Vec3 vec3_min(Vec3 a, Vec3 b) { return VEC3_INIT(HERO_MIN(a.x, b.x), HERO_MIN(a.y, b.y), HERO_MIN(a.z, b.z)); }
 Vec3 vec3_max(Vec3 a, Vec3 b) { return VEC3_INIT(HERO_MAX(a.x, b.x), HERO_MAX(a.y, b.y), HERO_MAX(a.z, b.z)); }
@@ -2207,11 +2209,24 @@ Quat quat_mul(Quat a, Quat b) {
 	Vec3 r = vec3_cross(av, bv);
 	Vec3 wv = vec3_mul_scalar(av, b.w);
 	r = vec3_add(r, wv);
-	wv = vec3_mul_scalar(av, b.w);
+	wv = vec3_mul_scalar(bv, a.w);
 	r = vec3_add(r, wv);
 	F32 w = (a.w * b.w) - ((av.x * bv.x) + (av.y * bv.y) + (av.z * bv.z));
 
 	return QUAT_INIT(r.x, r.y, r.z, w);
+}
+
+Vec3 quat_mul_vec3(Quat q, Vec3 vec) {
+	Vec3 u = VEC3_INIT(q.x, q.y, q.z);
+
+	Vec3 t = vec3_cross(u, vec);
+	t = vec3_mul_scalar(t, 2.f);
+
+	u = vec3_cross(u, t);
+	t = vec3_mul_scalar(t, q.w);
+
+	Vec3 r = vec3_add(vec, t);
+	return vec3_add(r, u);
 }
 
 Quat quat_conj(Quat q) {
@@ -2219,54 +2234,92 @@ Quat quat_conj(Quat q) {
 }
 
 Quat quat_rotate(F32 angle, Vec3 axis) {
-	Vec3 axis_norm = vec3_norm(axis);
 	F32 s = sinf(angle / 2.f);
 	F32 c = cosf(angle / 2.f);
 
 	return QUAT_INIT(
-		axis_norm.x * s,
-		axis_norm.y * s,
-		axis_norm.z * s,
+		axis.x * s,
+		axis.y * s,
+		axis.z * s,
 		c);
 }
 
+F32 quat_euler_roll(Quat q) {
+	F32 sinr_cosp = 2.f * (q.w * q.x + q.y * q.z);
+	F32 cosr_cosp = 1.f - 2.f * (q.x * q.x + q.y * q.y);
+	return atan2(sinr_cosp, cosr_cosp);
+}
+
+F32 quat_euler_pitch(Quat q) {
+	F32 sinp = 2.f * (q.w * q.y - q.z * q.x);
+	if (fabsf(sinp) >= 1.f) {
+		return copysign(M_PI / 2.f, sinp); // use 90 degrees if out of range
+	} else {
+		return asinf(sinp);
+	}
+}
+
+F32 quat_euler_yaw(Quat q) {
+	F32 siny_cosp = 2.f * (q.w * q.z + q.x * q.y);
+	F32 cosy_cosp = 1.f - 2.f * (q.y * q.y + q.z * q.z);
+	return atan2f(siny_cosp, cosy_cosp);
+}
+
+Quat quat_from_euler(F32 roll, F32 pitch, F32 yaw) {
+	F32 cy = cosf(yaw * 0.5f);
+	F32 sy = sinf(yaw * 0.5f);
+	F32 cp = cosf(pitch * 0.5f);
+	F32 sp = sinf(pitch * 0.5f);
+	F32 cr = cosf(roll * 0.5f);
+	F32 sr = sinf(roll * 0.5f);
+
+	Quat q;
+	q.w = cr * cp * cy + sr * sp * sy;
+	q.x = sr * cp * cy - cr * sp * sy;
+	q.y = cr * sp * cy + sr * cp * sy;
+	q.z = cr * cp * sy - sr * sp * cy;
+
+	return q;
+}
+
 // ===========================================
 //
 //
-// Matrices - row major order
+// Matrices - column major order
 //
 //
 // ===========================================
 
+
 void mat3x2_identity(Mat3x2* out) {
-	out->row[0] = VEC2_INIT(1.0, 0.0);
-	out->row[1] = VEC2_INIT(0.0, 1.0);
-	out->row[2] = VEC2_INIT(0.0, 0.0);
+	out->col[0] = VEC2_INIT(1.0, 0.0);
+	out->col[1] = VEC2_INIT(0.0, 1.0);
+	out->col[2] = VEC2_INIT(0.0, 0.0);
 }
 
 void mat3x2_identity_translate(Mat3x2* out, Vec2 v) {
-	out->row[0] = VEC2_INIT(1.0, 0.0);
-	out->row[1] = VEC2_INIT(0.0, 1.0);
-	out->row[2] = v;
+	out->col[0] = VEC2_INIT(1.0, 0.0);
+	out->col[1] = VEC2_INIT(0.0, 1.0);
+	out->col[2] = v;
 }
 
 void mat3x2_identity_scale(Mat3x2* out, Vec2 v) {
-	out->row[0] = VEC2_INIT(v.x, 0.0);
-	out->row[1] = VEC2_INIT(0.0, v.y);
-	out->row[2] = VEC2_INIT(0.0, 0.0);
+	out->col[0] = VEC2_INIT(v.x, 0.0);
+	out->col[1] = VEC2_INIT(0.0, v.y);
+	out->col[2] = VEC2_INIT(0.0, 0.0);
 }
 
 void mat3x2_identity_rotate(Mat3x2* out, F32 angle) {
 	F32 c = cosf(angle);
 	F32 s = sinf(angle);
-	out->row[0] = VEC2_INIT(c, -s);
-	out->row[1] = VEC2_INIT(s, c);
-	out->row[2] = VEC2_INIT(0.0, 0.0);
+	out->col[0] = VEC2_INIT(c, -s);
+	out->col[1] = VEC2_INIT(s, c);
+	out->col[2] = VEC2_INIT(0.0, 0.0);
 }
 
 Vec2 mat3x2_row(Mat3x2* m, U32 row_idx) {
-	HERO_ASSERT(row_idx < 3, "row index must be less than 3 but got %u", row_idx);
-	return m->row[row_idx];
+	HERO_ASSERT(row_idx < 3, "col index must be less than 3 but got %u", row_idx);
+	return m->col[row_idx];
 }
 
 Vec3 mat3x2_column(Mat3x2* m, U32 column_idx) {
@@ -2279,49 +2332,49 @@ Vec3 mat3x2_column(Mat3x2* m, U32 column_idx) {
 }
 
 void mat3x2_mul(Mat3x2* out, Mat3x2* a, Mat3x2* b) {
-	out->row[0] = VEC2_INIT(
-		(a->row[0].x * b->row[0].x) + (a->row[0].y * b->row[1].x),
-		(a->row[0].x * b->row[0].y) + (a->row[0].y * b->row[1].y)
+	out->col[0] = VEC2_INIT(
+		(a->col[0].x * b->col[0].x) + (a->col[0].y * b->col[1].x),
+		(a->col[0].x * b->col[0].y) + (a->col[0].y * b->col[1].y)
 	);
 
-	out->row[1] = VEC2_INIT(
-		(a->row[1].x * b->row[0].x) + (a->row[1].y * b->row[1].x),
-		(a->row[1].x * b->row[0].y) + (a->row[1].y * b->row[1].y)
+	out->col[1] = VEC2_INIT(
+		(a->col[1].x * b->col[0].x) + (a->col[1].y * b->col[1].x),
+		(a->col[1].x * b->col[0].y) + (a->col[1].y * b->col[1].y)
 	);
 
-	out->row[2] = VEC2_INIT(
-		(a->row[2].x * b->row[0].x) + (a->row[2].y * b->row[1].x) + b->row[2].x,
-		(a->row[2].x * b->row[0].y) + (a->row[2].y * b->row[1].y) + b->row[2].y
+	out->col[2] = VEC2_INIT(
+		(a->col[2].x * b->col[0].x) + (a->col[2].y * b->col[1].x) + b->col[2].x,
+		(a->col[2].x * b->col[0].y) + (a->col[2].y * b->col[1].y) + b->col[2].y
 	);
 }
 
 Vec2 mat3x2_mul_point(Mat3x2* m, Vec2 pt) {
 	return VEC2_INIT(
-		(pt.x * m->row[0].x) + (pt.y * m->row[1].x) + m->row[2].x,
-		(pt.x * m->row[0].y) + (pt.y * m->row[1].y) + m->row[2].y
+		(pt.x * m->col[0].x) + (pt.y * m->col[1].x) + m->col[2].x,
+		(pt.x * m->col[0].y) + (pt.y * m->col[1].y) + m->col[2].y
 	);
 }
 
 Vec2 mat3x2_mul_vector(Mat3x2* m, Vec2 v) {
 	return VEC2_INIT(
-		(v.x * m->row[0].x) + (v.y * m->row[1].x),
-		(v.x * m->row[0].y) + (v.y * m->row[1].y)
+		(v.x * m->col[0].x) + (v.y * m->col[1].x),
+		(v.x * m->col[0].y) + (v.y * m->col[1].y)
 	);
 }
 
 
 void mat4x4_identity(Mat4x4* out) {
-	out->row[0] = VEC4_INIT(1.0, 0.0, 0.0, 0.0);
-	out->row[1] = VEC4_INIT(0.0, 1.0, 0.0, 0.0);
-	out->row[2] = VEC4_INIT(0.0, 0.0, 1.0, 0.0);
-	out->row[3] = VEC4_INIT(0.0, 0.0, 0.0, 1.0);
+	out->col[0] = VEC4_INIT(1.0, 0.0, 0.0, 0.0);
+	out->col[1] = VEC4_INIT(0.0, 1.0, 0.0, 0.0);
+	out->col[2] = VEC4_INIT(0.0, 0.0, 1.0, 0.0);
+	out->col[3] = VEC4_INIT(0.0, 0.0, 0.0, 1.0);
 }
 
 void mat4x4_identity_scale(Mat4x4* out, Vec3 v) {
 	mat4x4_identity(out);
-	out->row[0].x = v.x;
-	out->row[1].y = v.y;
-	out->row[2].z = v.z;
+	out->col[0].x = v.x;
+	out->col[1].y = v.y;
+	out->col[2].z = v.z;
 }
 
 void mat4x4_identity_rotate(Mat4x4* out, Vec3 v, F32 angle) {
@@ -2335,33 +2388,75 @@ void mat4x4_identity_rotate(Mat4x4* out, Vec3 v, F32 angle) {
 	F32 sc = ts * tc;
 	F32 sq = ts * ts;
 
-	out->row[0] = VEC4_INIT(
+	out->col[0] = VEC4_INIT(
 		1.0 - (2.0 * (yy + zz) * sq),
-		2.0 * ((v.x * v.y * sq) - (v.z * sc)),
-		2.0 * ((v.x * v.z * sq) + (v.y * sc)),
-		0.0
-	);
-
-	out->row[1] = VEC4_INIT(
 		2.0 * ((v.x * v.y * sq) + (v.z * sc)),
-		1.0 - (2.0 * (xx + zz) * sq),
-		2.0 * ((v.y * v.z * sq) - (v.x * sc)),
+		2.0 * ((v.x * v.z * sq) - (v.y * sc)),
 		0.0
 	);
 
-	out->row[2] = VEC4_INIT(
-		2.0 * ((v.x * v.z * sq) - (v.y * sc)),
+	out->col[1] = VEC4_INIT(
+		2.0 * ((v.x * v.y * sq) - (v.z * sc)),
+		1.0 - (2.0 * (xx + zz) * sq),
 		2.0 * ((v.y * v.z * sq) + (v.x * sc)),
+
+		0.0
+	);
+
+	out->col[2] = VEC4_INIT(
+		2.0 * ((v.x * v.z * sq) + (v.y * sc)),
+		2.0 * ((v.y * v.z * sq) - (v.x * sc)),
 		1.0 - (2.0 * (xx + yy) * sq),
 		0.0
 	);
 
-	out->row[3] = VEC4_INIT(0.0, 0.0, 0.0, 1.0);
+	out->col[3] = VEC4_INIT(0.0, 0.0, 0.0, 1.0);
+}
+
+void mat4x4_identity_rotate_x(Mat4x4* out, F32 angle) {
+	F32 s = sinf(angle);
+	F32 c = cosf(angle);
+
+	*out = (Mat4x4){0};
+	out->col[0].x = 1.f;
+	out->col[1].y = c;
+	out->col[1].z = s;
+	out->col[2].y = -s;
+	out->col[2].z = c;
+	out->col[3].w = 1.f;
+}
+
+void mat4x4_identity_rotate_y(Mat4x4* out, F32 angle) {
+	F32 s = sinf(angle);
+	F32 c = cosf(angle);
+
+	*out = (Mat4x4){0};
+	out->col[0].x = c;
+	out->col[0].z = -s;
+	out->col[1].y = 1.f;
+	out->col[2].x = s;
+	out->col[2].z = c;
+	out->col[3].w = 1.f;
+}
+
+void mat4x4_identity_rotate_z(Mat4x4* out, F32 angle) {
+	F32 s = sinf(angle);
+	F32 c = cosf(angle);
+
+	*out = (Mat4x4){0};
+	out->col[0].x = c;
+	out->col[0].y = s;
+	out->col[1].x = -s;
+	out->col[1].y = c;
+	out->col[2].z = 1.f;
+	out->col[3].w = 1.f;
 }
 
 void mat4x4_identity_translate(Mat4x4* out, Vec3 v) {
 	mat4x4_identity(out);
-	out->row[3] = VEC4_INIT(v.x, v.y, v.z, 1.0);
+	out->col[3].x = v.x;
+	out->col[3].y = v.y;
+	out->col[3].z = v.z;
 }
 
 void mat4x4_from_quat(Mat4x4* out, Quat quat) {
@@ -2374,68 +2469,86 @@ void mat4x4_from_quat(Mat4x4* out, Quat quat) {
 	float c2 = c * c;
 	float d2 = d * d;
 
-	out->row[0] = VEC4_INIT(
+	out->col[0] = VEC4_INIT(
 		a2 + b2 - c2 - d2,
-		2*(b*c - a*d),
-		2.f*(b*d + a*c),
-		0.f
-	);
-
-	out->row[1] = VEC4_INIT(
 		2.f*(b*c + a*d),
-		a2 - b2 + c2 - d2,
-		2.f*(c*d - a*b),
+		2.f*(b*d - a*c),
 		0.f
 	);
 
-	out->row[2] = VEC4_INIT(
-		2.f*(b*d - a*c),
+	out->col[1] = VEC4_INIT(
+		2.f*(b*c - a*d),
+		a2 - b2 + c2 - d2,
 		2.f*(c*d + a*b),
+		0.f
+	);
+
+	out->col[2] = VEC4_INIT(
+		2.f*(b*d + a*c),
+		2.f*(c*d - a*b),
 		a2 - b2 - c2 + d2,
 		0.f
 	);
 
-	out->row[3] = VEC4_INIT(0.f, 0.f, 0.f, 1.f);
+	out->col[3] = VEC4_INIT(0.f, 0.f, 0.f, 1.f);
 }
 
 void mat4x4_scale(Mat4x4* m, Vec3 v) {
 	Mat4x4 mat;
 	mat4x4_identity_scale(&mat, v);
-	mat4x4_mul(m, m, &mat);
+	mat4x4_mul(m, &mat, m);
 }
 
 void mat4x4_rotate(Mat4x4* m, Vec3 v, F32 angle) {
 	Mat4x4 mat;
 	mat4x4_identity_rotate(&mat, v, angle);
-	mat4x4_mul(m, m, &mat);
+	mat4x4_mul(m, &mat, m);
+}
+
+void mat4x4_rotate_x(Mat4x4* m, F32 angle) {
+	Mat4x4 mat;
+	mat4x4_identity_rotate_x(&mat, angle);
+	mat4x4_mul(m, &mat, m);
+}
+
+void mat4x4_rotate_y(Mat4x4* m, F32 angle) {
+	Mat4x4 mat;
+	mat4x4_identity_rotate_y(&mat, angle);
+	mat4x4_mul(m, &mat, m);
+}
+
+void mat4x4_rotate_z(Mat4x4* m, F32 angle) {
+	Mat4x4 mat;
+	mat4x4_identity_rotate_z(&mat, angle);
+	mat4x4_mul(m, &mat, m);
 }
 
 void mat4x4_translate(Mat4x4* m, Vec3 v) {
 	Mat4x4 mat;
 	mat4x4_identity_translate(&mat, v);
-	mat4x4_mul(m, m, &mat);
+	mat4x4_mul(m, &mat, m);
 }
 
 void mat4x4_from_3x2(Mat4x4* out, Mat3x2* m) {
-	out->row[0] = VEC4_INIT(m->row[0].x, m->row[0].y, 0.0, 0.0);
-	out->row[1] = VEC4_INIT(m->row[1].x, m->row[1].y, 0.0, 0.0);
-	out->row[2] = VEC4_INIT(0.0, 0.0, 1.0, 0.0);
-	out->row[3] = VEC4_INIT(m->row[3].x, m->row[3].y, 0.0, 1.0);
+	out->col[0] = VEC4_INIT(m->col[0].x, m->col[0].y, 0.0, 0.0);
+	out->col[1] = VEC4_INIT(m->col[1].x, m->col[1].y, 0.0, 0.0);
+	out->col[2] = VEC4_INIT(0.0, 0.0, 1.0, 0.0);
+	out->col[3] = VEC4_INIT(m->col[2].x, m->col[2].y, 0.0, 1.0);
 }
 
 Vec4 mat4x4_row(Mat4x4* m, U32 row_idx) {
 	HERO_ASSERT(row_idx < 4, "row index must be less than 4 but got %u", row_idx);
-	return m->row[row_idx];
+	return VEC4_INIT(
+		m->a[0 * 4 + row_idx],
+		m->a[1 * 4 + row_idx],
+		m->a[2 * 4 + row_idx],
+		m->a[3 * 4 + row_idx]
+	);
 }
 
 Vec4 mat4x4_column(Mat4x4* m, U32 column_idx) {
 	HERO_ASSERT(column_idx < 4, "column index must be less than 4 but got %u", column_idx);
-	return VEC4_INIT(
-		m->a[0 * 4 + column_idx],
-		m->a[1 * 4 + column_idx],
-		m->a[2 * 4 + column_idx],
-		m->a[3 * 4 + column_idx]
-	);
+	return m->col[column_idx];
 }
 
 void mat4x4_ortho(Mat4x4* out, F32 left, F32 right, F32 bottom, F32 top, F32 near, F32 far) {
@@ -2447,70 +2560,81 @@ void mat4x4_ortho(Mat4x4* out, F32 left, F32 right, F32 bottom, F32 top, F32 nea
 	F32 ty = -((top + bottom) / diff_y);
 	F32 tz = -((far + near) / diff_z);
 
-	out->row[0] = VEC4_INIT(2.0 / diff_x, 0.0, 0.0, 0.0);
-	out->row[1] = VEC4_INIT(0.0, 2.0 / diff_y, 0.0, 0.0);
-	out->row[2] = VEC4_INIT(0.0, 0.0, -2.0 / diff_z, 0.0);
-	out->row[3] = VEC4_INIT(tx, ty, tz, 1.0);
+	out->col[0] = VEC4_INIT(2.f / diff_x, 0.0, 0.0, 0.0);
+	out->col[1] = VEC4_INIT(0.0, 2.f / diff_y, 0.0, 0.0);
+	out->col[2] = VEC4_INIT(0.0, 0.0, -2.f / diff_z, 0.0);
+	out->col[3] = VEC4_INIT(tx, ty, tz, 1.0);
 }
 
 void mat4x4_perspective(Mat4x4* out, F32 fovy, F32 aspect_ratio, F32 z_near, F32 z_far) {
 	HERO_ASSERT(aspect_ratio != 0.0, "aspect_ratio cannot be 0.0");
 	HERO_ASSERT(z_far != z_near, "z_near and z_far cannot be equal");
 
-	F32 tan_half_fovy = tanf(fovy / 2.0);
-	F32 a = 1.0 / tan_half_fovy;
+	float tan_half_fovy = tanf(fovy / 2.0);
+	float a = 1.0 / tan_half_fovy;
 
 	*out = (Mat4x4){0};
-	out->row[0].x = a / aspect_ratio;
-	out->row[1].y = a;
-	out->row[2].z = -((z_far + z_near) / (z_far - z_near));
-	out->row[2].w = -1.0;
-	out->row[3].z = -((2.0 * z_far * z_near) / (z_far - z_near));
+	out->col[0].x = a / aspect_ratio;
+	out->col[1].y = a;
+	out->col[2].z = -((z_far + z_near) / (z_far - z_near));
+	out->col[2].w = -1.0;
+	out->col[3].z = -((2.0 * z_far * z_near) / (z_far - z_near));
 }
 
 void mat4x4_mul(Mat4x4* out, Mat4x4* a, Mat4x4* b) {
-	out->row[0] = VEC4_INIT(
-		a->row[0].x * b->row[0].x  +  a->row[0].y * b->row[1].x  +  a->row[0].z * b->row[2].x  +  a->row[0].w * b->row[3].x,
-		a->row[0].x * b->row[0].y  +  a->row[0].y * b->row[1].y  +  a->row[0].z * b->row[2].y  +  a->row[0].w * b->row[3].y,
-		a->row[0].x * b->row[0].z  +  a->row[0].y * b->row[1].z  +  a->row[0].z * b->row[2].z  +  a->row[0].w * b->row[3].z,
-		a->row[0].x * b->row[0].w  +  a->row[0].y * b->row[1].w  +  a->row[0].z * b->row[2].w  +  a->row[0].w * b->row[3].w
+	out->col[0] = VEC4_INIT(
+		a->col[0].x * b->col[0].x  +  a->col[0].y * b->col[1].x  +  a->col[0].z * b->col[2].x  +  a->col[0].w * b->col[3].x,
+		a->col[0].x * b->col[0].y  +  a->col[0].y * b->col[1].y  +  a->col[0].z * b->col[2].y  +  a->col[0].w * b->col[3].y,
+		a->col[0].x * b->col[0].z  +  a->col[0].y * b->col[1].z  +  a->col[0].z * b->col[2].z  +  a->col[0].w * b->col[3].z,
+		a->col[0].x * b->col[0].w  +  a->col[0].y * b->col[1].w  +  a->col[0].z * b->col[2].w  +  a->col[0].w * b->col[3].w
 	);
 
-	out->row[1] = VEC4_INIT(
-		a->row[2].x * b->row[0].x  +  a->row[2].y * b->row[1].x  +  a->row[2].z * b->row[2].x  +  a->row[2].w * b->row[3].x,
-		a->row[1].x * b->row[0].y  +  a->row[1].y * b->row[1].y  +  a->row[1].z * b->row[2].y  +  a->row[1].w * b->row[3].y,
-		a->row[1].x * b->row[0].z  +  a->row[1].y * b->row[1].z  +  a->row[1].z * b->row[2].z  +  a->row[1].w * b->row[3].z,
-		a->row[1].x * b->row[0].w  +  a->row[1].y * b->row[1].w  +  a->row[1].z * b->row[2].w  +  a->row[1].w * b->row[3].w
+	out->col[1] = VEC4_INIT(
+		a->col[1].x * b->col[0].x  +  a->col[1].y * b->col[1].x  +  a->col[1].z * b->col[2].x  +  a->col[1].w * b->col[3].x,
+		a->col[1].x * b->col[0].y  +  a->col[1].y * b->col[1].y  +  a->col[1].z * b->col[2].y  +  a->col[1].w * b->col[3].y,
+		a->col[1].x * b->col[0].z  +  a->col[1].y * b->col[1].z  +  a->col[1].z * b->col[2].z  +  a->col[1].w * b->col[3].z,
+		a->col[1].x * b->col[0].w  +  a->col[1].y * b->col[1].w  +  a->col[1].z * b->col[2].w  +  a->col[1].w * b->col[3].w
 	);
 
-	out->row[2] = VEC4_INIT(
-		a->row[2].x * b->row[0].x  +  a->row[2].y * b->row[1].x  +  a->row[2].z * b->row[2].x  +  a->row[2].w * b->row[3].x,
-		a->row[2].x * b->row[0].y  +  a->row[2].y * b->row[1].y  +  a->row[2].z * b->row[2].y  +  a->row[2].w * b->row[3].y,
-		a->row[2].x * b->row[0].z  +  a->row[2].y * b->row[1].z  +  a->row[2].z * b->row[2].z  +  a->row[2].w * b->row[3].z,
-		a->row[2].x * b->row[0].w  +  a->row[2].y * b->row[1].w  +  a->row[2].z * b->row[2].w  +  a->row[2].w * b->row[3].w
+	out->col[2] = VEC4_INIT(
+		a->col[2].x * b->col[0].x  +  a->col[2].y * b->col[1].x  +  a->col[2].z * b->col[2].x  +  a->col[2].w * b->col[3].x,
+		a->col[2].x * b->col[0].y  +  a->col[2].y * b->col[1].y  +  a->col[2].z * b->col[2].y  +  a->col[2].w * b->col[3].y,
+		a->col[2].x * b->col[0].z  +  a->col[2].y * b->col[1].z  +  a->col[2].z * b->col[2].z  +  a->col[2].w * b->col[3].z,
+		a->col[2].x * b->col[0].w  +  a->col[2].y * b->col[1].w  +  a->col[2].z * b->col[2].w  +  a->col[2].w * b->col[3].w
 	);
 
-	out->row[3] = VEC4_INIT(
-		a->row[3].x * b->row[0].x  +  a->row[3].y * b->row[1].x  +  a->row[3].z * b->row[2].x  +  a->row[3].w * b->row[3].x,
-		a->row[3].x * b->row[0].y  +  a->row[3].y * b->row[1].y  +  a->row[3].z * b->row[2].y  +  a->row[3].w * b->row[3].y,
-		a->row[3].x * b->row[0].z  +  a->row[3].y * b->row[1].z  +  a->row[3].z * b->row[2].z  +  a->row[3].w * b->row[3].z,
-		a->row[3].x * b->row[0].w  +  a->row[3].y * b->row[1].w  +  a->row[3].z * b->row[2].w  +  a->row[3].w * b->row[3].w
+	out->col[3] = VEC4_INIT(
+		a->col[3].x * b->col[0].x  +  a->col[3].y * b->col[1].x  +  a->col[3].z * b->col[2].x  +  a->col[3].w * b->col[3].x,
+		a->col[3].x * b->col[0].y  +  a->col[3].y * b->col[1].y  +  a->col[3].z * b->col[2].y  +  a->col[3].w * b->col[3].y,
+		a->col[3].x * b->col[0].z  +  a->col[3].y * b->col[1].z  +  a->col[3].z * b->col[2].z  +  a->col[3].w * b->col[3].z,
+		a->col[3].x * b->col[0].w  +  a->col[3].y * b->col[1].w  +  a->col[3].z * b->col[2].w  +  a->col[3].w * b->col[3].w
 	);
+}
+
+void mat4x4_mul_quat(Mat4x4* out, Mat4x4* m, Quat q) {
+	Vec3 col_0 = quat_mul_vec3(q, VEC3_INIT(m->col[0].x, m->col[0].y, m->col[0].z));
+	Vec3 col_1 = quat_mul_vec3(q, VEC3_INIT(m->col[1].x, m->col[1].y, m->col[1].z));
+	Vec3 col_2 = quat_mul_vec3(q, VEC3_INIT(m->col[2].x, m->col[2].y, m->col[2].z));
+
+	out->col[0] = VEC4_INIT(col_0.x, col_0.y, col_0.z, m->col[0].w);
+	out->col[1] = VEC4_INIT(col_1.x, col_1.y, col_1.z, m->col[1].w);
+	out->col[2] = VEC4_INIT(col_2.x, col_2.y, col_2.z, m->col[2].w);
+	out->col[3] = m->col[3];
 }
 
 Vec3 mat4x4_mul_point(Mat4x4* m, Vec3 pt) {
 	return VEC3_INIT(
-		(pt.x * m->row[0].x) + (pt.y * m->row[1].x) + (pt.z * m->row[2].x) + m->row[3].x,
-		(pt.x * m->row[0].y) + (pt.y * m->row[1].y) + (pt.z * m->row[2].y) + m->row[3].y,
-		(pt.x * m->row[0].z) + (pt.y * m->row[1].z) + (pt.z * m->row[2].z) + m->row[3].z
+		(pt.x * m->col[0].x) + (pt.y * m->col[1].y) + (pt.z * m->col[2].z) + m->col[3].x,
+		(pt.x * m->col[1].x) + (pt.y * m->col[1].y) + (pt.z * m->col[2].z) + m->col[3].y,
+		(pt.x * m->col[2].x) + (pt.y * m->col[1].y) + (pt.z * m->col[2].z) + m->col[3].z
 	);
 }
 
 Vec3 mat4x4_mul_vector(Mat4x4* m, Vec3 v) {
 	return VEC3_INIT(
-		(v.x * m->row[0].x) + (v.y * m->row[1].x) + (v.z * m->row[2].x),
-		(v.x * m->row[0].y) + (v.y * m->row[1].y) + (v.z * m->row[2].y),
-		(v.x * m->row[0].z) + (v.y * m->row[1].z) + (v.z * m->row[2].z)
+		(v.x * m->col[0].x) + (v.y * m->col[1].y) + (v.z * m->col[2].z),
+		(v.x * m->col[1].x) + (v.y * m->col[1].y) + (v.z * m->col[2].z),
+		(v.x * m->col[2].x) + (v.y * m->col[1].y) + (v.z * m->col[2].z)
 	);
 }
 
