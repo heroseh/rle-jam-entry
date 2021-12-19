@@ -139,6 +139,7 @@ typedef struct HeroCommandPoolBufferVulkan HeroCommandPoolBufferVulkan;
 	HERO_VULKAN_DEVICE_FN(vkCreatePipelineCache) \
 	HERO_VULKAN_DEVICE_FN(vkDestroyPipelineCache) \
 	HERO_VULKAN_DEVICE_FN(vkCreateGraphicsPipelines) \
+	HERO_VULKAN_DEVICE_FN(vkCreateComputePipelines) \
 	HERO_VULKAN_DEVICE_FN(vkDestroyPipeline) \
 	HERO_VULKAN_DEVICE_FN(vkCreateDescriptorPool) \
 	HERO_VULKAN_DEVICE_FN(vkDestroyDescriptorPool) \
@@ -161,6 +162,7 @@ typedef struct HeroCommandPoolBufferVulkan HeroCommandPoolBufferVulkan;
 	HERO_VULKAN_DEVICE_FN(vkCmdSetScissor) \
 	HERO_VULKAN_DEVICE_FN(vkCmdBeginRenderPass) \
 	HERO_VULKAN_DEVICE_FN(vkCmdBindPipeline) \
+	HERO_VULKAN_DEVICE_FN(vkCmdDispatch) \
 	HERO_VULKAN_DEVICE_FN(vkCmdBindDescriptorSets) \
 	HERO_VULKAN_DEVICE_FN(vkCmdBindVertexBuffers) \
 	HERO_VULKAN_DEVICE_FN(vkCmdBindIndexBuffer) \
@@ -388,6 +390,7 @@ struct HeroShaderVulkan {
 	HeroShader public_;
 
 	VkPipelineLayout pipeline_layout;
+	VkPipeline compute_pipeline;
 	VkDescriptorSetLayout descriptor_set_layouts[HERO_GFX_DESCRIPTOR_SET_COUNT];
 	VkDescriptorUpdateTemplate descriptor_update_templates[HERO_GFX_DESCRIPTOR_SET_COUNT];
 	U32* descriptor_binding_update_data_indices;
@@ -510,8 +513,10 @@ typedef struct HeroCommandRecorderVulkan HeroCommandRecorderVulkan;
 struct HeroCommandRecorderVulkan {
 	HeroCommandRecorder public_;
 	VkCommandBuffer command_buffer;
-	VkPipeline bound_pipeline;
-	VkDescriptorSet bound_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_COUNT];
+	VkPipeline bound_pipeline_graphics;
+	VkPipeline bound_pipeline_compute;
+	VkDescriptorSet bound_graphics_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_COUNT];
+	VkDescriptorSet bound_compute_descriptor_set;
 	VkBuffer bound_vertex_buffers[HERO_BUFFER_BINDINGS_CAP];
 	U64 bound_vertex_buffer_offsets[HERO_BUFFER_BINDINGS_CAP];
 	U32 vertex_buffer_binding_start;
@@ -679,7 +684,7 @@ HeroResult _hero_vulkan_frame_buffer_get(HeroLogicalDevice* ldev, HeroFrameBuffe
 HeroResult _hero_vulkan_pipeline_cache_init(HeroLogicalDevice* ldev, HeroPipelineCacheSetup* setup, HeroPipelineCacheId* id_out);
 HeroResult _hero_vulkan_pipeline_cache_deinit(HeroLogicalDevice* ldev, HeroPipelineCacheId id);
 
-HeroResult _hero_vulkan_pipeline_init(HeroLogicalDevice* ldev, HeroPipelineSetup* setup, HeroPipelineId* id_out, HeroPipeline** out);
+HeroResult _hero_vulkan_pipeline_graphics_init(HeroLogicalDevice* ldev, HeroPipelineGraphicsSetup* setup, HeroPipelineId* id_out, HeroPipeline** out);
 HeroResult _hero_vulkan_pipeline_deinit(HeroLogicalDevice* ldev, HeroPipelineId id, HeroPipeline* pipeline);
 HeroResult _hero_vulkan_pipeline_get(HeroLogicalDevice* ldev, HeroPipelineId id, HeroPipeline** out);
 

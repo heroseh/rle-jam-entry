@@ -1251,10 +1251,21 @@ F32 vec3_dot(Vec3 a, Vec3 b);
 
 Vec3 vec3_cross(Vec3 a, Vec3 b);
 
-Vec3 vec3_perp_forward(Vec3 v);
-Vec3 vec3_perp_backward(Vec3 v);
+
+Vec3 vec3_perp_x_forward(Vec3 v);
+Vec3 vec3_perp_x_backward(Vec3 v);
+Vec3 vec3_perp_y_forward(Vec3 v);
+Vec3 vec3_perp_y_backward(Vec3 v);
+
+Vec3 vec3_perp_y_left(Vec3 v);
+Vec3 vec3_perp_y_right(Vec3 v);
+Vec3 vec3_perp_z_left(Vec3 v);
+Vec3 vec3_perp_z_right(Vec3 v);
+
 Vec3 vec3_perp_left(Vec3 v);
 Vec3 vec3_perp_right(Vec3 v);
+Vec3 vec3_perp_backward(Vec3 v);
+Vec3 vec3_perp_forward(Vec3 v);
 
 Vec3 vec3_min(Vec3 a, Vec3 b);
 Vec3 vec3_max(Vec3 a, Vec3 b);

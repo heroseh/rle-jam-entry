@@ -1399,7 +1399,7 @@ HeroResult hero_ui_sys_init(HeroUISysSetup* setup) {
 		render_state.depth_stencil.front.pass_op = HERO_STENCIL_OP_KEEP;
 		render_state.depth_stencil.front.compare_op = HERO_COMPARE_OP_ALWAYS;
 
-		HeroPipelineSetup pipeline_setup = {
+		HeroPipelineGraphicsSetup pipeline_setup = {
 			.render_state = &render_state,
 			.shader_id = setup->shader_id,
 			.render_pass_layout_id = setup->render_pass_layout_id,
@@ -1407,7 +1407,7 @@ HeroResult hero_ui_sys_init(HeroUISysSetup* setup) {
 			.cache_id.raw = 0,
 		};
 
-		result = hero_pipeline_init(setup->ldev, &pipeline_setup, &hero_ui_sys.pipeline_id);
+		result = hero_pipeline_graphics_init(setup->ldev, &pipeline_setup, &hero_ui_sys.pipeline_id);
 		HERO_RESULT_ASSERT(result);
 	}
 

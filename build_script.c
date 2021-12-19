@@ -30,6 +30,16 @@ int compile_shader(const char* src_dir, const char* name) {
 	return 0;
 }
 
+int compile_shader_compute(const char* src_dir, const char* name) {
+	char buf[BUF_SIZE];
+
+	snprintf(buf, BUF_SIZE, "glslangValidator -V -DCOMPUTE -DHERO_GLSL -S comp --source-entrypoint main -e compute -o build/%s.spv %s/%s.glsl", name, src_dir, name);
+	int exe_res = system(buf);
+	if (exe_res != 0) { return exe_res; }
+
+	return 0;
+}
+
 int main(int argc, char** argv) {
 	bool debug = false;
 	bool debug_address = false;
@@ -117,6 +127,9 @@ int main(int argc, char** argv) {
 		if (exe_res != 0) { return exe_res; }
 
 		exe_res = compile_shader("src/shaders", "play_terrain");
+		if (exe_res != 0) { return exe_res; }
+
+		exe_res = compile_shader_compute("src/shaders", "play_voxel_raytrace");
 		if (exe_res != 0) { return exe_res; }
 
 		exe_res = compile_shader("src/shaders", "play_model");

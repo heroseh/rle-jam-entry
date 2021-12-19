@@ -170,16 +170,74 @@ HeroResult game_scene_island_gen_debug_init(GameScene** scene_out);
 //
 // ===========================================
 
+typedef U8 GameEntityType;
+enum {
+	GAME_ENTITY_TYPE_HUMAN,
+
+	GAME_ENTITY_TYPE_COUNT,
+};
+
+typedef U32 GameEntityFlags;
+enum {
+	GAME_ENTITY_FLAGS_AUTO_Y_FROM_HEIGHT_MAP = 0x1,
+	GAME_ENTITY_FLAGS_BILLBOARD =              0x2,
+	GAME_ENTITY_FLAGS_PLAYER =                 0x4,
+	GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE =      0x8,
+};
+
+typedef U8 GameDirection;
+enum {
+	GAME_DIRECTION_NONE,
+	GAME_DIRECTION_UP,
+	GAME_DIRECTION_DOWN,
+	GAME_DIRECTION_LEFT,
+	GAME_DIRECTION_RIGHT,
+
+	GAME_DIRECTION_COUNT,
+};
+
+extern Vec3 game_direction_vectors[GAME_DIRECTION_COUNT];
+
+typedef struct GameEntity GameEntity;
+struct GameEntity {
+	HeroObjectHeader header;
+	GameEntityType   type;
+	GameEntityFlags  flags;
+	Vec3             position;
+	GameDirection    direction;
+	F32              stop_on_next_tile_start;
+};
+
+typedef struct GameRenderEntityBillboard GameRenderEntityBillboard;
+struct GameRenderEntityBillboard {
+	GameEntityType   type;
+	Vec3             position;
+	U8               ascii;
+};
+
+#define HERO_STACK_ELMT_TYPE GameRenderEntityBillboard
+#include "deps/hero/stack_gen.inl"
+
+HERO_TYPEDEF_OBJECT_ID(GameEntityId);
+#define HERO_OBJECT_ID_TYPE GameEntityId
+#define HERO_OBJECT_TYPE GameEntity
+#include "deps/hero/object_pool_gen.inl"
+
 typedef struct GameScenePlayRenderData GameScenePlayRenderData;
 struct GameScenePlayRenderData {
 	F32* tile_height_map;
+	F32* voxel_height_map;
+	Vec3 camera_forward;
 	Vec3 camera_position;
 	Quat camera_rotation;
+	HeroStack(GameRenderEntityBillboard) entity_billboards;
 };
 
 typedef struct GameScenePlay GameScenePlay;
 struct GameScenePlay {
 	GameScene scene;
+	HeroObjectPool(GameEntity) entity_pool;
+	GameEntityId player_entity_id;
 	F32* tile_height_map;
 	GameScenePlayRenderData render_data;
 	HeroUIImageAtlasId ui_image_atlas_id;
@@ -191,6 +249,11 @@ struct GameScenePlay {
 };
 
 HeroResult game_scene_play_init(GameScene** scene_out);
+
+HeroResult game_scene_play_entity_add(GameScenePlay* scene, GameEntityType type, GameEntity** entity_out, GameEntityId* id_out);
+HeroResult game_scene_play_entity_get(GameScenePlay* scene, GameEntityId id, GameEntity** out);
+HeroResult game_scene_play_entity_update(GameScenePlay* scene, GameEntityId id, GameEntity* entity);
+U8 game_scene_play_entity_ascii(GameEntity* entity);
 
 // ===========================================
 //
@@ -211,7 +274,7 @@ void game_logic_update(void);
 //
 // ===========================================
 
-HeroResult game_gfx_shader_init(const char* name, HeroShaderId* id_out);
+HeroResult game_gfx_shader_init(const char* name, HeroShaderType type, HeroShaderId* id_out);
 HeroResult game_gfx_swapchain_frame_buffers_reinit(HeroSwapchain* swapchain);
 
 // ===========================================
@@ -258,6 +321,8 @@ typedef struct GameGfxPlay GameGfxPlay;
 struct GameGfxPlay {
 	GameScenePlayRenderData scene_render_data;
 
+	HeroShaderId           voxel_raytrace_shader_id;
+	HeroShaderGlobalsId    voxel_raytrace_shader_globals_id;
 	HeroVertexLayoutId     terrain_tile_vertex_layout_id;
 	HeroBufferId           terrain_tile_vertex_buffer_id;
 	HeroBufferId           terrain_tile_index_buffer_id;
@@ -285,6 +350,8 @@ struct GameGfxPlay {
 	HeroRenderPassLayoutId render_pass_layout_id;
 	HeroRenderPassId       render_pass_id;
 	HeroFrameBufferId      frame_buffer_id;
+	HeroImageId            voxel_raytrace_color_image_id;
+	HeroImageId            voxel_raytrace_depth_image_id;
 	HeroImageId            attachment_image_id;
 	HeroImageId            depth_image_id;
 };
@@ -347,6 +414,7 @@ struct Game {
 	HeroUIWindowId ui_window_id;
 	HeroUIImageAtlasId ui_ascii_image_atlas_id;
 	GameScene* scene;
+	F32 dt;
 
 	GameGfx gfx;
 };

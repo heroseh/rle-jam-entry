@@ -1,5 +1,10 @@
 #include "game.h"
 
+#define ENABLE_VOXEL_RAYTRACTER 0
+#define GAME_ENTITIES_CAP 128
+#define GAME_ENTITY_MOVE_SPEED 2.5f
+#define GAME_CAMERA_TARGET_OFFSET VEC3_INIT(0.5f, 10.f, -10.f)
+
 #define FNL_IMPL
 #include <deps/FastNoiseLite.h>
 
@@ -314,13 +319,81 @@ HeroResult game_scene_island_gen_debug_init(GameScene** scene_out) {
 //
 // ===========================================
 
+Vec3 game_direction_vectors[GAME_DIRECTION_COUNT] = {
+	[GAME_DIRECTION_NONE] = {0},
+	[GAME_DIRECTION_UP] = VEC3_FORWARD,
+	[GAME_DIRECTION_DOWN] = VEC3_BACKWARD,
+	[GAME_DIRECTION_LEFT] = VEC3_LEFT,
+	[GAME_DIRECTION_RIGHT] = VEC3_RIGHT,
+};
+
+HeroResult _game_scene_play_init_voxel_height_map(U32 cell_x, U32 cell_y, F32* tile_height_map, F32* voxel_height_map) {
+	U32 tile_x = cell_x * GAME_ISLAND_CELL_AXIS_TILES_COUNT;
+	U32 tile_y = cell_y * GAME_ISLAND_CELL_AXIS_TILES_COUNT;
+	U32 row_start = tile_y * GAME_ISLAND_AXIS_TILES_COUNT + tile_x;
+	U32 next_row_start = row_start + GAME_ISLAND_AXIS_TILES_COUNT;
+
+	F32 tl = tile_height_map[row_start];
+	F32 tr = tile_height_map[row_start];
+	F32 bl = tile_height_map[next_row_start];
+	F32 br = tile_height_map[next_row_start + 1];
+	U32 voxel_start = 0;
+	for_range(y, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+		for_range(x, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+
+			F32 tvy = 0.f;
+			F32 tstep = 1.f / (F32)GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+			U32 voxel_idx = voxel_start;
+			for_range(vy, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+				F32 tvx = 0.f;
+				for_range(vx, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+					F32 voxel_height = hero_bilerp(tl, tr, bl, br, tvx, tvy);
+					voxel_height_map[voxel_idx] = voxel_height * 256.f;
+					tvx += tstep;
+					voxel_idx += 1;
+				}
+
+				tvy += tstep;
+
+				// increment to next row
+				voxel_idx += GAME_PLAY_CELL_AXIS_VOXELS_COUNT - GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+			}
+
+			// increment to next column
+			voxel_start += GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+
+			if (x + 1 < GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+				tl = tr;
+				bl = br;
+				tr = tile_height_map[row_start + x + 1];
+				br = tile_height_map[next_row_start + x + 1];
+			}
+		}
+
+		if (y + 1 < GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+			row_start += GAME_ISLAND_AXIS_TILES_COUNT;
+			tl = tile_height_map[row_start];
+			tr = tile_height_map[row_start + 1];
+
+			next_row_start = row_start + GAME_ISLAND_AXIS_TILES_COUNT;
+			bl = tile_height_map[next_row_start];
+			br = tile_height_map[next_row_start + 1];
+
+			// go to the next row
+			voxel_start = ((y + 1) * GAME_PLAY_CELL_AXIS_VOXELS_COUNT) * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+		}
+	}
+
+	return HERO_SUCCESS;
+}
+
 HeroResult game_scene_play_load(GameScene* s) {
 	HERO_ASSERT(s->type == GAME_SCENE_TYPE_PLAY, "expected a play scene");
 	GameScenePlay* scene = (GameScenePlay*)s;
 	HeroResult result;
 
 	scene->camera_forward = VEC3_FORWARD;
-	scene->camera_position = VEC3_INIT(0.f, 128.f, 0.f);
+	scene->camera_position = VEC3_INIT(0.f, 118.f, -8.f);
 	scene->camera_rotation = QUAT_IDENTITY;
 
 	F32* tile_height_map = hero_alloc_array(F32, hero_system_alctor, 0, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
@@ -331,6 +404,19 @@ HeroResult game_scene_play_load(GameScene* s) {
 
 	GameIslandGenConfig config = game_island_gen_configs[0];
 	game_island_gen(&config, scene->tile_height_map);
+
+	static int init = 0;
+	if (!init) {
+		init = 1;
+		U32 cell_x = 12;
+		U32 cell_y = 12;
+		F32* voxel_height_map = hero_alloc_array(F32, hero_system_alctor, 0, GAME_PLAY_CELL_AXIS_VOXELS_COUNT * GAME_PLAY_CELL_AXIS_VOXELS_COUNT);
+		if (voxel_height_map == NULL) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+		_game_scene_play_init_voxel_height_map(cell_x, cell_y, tile_height_map, voxel_height_map);
+		scene->render_data.voxel_height_map = voxel_height_map;
+	}
 
 	{
 		HeroUIImageAtlasSetup setup = {
@@ -347,6 +433,13 @@ HeroResult game_scene_play_load(GameScene* s) {
 		HERO_RESULT_ASSERT(result);
 	}
 
+	hero_object_pool(GameEntity, init)(&scene->entity_pool, GAME_ENTITIES_CAP, hero_system_alctor, 0);
+
+	GameEntity* player;
+	result = game_scene_play_entity_add(scene, GAME_ENTITY_TYPE_HUMAN, &player, &scene->player_entity_id);
+	HERO_RESULT_ASSERT(result);
+	player->flags |= GAME_ENTITY_FLAGS_PLAYER;
+
 	return HERO_SUCCESS;
 }
 
@@ -362,6 +455,8 @@ HeroResult game_scene_play_update(GameScene* s, GameScene** replace_with_scene_o
 	GameScenePlay* scene = (GameScenePlay*)s;
 	HeroResult result;
 
+	scene->render_data.entity_billboards.count = 0;
+
 	HeroUIWindow* window;
 	result = hero_ui_window_get(game.ui_window_id, &window);
 	if (result < 0) {
@@ -370,6 +465,48 @@ HeroResult game_scene_play_update(GameScene* s, GameScene** replace_with_scene_o
 
 	hero_ui_image(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_IMAGE_ID(scene->ui_image_atlas_id, 0), -1, 1.f, HERO_UI_IMAGE_SCALE_MODE_NONE, NULL);
 
+	{
+		GameEntity* player;
+		HeroResult result = game_scene_play_entity_get(scene, scene->player_entity_id, &player);
+		if (result < 0) {
+			return result;
+		}
+
+		GameDirection direction = GAME_DIRECTION_NONE;
+		if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_W)) {
+			direction = GAME_DIRECTION_UP;
+		}
+		if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_A)) {
+			direction = GAME_DIRECTION_LEFT;
+		}
+		if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_S)) {
+			direction = GAME_DIRECTION_DOWN;
+		}
+		if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_D)) {
+			direction = GAME_DIRECTION_RIGHT;
+		}
+		if (hero_keyboard_scan_code_has_been_released(HERO_KEY_CODE_W) && player->direction == GAME_DIRECTION_UP) {
+			player->stop_on_next_tile_start = floorf(player->position.z);
+			player->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
+		}
+		if (hero_keyboard_scan_code_has_been_released(HERO_KEY_CODE_S) && player->direction == GAME_DIRECTION_DOWN) {
+			player->stop_on_next_tile_start = ceilf(player->position.z);
+			player->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
+		}
+		if (hero_keyboard_scan_code_has_been_released(HERO_KEY_CODE_A) && player->direction == GAME_DIRECTION_LEFT) {
+			player->stop_on_next_tile_start = ceilf(player->position.x);
+			player->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
+		}
+		if (hero_keyboard_scan_code_has_been_released(HERO_KEY_CODE_D) && player->direction == GAME_DIRECTION_RIGHT) {
+			player->stop_on_next_tile_start = floorf(player->position.x);
+			player->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
+		}
+
+		if (player->direction == GAME_DIRECTION_NONE) {
+			player->direction = direction;
+		}
+	}
+#if 0
 	if (hero_window_sys.mouse.rel_x || hero_window_sys.mouse.rel_y) {
 		scene->camera_yaw += 0.01 * (F32)hero_window_sys.mouse.rel_x;
 		scene->camera_pitch += 0.01 * (F32)hero_window_sys.mouse.rel_y;
@@ -377,8 +514,8 @@ HeroResult game_scene_play_update(GameScene* s, GameScene** replace_with_scene_o
 		Quat y_rotation = quat_rotate(scene->camera_pitch, VEC3_INIT(1.f, 0.f, 0.f));
 		scene->camera_rotation = quat_norm(quat_mul(x_rotation, y_rotation));
 		scene->camera_forward = quat_mul_vec3(scene->camera_rotation, VEC3_FORWARD);
-		printf("camera_forward = { %f, %f, %f }\n", scene->camera_forward.x, scene->camera_forward.y, scene->camera_forward.z);
 	}
+		printf("camera_forward = { %f, %f, %f }\n", scene->camera_forward.x, scene->camera_forward.y, scene->camera_forward.z);
 
 	if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_W)) {
 		Vec3 offset = vec3_mul_scalar(scene->camera_forward, 0.1);
@@ -407,7 +544,16 @@ HeroResult game_scene_play_update(GameScene* s, GameScene** replace_with_scene_o
 	if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_SPACE)) {
 		scene->camera_position.y += 0.1;
 	}
+#endif
 
+	GameEntity* entity = NULL;
+	GameEntityId entity_id = {0};
+	while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+		result = game_scene_play_entity_update(scene, entity_id, entity);
+		if (result < 0) {
+			return result;
+		}
+	}
 
 	return HERO_SUCCESS;
 }
@@ -418,8 +564,18 @@ HeroResult game_scene_play_update_render_data(GameScene* s) {
 	GameScenePlayRenderData* dst = &game.gfx.play.scene_render_data;
 
 	dst->tile_height_map = scene->tile_height_map;
+	dst->voxel_height_map = scene->render_data.voxel_height_map;
+	dst->camera_forward = scene->camera_forward;
 	dst->camera_position = scene->camera_position;
 	dst->camera_rotation = scene->camera_rotation;
+
+	dst->entity_billboards.count = 0;
+	GameRenderEntityBillboard* dst_renders;
+	HeroResult result = hero_stack(GameRenderEntityBillboard, push_many)(&dst->entity_billboards, scene->render_data.entity_billboards.count, hero_system_alctor, 0, &dst_renders);
+	if (result < 0) {
+		return result;
+	}
+	HERO_COPY_ELMT_MANY(dst->entity_billboards.data, scene->render_data.entity_billboards.data, scene->render_data.entity_billboards.count);
 
 	return HERO_SUCCESS;
 }
@@ -429,6 +585,7 @@ HeroResult game_scene_play_init(GameScene** scene_out) {
 	if (scene == NULL) {
 		return HERO_ERROR(ALLOCATION_FAILURE);
 	}
+	HERO_ZERO_ELMT(scene);
 	scene->scene.type = GAME_SCENE_TYPE_PLAY;
 	scene->scene.state = GAME_SCENE_STATE_UNLOADED;
 	scene->scene.load_fn = game_scene_play_load;
@@ -438,6 +595,162 @@ HeroResult game_scene_play_init(GameScene** scene_out) {
 
 	*scene_out = (GameScene*)scene;
 	return HERO_SUCCESS;
+}
+
+HeroResult game_scene_play_entity_add(GameScenePlay* scene, GameEntityType type, GameEntity** entity_out, GameEntityId* id_out) {
+	HeroResult result;
+	GameEntity* entity;
+	GameEntityId id;
+	result = hero_object_pool(GameEntity, alloc)(&scene->entity_pool, &entity, &id);
+	if (result < 0) {
+		return result;
+	}
+	if (entity_out) *entity_out = entity;
+	*id_out = id;
+	entity->type = type;
+
+	switch (type) {
+		case GAME_ENTITY_TYPE_HUMAN: {
+			entity->flags |=
+				GAME_ENTITY_FLAGS_AUTO_Y_FROM_HEIGHT_MAP |
+				GAME_ENTITY_FLAGS_BILLBOARD              ;
+			break;
+		};
+		default: HERO_ABORT("unhandled entity type %u\n", type);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult game_scene_play_entity_get(GameScenePlay* scene, GameEntityId id, GameEntity** out) {
+	return hero_object_pool(GameEntity, get)(&scene->entity_pool, id, out);
+}
+
+HeroResult game_scene_play_entity_update(GameScenePlay* scene, GameEntityId id, GameEntity* entity) {
+	HeroResult result;
+	switch (entity->type) {
+		case GAME_ENTITY_TYPE_HUMAN: {
+			break;
+		};
+		default: HERO_ABORT("unhandled entity type %u\n", entity->type);
+	}
+
+	Vec3 move_vec = vec3_mul_scalar(game_direction_vectors[entity->direction], GAME_ENTITY_MOVE_SPEED * game.dt);
+	entity->position = vec3_add(entity->position, move_vec);
+	if (entity->flags & GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE) {
+		F32 diff = 1.f;
+		switch (entity->direction) {
+			case GAME_DIRECTION_UP:
+			case GAME_DIRECTION_DOWN:
+				diff = fabsf(entity->stop_on_next_tile_start - entity->position.z);
+				break;
+			case GAME_DIRECTION_LEFT:
+			case GAME_DIRECTION_RIGHT:
+				diff = fabsf(entity->stop_on_next_tile_start - entity->position.x);
+				break;
+		}
+		if (diff >= 1.f) {
+			Vec3 align_back = vec3_mul_scalar(game_direction_vectors[entity->direction], diff - 1.f);
+			entity->position = vec3_sub(entity->position, align_back);
+
+			entity->direction = GAME_DIRECTION_NONE;
+			entity->flags &= ~GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
+		}
+	}
+
+	if (entity->flags & GAME_ENTITY_FLAGS_AUTO_Y_FROM_HEIGHT_MAP) {
+		U32 tile_x = (U32)floorf(entity->position.x);
+		U32 tile_y = (U32)floorf(entity->position.z);
+
+		F32 height = 0.f;
+		{
+			U32 voxel_start_x = tile_x * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+			U32 voxel_start_y = tile_y * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+
+			for_range(voxel_y, voxel_start_y, voxel_start_y + GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+				for_range(voxel_x, voxel_start_x, voxel_start_x + GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+					F32 voxel_height = scene->render_data.voxel_height_map[voxel_y * GAME_PLAY_CELL_AXIS_VOXELS_COUNT + voxel_x];
+					height = HERO_MAX(height, voxel_height);
+				}
+			}
+		}
+
+		F32 next_height = 0.f;
+		F32 interp_ratio = 0.f;
+		if (entity->direction != GAME_DIRECTION_NONE) {
+			switch (entity->direction) {
+				case GAME_DIRECTION_UP:
+				case GAME_DIRECTION_DOWN:
+					interp_ratio = fabsf(entity->position.z - floorf(entity->position.z));
+					tile_y += 1;
+					break;
+				case GAME_DIRECTION_LEFT:
+				case GAME_DIRECTION_RIGHT:
+					interp_ratio = fabsf(entity->position.x - floorf(entity->position.x));
+					tile_x += 1;
+					break;
+			}
+
+			{
+				U32 voxel_start_x = tile_x * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+				U32 voxel_start_y = tile_y * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+
+				for_range(voxel_y, voxel_start_y, voxel_start_y + GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+					for_range(voxel_x, voxel_start_x, voxel_start_x + GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+						F32 voxel_height = scene->render_data.voxel_height_map[voxel_y * GAME_PLAY_CELL_AXIS_VOXELS_COUNT + voxel_x];
+						next_height = HERO_MAX(next_height, voxel_height);
+					}
+				}
+			}
+		}
+
+		switch (entity->direction) {
+			case GAME_DIRECTION_NONE:
+				entity->position.y = height;
+				break;
+			case GAME_DIRECTION_UP:
+			case GAME_DIRECTION_RIGHT:
+				entity->position.y = hero_lerp(height, next_height, interp_ratio);
+				break;
+			case GAME_DIRECTION_DOWN:
+			case GAME_DIRECTION_LEFT:
+				entity->position.y = hero_lerp(height, next_height, interp_ratio);
+				break;
+		}
+	}
+
+	if (entity->flags & GAME_ENTITY_FLAGS_BILLBOARD) {
+		GameRenderEntityBillboard* render;
+		result = hero_stack(GameRenderEntityBillboard, push)(&scene->render_data.entity_billboards, hero_system_alctor, 0, &render);
+		if (result < 0) {
+			return result;
+		}
+
+		render->type = entity->type;
+		render->position = entity->position;
+		render->ascii = game_scene_play_entity_ascii(entity);
+	}
+
+	if (entity->flags & GAME_ENTITY_FLAGS_PLAYER) {
+
+		scene->camera_position = vec3_add(entity->position, GAME_CAMERA_TARGET_OFFSET);
+		scene->camera_forward = vec3_norm(vec3_sub(vec3_add(entity->position, VEC3_INIT(0.5f, 0.f, 0.5f)), scene->camera_position));
+		F32 pitch = asinf(-scene->camera_forward.y);
+		F32 yaw = atan2f(scene->camera_forward.x, scene->camera_forward.z);
+		Quat x_rotation = quat_rotate(yaw, VEC3_INIT(0.f, 1.f, 0.f));
+		Quat y_rotation = quat_rotate(pitch, VEC3_INIT(1.f, 0.f, 0.f));
+		scene->camera_rotation = quat_norm(quat_mul(x_rotation, y_rotation));
+	}
+
+	return HERO_SUCCESS;
+}
+
+U8 game_scene_play_entity_ascii(GameEntity* entity) {
+	if (entity->flags & GAME_ENTITY_FLAGS_PLAYER) {
+		return '@';
+	}
+
+	return '\0';
 }
 
 // ===========================================
@@ -571,7 +884,7 @@ void game_logic_update(void) {
 //
 // ===========================================
 
-HeroResult game_gfx_shader_init(const char* name, HeroShaderId* id_out) {
+HeroResult game_gfx_shader_init(const char* name, HeroShaderType type, HeroShaderId* id_out) {
 	HeroResult result;
 
 	HeroShaderModuleId shader_module_id;
@@ -595,15 +908,25 @@ HeroResult game_gfx_shader_init(const char* name, HeroShaderId* id_out) {
 	}
 
 	HeroShaderStages shader_stages = {0};
-	{
-		shader_stages.type = HERO_SHADER_TYPE_GRAPHICS;
-		shader_stages.data.graphics.vertex = (HeroShaderStage) {
-			.backend.spir_v.entry_point_name = "vertex",
-			.module_id = shader_module_id,
+	shader_stages.type = type;
+	switch (type) {
+		case HERO_SHADER_TYPE_GRAPHICS: {
+			shader_stages.data.graphics.vertex = (HeroShaderStage) {
+				.backend.spir_v.entry_point_name = "vertex",
+				.module_id = shader_module_id,
+			};
+			shader_stages.data.graphics.fragment = (HeroShaderStage) {
+				.backend.spir_v.entry_point_name = "fragment",
+				.module_id = shader_module_id,
+			};
+			break;
 		};
-		shader_stages.data.graphics.fragment = (HeroShaderStage) {
-			.backend.spir_v.entry_point_name = "fragment",
-			.module_id = shader_module_id,
+		case HERO_SHADER_TYPE_COMPUTE: {
+			shader_stages.data.compute.compute = (HeroShaderStage) {
+				.backend.spir_v.entry_point_name = "compute",
+				.module_id = shader_module_id,
+			};
+			break;
 		};
 	}
 
@@ -786,7 +1109,7 @@ HeroResult game_gfx_island_gen_debug_init() {
 		HERO_RESULT_ASSERT(result);
 	}
 
-	result = game_gfx_shader_init("island_gen_debug", &gfx->shader_id);
+	result = game_gfx_shader_init("island_gen_debug", HERO_SHADER_TYPE_GRAPHICS, &gfx->shader_id);
 	HERO_RESULT_ASSERT(result);
 
 	{
@@ -911,7 +1234,7 @@ HeroResult game_gfx_island_gen_debug_init() {
 		render_state.depth_stencil.front.pass_op = HERO_STENCIL_OP_KEEP;
 		render_state.depth_stencil.front.compare_op = HERO_COMPARE_OP_ALWAYS;
 
-		HeroPipelineSetup setup = {
+		HeroPipelineGraphicsSetup setup = {
 			.render_state = &render_state,
 			.shader_id = gfx->shader_id,
 			.render_pass_layout_id = gfx->render_pass_layout_id,
@@ -919,7 +1242,7 @@ HeroResult game_gfx_island_gen_debug_init() {
 			.cache_id.raw = 0,
 		};
 
-		result = hero_pipeline_init(ldev, &setup, &gfx->pipeline_id);
+		result = hero_pipeline_graphics_init(ldev, &setup, &gfx->pipeline_id);
 		HERO_RESULT_ASSERT(result);
 	}
 
@@ -1088,20 +1411,26 @@ static HeroVertexLayout game_gfx_model_layout = {
 
 typedef struct GameBillboardVertex GameBillboardVertex;
 struct GameBillboardVertex {
-	Vec2 pos;
+	Vec3 pos;
 	Vec2 uv;
+	U32 color;
 };
 
 static HeroVertexAttribInfo game_gfx_billboard_attribs[] = {
 	{ // GameBillboardVertex.pos
 		.location = 0,
 		.elmt_type = HERO_VERTEX_ELMT_TYPE_F32,
-		.vector_type = HERO_VERTEX_VECTOR_TYPE_2,
+		.vector_type = HERO_VERTEX_VECTOR_TYPE_3,
 	},
 	{ // GameBillboardVertex.uv
 		.location = 1,
 		.elmt_type = HERO_VERTEX_ELMT_TYPE_F32,
 		.vector_type = HERO_VERTEX_VECTOR_TYPE_2,
+	},
+	{ // GameBillboardVertex.color
+		.location = 2,
+		.elmt_type = HERO_VERTEX_ELMT_TYPE_U32,
+		.vector_type = HERO_VERTEX_VECTOR_TYPE_1,
 	},
 };
 
@@ -1286,10 +1615,10 @@ HeroResult _game_gfx_play_terrain_tile_init() {
 			// right
 			//
 			indices[indices_start_idx + 18] = vertices_start_idx + 12;
-			indices[indices_start_idx + 19] = vertices_start_idx + 13;
+			indices[indices_start_idx + 19] = vertices_start_idx + 15;
 			indices[indices_start_idx + 20] = vertices_start_idx + 14;
 			indices[indices_start_idx + 21] = vertices_start_idx + 14;
-			indices[indices_start_idx + 22] = vertices_start_idx + 15;
+			indices[indices_start_idx + 22] = vertices_start_idx + 13;
 			indices[indices_start_idx + 23] = vertices_start_idx + 12;
 
 			vertices_start_idx += GAME_PLAY_VOXEL_VERTICES_COUNT;
@@ -1308,17 +1637,28 @@ HeroResult game_gfx_play_init() {
 	HeroLogicalDevice* ldev = game.gfx.ldev;
 	HeroResult result;
 
-	result = game_gfx_shader_init("play_terrain", &gfx->terrain_tile_shader_id);
+	result = game_gfx_shader_init("play_terrain", HERO_SHADER_TYPE_GRAPHICS, &gfx->terrain_tile_shader_id);
 	HERO_RESULT_ASSERT(result);
 
-	result = game_gfx_shader_init("play_model", &gfx->model_shader_id);
+	result = game_gfx_shader_init("play_model", HERO_SHADER_TYPE_GRAPHICS, &gfx->model_shader_id);
 	HERO_RESULT_ASSERT(result);
 
-	result = game_gfx_shader_init("play_billboard", &gfx->billboard_shader_id);
+	result = game_gfx_shader_init("play_billboard", HERO_SHADER_TYPE_GRAPHICS, &gfx->billboard_shader_id);
+	HERO_RESULT_ASSERT(result);
+
+	result = game_gfx_shader_init("play_voxel_raytrace", HERO_SHADER_TYPE_COMPUTE, &gfx->voxel_raytrace_shader_id);
 	HERO_RESULT_ASSERT(result);
 
 	{
 		HeroDescriptorShaderInfo shader_infos[] = {
+			{
+				.shader_id = gfx->voxel_raytrace_shader_id,
+				.advised_pool_counts = {
+					[HERO_GFX_DESCRIPTOR_SET_GLOBAL] = 32,
+					[HERO_GFX_DESCRIPTOR_SET_MATERIAL] = 32,
+					[HERO_GFX_DESCRIPTOR_SET_DRAW_CMD] = 32,
+				},
+			},
 			{
 				.shader_id = gfx->terrain_tile_shader_id,
 				.advised_pool_counts = {
@@ -1438,6 +1778,46 @@ HeroResult game_gfx_play_init() {
 			.type = HERO_IMAGE_TYPE_2D,
 			.internal_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
 			.format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
+			.flags = HERO_IMAGE_FLAGS_USED_FOR_COMPUTE | HERO_IMAGE_FLAGS_STORAGE,
+			.samples = HERO_SAMPLE_COUNT_1,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.width = 1920,
+			.height = 1088,
+			.depth = 1,
+			.mip_levels = 1,
+			.array_layers_count = 1,
+		};
+
+		result = hero_image_init(ldev, &setup, &gfx->voxel_raytrace_color_image_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroImageSetup setup = {
+			.type = HERO_IMAGE_TYPE_2D,
+			.internal_format = HERO_IMAGE_FORMAT_R32_SFLOAT,
+			.format = HERO_IMAGE_FORMAT_R32_SFLOAT,
+			.flags = HERO_IMAGE_FLAGS_USED_FOR_COMPUTE | HERO_IMAGE_FLAGS_STORAGE,
+			.samples = HERO_SAMPLE_COUNT_1,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.width = 1920,
+			.height = 1088,
+			.depth = 1,
+			.mip_levels = 1,
+			.array_layers_count = 1,
+		};
+
+		result = hero_image_init(ldev, &setup, &gfx->voxel_raytrace_depth_image_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroImageSetup setup = {
+			.type = HERO_IMAGE_TYPE_2D,
+			.internal_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
+			.format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
 			.flags = HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS | HERO_IMAGE_FLAGS_COLOR_ATTACHMENT | HERO_IMAGE_FLAGS_SAMPLED,
 			.samples = HERO_SAMPLE_COUNT_1,
 			.memory_location = HERO_MEMORY_LOCATION_SHARED,
@@ -1495,6 +1875,27 @@ HeroResult game_gfx_play_init() {
 
 	{
 		HeroShaderGlobalsSetup setup = {
+			.shader_id = gfx->voxel_raytrace_shader_id,
+			.descriptor_pool_id = gfx->descriptor_pool_id,
+		};
+
+		result = hero_shader_globals_init(ldev, &setup, &gfx->voxel_raytrace_shader_globals_id);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_set_uniform_buffer(ldev, gfx->voxel_raytrace_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_GLOBAL_UBO, 0, gfx->uniform_buffer_id, 0);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_set_image_storage(ldev, gfx->voxel_raytrace_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_COLOR_ATTACHMENT_IMAGE, 0, gfx->voxel_raytrace_color_image_id);
+
+		result = hero_shader_globals_set_image_storage(ldev, gfx->voxel_raytrace_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_DEPTH_ATTACHMENT_IMAGE, 0, gfx->voxel_raytrace_depth_image_id);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_update(ldev, gfx->voxel_raytrace_shader_globals_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroShaderGlobalsSetup setup = {
 			.shader_id = gfx->terrain_tile_shader_id,
 			.descriptor_pool_id = gfx->descriptor_pool_id,
 		};
@@ -1540,6 +1941,9 @@ HeroResult game_gfx_play_init() {
 		result = hero_shader_globals_set_uniform_buffer(ldev, gfx->billboard_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_GLOBAL_UBO, 0, gfx->uniform_buffer_id, 0);
 		HERO_RESULT_ASSERT(result);
 
+		result = hero_shader_globals_set_image_sampler(ldev, gfx->billboard_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_BILLBOARD_IMAGE_ATLAS, 0, game.gfx.font_ascii_image_id, game.gfx.clamp_nearest_sampler_id);
+		HERO_RESULT_ASSERT(result);
+
 		result = hero_shader_globals_update(ldev, gfx->billboard_shader_globals_id);
 		HERO_RESULT_ASSERT(result);
 	}
@@ -1573,13 +1977,21 @@ HeroResult game_gfx_play_init() {
 		render_state.viewports_count = 1;
 
 		render_state.rasterization.polygon_mode = HERO_POLYGON_MODE_FILL;
+		render_state.rasterization.cull_mode_flags = HERO_CULL_MODE_FLAGS_BACK;
 		render_state.rasterization.front_face = HERO_FRONT_FACE_CLOCKWISE;
 		render_state.rasterization.line_width = 1.f;
 
 		render_state.multisample.rasterization_samples_count = HERO_SAMPLE_COUNT_1;
 
 		static HeroRenderStateBlendAttachment blend_color_attachment = {0};
+		blend_color_attachment.blend_enable = true;
 		blend_color_attachment.color_write_mask = 0xf;
+		blend_color_attachment.src_color_blend_factor = HERO_BLEND_FACTOR_SRC_ALPHA;
+		blend_color_attachment.dst_color_blend_factor = HERO_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		blend_color_attachment.color_blend_op = HERO_BLEND_OP_ADD;
+		blend_color_attachment.src_alpha_blend_factor = HERO_BLEND_FACTOR_ONE;
+		blend_color_attachment.dst_alpha_blend_factor = HERO_BLEND_FACTOR_ONE;
+		blend_color_attachment.alpha_blend_op = HERO_BLEND_OP_ADD;
 
 		render_state.blend.attachments = &blend_color_attachment;
 		render_state.blend.attachments_count = 1;
@@ -1593,7 +2005,7 @@ HeroResult game_gfx_play_init() {
 		render_state.depth_stencil.front.pass_op = HERO_STENCIL_OP_KEEP;
 		render_state.depth_stencil.front.compare_op = HERO_COMPARE_OP_ALWAYS;
 
-		HeroPipelineSetup setup = {
+		HeroPipelineGraphicsSetup setup = {
 			.render_state = &render_state,
 			.shader_id = gfx->model_shader_id,
 			.render_pass_layout_id = gfx->render_pass_layout_id,
@@ -1601,17 +2013,17 @@ HeroResult game_gfx_play_init() {
 			.cache_id.raw = 0,
 		};
 
-		result = hero_pipeline_init(ldev, &setup, &gfx->model_pipeline_id);
+		result = hero_pipeline_graphics_init(ldev, &setup, &gfx->model_pipeline_id);
 		HERO_RESULT_ASSERT(result);
 
 		setup.shader_id = gfx->terrain_tile_shader_id;
 		setup.vertex_layout_id = gfx->terrain_tile_vertex_layout_id;
-		result = hero_pipeline_init(ldev, &setup, &gfx->terrain_tile_pipeline_id);
+		result = hero_pipeline_graphics_init(ldev, &setup, &gfx->terrain_tile_pipeline_id);
 		HERO_RESULT_ASSERT(result);
 
 		setup.shader_id = gfx->billboard_shader_id;
 		setup.vertex_layout_id = gfx->billboard_vertex_layout_id;
-		result = hero_pipeline_init(ldev, &setup, &gfx->billboard_pipeline_id);
+		result = hero_pipeline_graphics_init(ldev, &setup, &gfx->billboard_pipeline_id);
 		HERO_RESULT_ASSERT(result);
 	}
 
@@ -1712,72 +2124,6 @@ HeroResult game_gfx_play_deinit() {
 	return HERO_SUCCESS;
 }
 
-HeroResult _game_gfx_play_init_voxel_height_map(U32 cell_x, U32 cell_y, F32* tile_height_map) {
-	GameGfxPlay* gfx = &game.gfx.play;
-
-	F32* voxel_height_map;
-	HeroResult result = hero_image_write(game.gfx.ldev, gfx->voxel_height_image_id, NULL, (void**)&voxel_height_map);
-	HERO_RESULT_ASSERT(result);
-
-	U32 tile_x = cell_x * GAME_ISLAND_CELL_AXIS_TILES_COUNT;
-	U32 tile_y = cell_y * GAME_ISLAND_CELL_AXIS_TILES_COUNT;
-	U32 row_start = tile_y * GAME_ISLAND_AXIS_TILES_COUNT + tile_x;
-	U32 next_row_start = row_start + GAME_ISLAND_AXIS_TILES_COUNT;
-
-	F32 tl = tile_height_map[row_start];
-	F32 tr = tile_height_map[row_start];
-	F32 bl = tile_height_map[next_row_start];
-	F32 br = tile_height_map[next_row_start + 1];
-	U32 voxel_start = 0;
-	for_range(y, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
-		for_range(x, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
-
-			F32 tvy = 0.f;
-			F32 tstep = 1.f / (F32)GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
-			U32 voxel_idx = voxel_start;
-			for_range(vy, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
-				F32 tvx = 0.f;
-				for_range(vx, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
-					F32 voxel_height = hero_bilerp(tl, tr, bl, br, tvx, tvy);
-					voxel_height_map[voxel_idx] = voxel_height * 256.f;
-					tvx += tstep;
-					voxel_idx += 1;
-				}
-
-				tvy += tstep;
-
-				// increment to next row
-				voxel_idx += GAME_PLAY_CELL_AXIS_VOXELS_COUNT - GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
-			}
-
-			// increment to next column
-			voxel_start += GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
-
-			if (x + 1 < GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
-				tl = tr;
-				bl = br;
-				tr = tile_height_map[row_start + x + 1];
-				br = tile_height_map[next_row_start + x + 1];
-			}
-		}
-
-		if (y + 1 < GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
-			row_start += GAME_ISLAND_AXIS_TILES_COUNT;
-			tl = tile_height_map[row_start];
-			tr = tile_height_map[row_start + 1];
-
-			next_row_start = row_start + GAME_ISLAND_AXIS_TILES_COUNT;
-			bl = tile_height_map[next_row_start];
-			br = tile_height_map[next_row_start + 1];
-
-			// go to the next row
-			voxel_start = ((y + 1) * GAME_PLAY_CELL_AXIS_VOXELS_COUNT) * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
-		}
-	}
-
-	return HERO_SUCCESS;
-}
-
 HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 	GameGfxPlay* gfx = &game.gfx.play;
 	HeroResult result;
@@ -1788,7 +2134,10 @@ HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 	static int init = 0;
 	if (!init) {
 		init += 1;
-		_game_gfx_play_init_voxel_height_map(cell_x, cell_y, gfx->scene_render_data.tile_height_map);
+		F32* voxel_height_map;
+		HeroResult result = hero_image_write(game.gfx.ldev, gfx->voxel_height_image_id, NULL, (void**)&voxel_height_map);
+		HERO_RESULT_ASSERT(result);
+		HERO_COPY_ELMT_MANY(voxel_height_map, gfx->scene_render_data.voxel_height_map, GAME_PLAY_CELL_AXIS_VOXELS_COUNT * GAME_PLAY_CELL_AXIS_VOXELS_COUNT);
 	}
 
 	GamePlayGlobalUBO* global_ubo;
@@ -1812,6 +2161,10 @@ HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 		mat4x4_mul(&global_ubo->mvp, &world_to_view, &view_to_ndc);
 	}
 
+#if ENABLE_VOXEL_RAYTRACTER
+	result = hero_cmd_compute_dispatch(command_recorder, gfx->voxel_raytrace_shader_id, gfx->voxel_raytrace_shader_globals_id, 1920 / 32, 1088 / 32, 1);
+	HERO_RESULT_ASSERT(result);
+#endif
 	result = hero_cmd_render_pass_start(command_recorder, gfx->render_pass_id, gfx->frame_buffer_id, NULL, NULL);
 	HERO_RESULT_ASSERT(result);
 
@@ -1826,6 +2179,102 @@ HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 
 	result = hero_cmd_draw_end_indexed(command_recorder, gfx->terrain_tile_index_buffer_id, 0, GAME_PLAY_TILE_VOXELS_INDICES_COUNT, 0);
 	HERO_RESULT_ASSERT(result);
+
+	{
+		U32 vertices_count = gfx->scene_render_data.entity_billboards.count * 4;
+		U32 indices_count = gfx->scene_render_data.entity_billboards.count * 6;
+
+		result = hero_buffer_reserve(game.gfx.ldev, gfx->billboard_vertex_buffer_id, vertices_count);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_buffer_reserve(game.gfx.ldev, gfx->billboard_index_buffer_id, indices_count);
+		HERO_RESULT_ASSERT(result);
+
+		GameBillboardVertex* vertices;
+		result = hero_buffer_write(game.gfx.ldev, gfx->billboard_vertex_buffer_id, 0, vertices_count, (void**)&vertices);
+		HERO_RESULT_ASSERT(result);
+
+		U32* indices;
+		result = hero_buffer_write(game.gfx.ldev, gfx->billboard_index_buffer_id, 0, indices_count, (void**)&indices);
+		HERO_RESULT_ASSERT(result);
+
+		Vec3 top_left;
+		Vec3 top_right;
+		Vec3 bottom_right;
+		Vec3 bottom_left;
+		{
+			Vec3 camera_right = vec3_norm(vec3_cross(VEC3_UP, gfx->scene_render_data.camera_forward));
+			Vec3 camera_up = vec3_norm(vec3_cross(gfx->scene_render_data.camera_forward, camera_right));
+
+			F32 billboard_width = 1.f;
+			F32 billboard_height = 1.f;
+
+			Vec3 top = vec3_mul_scalar(camera_up, billboard_height);
+			Vec3 x_offset = vec3_mul_scalar(camera_right, billboard_width);
+
+			top_left = top;
+			top_right = vec3_add(top, x_offset);
+			bottom_right = x_offset;
+			bottom_left = VEC3_ZERO;
+		}
+
+		U32 vertices_start_idx = 0;
+		U32 indices_start_idx = 0;
+		for_range(i, 0, gfx->scene_render_data.entity_billboards.count) {
+			GameRenderEntityBillboard* b = &gfx->scene_render_data.entity_billboards.data[i];
+
+			U32 color = hero_color_init(0xff, 0x66, 0xcc, 0xff);
+			//U32 color = hero_color_init(0xff, 0x66, 0xcc, 0xff);
+			F32 pixel_to_norm_ratio = 1.f / 16.f;
+			F32 uv_x = (F32)(b->ascii & 0xf) * pixel_to_norm_ratio;
+			F32 uv_y = (F32)((b->ascii & 0xf0) >> 4) * pixel_to_norm_ratio;
+			F32 uv_ex = uv_x + pixel_to_norm_ratio;
+			F32 uv_ey = uv_y + pixel_to_norm_ratio;
+
+			vertices[vertices_start_idx + 0] = (GameBillboardVertex) {
+				.pos = vec3_add(top_left, b->position),
+				.uv = VEC2_INIT(uv_x, uv_y),
+				.color = color,
+			};
+
+			vertices[vertices_start_idx + 1] = (GameBillboardVertex) {
+				.pos = vec3_add(top_right, b->position),
+				.uv = VEC2_INIT(uv_ex, uv_y),
+				.color = color,
+			};
+
+			vertices[vertices_start_idx + 2] = (GameBillboardVertex) {
+				.pos = vec3_add(bottom_right, b->position),
+				.uv = VEC2_INIT(uv_ex, uv_ey),
+				.color = color,
+			};
+
+			vertices[vertices_start_idx + 3] = (GameBillboardVertex) {
+				.pos = vec3_add(bottom_left, b->position),
+				.uv = VEC2_INIT(uv_x, uv_ey),
+				.color = color,
+			};
+
+			indices[indices_start_idx + 0] = vertices_start_idx + 0;
+			indices[indices_start_idx + 1] = vertices_start_idx + 1;
+			indices[indices_start_idx + 2] = vertices_start_idx + 2;
+			indices[indices_start_idx + 3] = vertices_start_idx + 2;
+			indices[indices_start_idx + 4] = vertices_start_idx + 3;
+			indices[indices_start_idx + 5] = vertices_start_idx + 0;
+
+			vertices_start_idx += 4;
+			indices_start_idx += 6;
+		}
+
+		result = hero_cmd_draw_start(command_recorder, gfx->billboard_material_id);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_cmd_draw_set_vertex_buffer(command_recorder, gfx->billboard_vertex_buffer_id, 0, 0);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_cmd_draw_end_indexed(command_recorder, gfx->billboard_index_buffer_id, 0, indices_count, 0);
+		HERO_RESULT_ASSERT(result);
+	}
 
 	result = hero_cmd_render_pass_end(command_recorder);
 	HERO_RESULT_ASSERT(result);
@@ -1882,7 +2331,7 @@ void game_gfx_init(void) {
 	result = hero_logical_device_init(physical_device, &setup, &game.gfx.ldev);
 	HERO_RESULT_ASSERT(result);
 
-	result = game_gfx_shader_init("ui", &game.gfx.ui_shader_id);
+	result = game_gfx_shader_init("ui", HERO_SHADER_TYPE_GRAPHICS, &game.gfx.ui_shader_id);
 	HERO_RESULT_ASSERT(result);
 
 	{
@@ -2327,8 +2776,8 @@ int main(int argc, char** argv) {
 		HeroTime frame_start_time = hero_time_now(HERO_TIME_MODE_MONOTONIC);
 		HeroDuration frame_duration = hero_time_diff(frame_start_time, last_frame_start_time);
 
-		F32 dt = hero_duration_to_f32_secs(frame_duration);
-		dt_acc_for_one_sec += dt;
+		game.dt = hero_duration_to_f32_secs(frame_duration);
+		dt_acc_for_one_sec += game.dt;
 		if (dt_acc_for_one_sec >= 1.f) {
 			dt_acc_for_one_sec -= 1.f;
 			printf("fps = %u, ms_per_frame = %f\n", fps, 1.f / fps);

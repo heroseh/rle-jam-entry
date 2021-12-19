@@ -89,7 +89,7 @@ void main() {
 	float NdotL = dot(normal, light_dir);
 	float intensity = max(0.0, -NdotL);
 
-	out_frag_color = color * intensity;
+	out_frag_color = vec4(color.rgb * intensity, 1.0);
 }
 
 #endif // FRAGMENT

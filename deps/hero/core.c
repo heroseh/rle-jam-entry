@@ -2154,12 +2154,29 @@ Vec3 vec3_cross(Vec3 a, Vec3 b) {
 	return VEC3_INIT((a.y * b.z) - (a.z * b.y), (a.z * b.x) - (a.x * b.z), (a.x * b.y) - (a.y * b.x));
 }
 
+Vec3 vec3_perp_x_forward(Vec3 v) { return VEC3_INIT(v.y, -v.x, v.z); }
+Vec3 vec3_perp_x_backward(Vec3 v) { return VEC3_INIT(-v.y, v.x, v.z); }
 Vec3 vec3_perp_y_forward(Vec3 v) { return VEC3_INIT(v.x, -v.z, v.y); }
-Vec3 vec3_perp_y_backward(Vec3 v) { return VEC3_INIT(v.x, v.z, v.y); }
+Vec3 vec3_perp_y_backward(Vec3 v) { return VEC3_INIT(v.x, v.z, -v.y); }
+
 Vec3 vec3_perp_y_left(Vec3 v) { return VEC3_INIT(v.y, -v.x, v.z); }
 Vec3 vec3_perp_y_right(Vec3 v) { return VEC3_INIT(-v.y, v.x, v.z); }
 Vec3 vec3_perp_z_left(Vec3 v) { return VEC3_INIT(-v.z, v.y, v.x); }
 Vec3 vec3_perp_z_right(Vec3 v) { return VEC3_INIT(v.z, v.y, -v.x); }
+
+Vec3 vec3_perp_left(Vec3 v) {
+	return vec3_norm(vec3_cross(v, VEC3_UP));
+}
+Vec3 vec3_perp_right(Vec3 v) {
+	return vec3_norm(vec3_cross(v, VEC3_DOWN));
+}
+
+Vec3 vec3_perp_forward(Vec3 v) {
+	return vec3_norm(vec3_cross(v, VEC3_RIGHT));
+}
+Vec3 vec3_perp_backward(Vec3 v) {
+	return vec3_norm(vec3_cross(v, VEC3_RIGHT));
+}
 
 Vec3 vec3_min(Vec3 a, Vec3 b) { return VEC3_INIT(HERO_MIN(a.x, b.x), HERO_MIN(a.y, b.y), HERO_MIN(a.z, b.z)); }
 Vec3 vec3_max(Vec3 a, Vec3 b) { return VEC3_INIT(HERO_MAX(a.x, b.x), HERO_MAX(a.y, b.y), HERO_MAX(a.z, b.z)); }

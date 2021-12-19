@@ -619,7 +619,7 @@ HeroResult hero_shader_stages_validate(HeroShaderStages* stages) {
 			}
 			break;
 		case HERO_SHADER_TYPE_COMPUTE:
-			if (stages->data.compute.module_id.raw == 0) {
+			if (stages->data.compute.compute.module_id.raw == 0) {
 				return HERO_ERROR(GFX_SHADER_MISSING_COMPUTE);
 			}
 			break;
@@ -1028,7 +1028,7 @@ HeroResult hero_pipeline_cache_deinit(HeroLogicalDevice* ldev, HeroPipelineCache
 //
 // ===========================================
 
-HeroResult hero_pipeline_init(HeroLogicalDevice* ldev, HeroPipelineSetup* setup, HeroPipelineId* id_out) {
+HeroResult hero_pipeline_graphics_init(HeroLogicalDevice* ldev, HeroPipelineGraphicsSetup* setup, HeroPipelineId* id_out) {
 	if (setup->shader_id.raw == 0) {
 		return HERO_ERROR(GFX_PIPELINE_SHADER_ID_CANNOT_BE_NULL);
 	}
@@ -1038,7 +1038,7 @@ HeroResult hero_pipeline_init(HeroLogicalDevice* ldev, HeroPipelineSetup* setup,
 	}
 
 	HeroPipeline* pipeline;
-	HeroResult result = hero_gfx_sys.backend_vtable.pipeline_init(ldev, setup, id_out, &pipeline);
+	HeroResult result = hero_gfx_sys.backend_vtable.pipeline_graphics_init(ldev, setup, id_out, &pipeline);
 	if (result < 0) {
 		return result;
 	}
@@ -1336,6 +1336,9 @@ HeroResult hero_cmd_draw_set_texture(HeroCommandRecorder* command_recorder, U16 
 HeroResult hero_cmd_draw_set_uniform_buffer(HeroCommandRecorder* command_recorder, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
 HeroResult hero_cmd_draw_set_storage_buffer(HeroCommandRecorder* command_recorder, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
 HeroResult hero_cmd_draw_set_dynamic_descriptor_offset(HeroCommandRecorder* command_recorder, U16 binding_idx, U16 elmt_idx, U32 dynamic_offset);
+HeroResult hero_cmd_compute_dispatch(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, HeroShaderGlobalsId shader_globals_id, U32 group_count_x, U32 group_count_y, U32 group_count_z) {
+	return hero_gfx_sys.backend_vtable.cmd_compute_dispatch(command_recorder, compute_shader_id, shader_globals_id, group_count_x, group_count_y, group_count_z);
+}
 
 // ===========================================
 //
@@ -3464,7 +3467,7 @@ HeroResult _hero_vulkan_logical_device_init(HeroPhysicalDevice* physical_device,
 			vk_image_create_info.extent.width = 1;
 			vk_image_create_info.extent.height = 1;
 			vk_image_create_info.extent.depth = 1;
-			vk_image_create_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+			vk_image_create_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 			vk_image_create_info.format = VK_FORMAT_R8_UNORM;
 			vk_image_create_info.imageType = VK_IMAGE_TYPE_2D;
 			vk_image_create_info.samples = 1;
@@ -5176,6 +5179,49 @@ HeroResult _hero_vulkan_shader_init(HeroLogicalDevice* ldev, HeroShaderSetup* se
 		}
 	}
 
+	VkPipeline vk_pipeline = VK_NULL_HANDLE;
+	if (stages->type == HERO_SHADER_TYPE_COMPUTE) {
+		HeroShaderModuleVulkan* shader_module_vulkan;
+		result = hero_object_pool(HeroShaderModuleVulkan, get)(&ldev_vulkan->shader_module_pool, stages->data.compute.compute.module_id, &shader_module_vulkan);
+		if (result < 0) {
+			return result;
+		}
+
+		VkPipelineCache vk_pipeline_cache = VK_NULL_HANDLE;
+		if (stages->data.compute.cache_id.raw) {
+			HeroPipelineCacheVulkan* pipeline_cache_vulkan;
+			result = hero_object_pool(HeroPipelineCacheVulkan, get)(&ldev_vulkan->pipeline_cache_pool, stages->data.compute.cache_id, &pipeline_cache_vulkan);
+			if (result < 0) {
+				return result;
+			}
+
+			vk_pipeline_cache = pipeline_cache_vulkan->handle;
+		}
+
+		VkComputePipelineCreateInfo vk_create_info = {
+			.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.stage = {
+				.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+				.pNext = NULL,
+				.flags = 0,
+				.stage = VK_SHADER_STAGE_COMPUTE_BIT,
+				.module = shader_module_vulkan->handle,
+				.pName = stages->data.compute.compute.backend.spir_v.entry_point_name,
+				.pSpecializationInfo = NULL,
+			},
+			.layout = vk_pipeline_layout,
+			.basePipelineHandle = VK_NULL_HANDLE,
+			.basePipelineIndex = 0,
+		};
+
+		vk_result = ldev_vulkan->vkCreateComputePipelines(ldev_vulkan->handle, vk_pipeline_cache, 1, &vk_create_info, HERO_VULKAN_TODO_ALLOCATOR, &vk_pipeline);
+		if (vk_result < 0) {
+			return _hero_vulkan_convert_from_result(vk_result);
+		}
+	}
+
 	HeroShaderVulkan* shader_vulkan;
 	result = hero_object_pool(HeroShaderVulkan, alloc)(&ldev_vulkan->shader_pool, &shader_vulkan, id_out);
 	if (result < 0) {
@@ -5183,11 +5229,11 @@ HeroResult _hero_vulkan_shader_init(HeroLogicalDevice* ldev, HeroShaderSetup* se
 	}
 
 	shader_vulkan->pipeline_layout = vk_pipeline_layout;
+	shader_vulkan->compute_pipeline = vk_pipeline;
 	HERO_COPY_ARRAY(shader_vulkan->descriptor_set_layouts, descriptor_set_layouts);
 	HERO_COPY_ARRAY(shader_vulkan->descriptor_update_templates, descriptor_update_templates);
 	HERO_COPY_ARRAY(shader_vulkan->descriptors_counts, descriptors_counts);
 	shader_vulkan->descriptor_binding_update_data_indices = binding_update_data_indices;
-	shader_vulkan->descriptors_count = descriptors_count;
 	*out = &shader_vulkan->public_;
 
 	return HERO_SUCCESS;
@@ -6219,7 +6265,7 @@ HeroResult _hero_vulkan_pipeline_cache_deinit(HeroLogicalDevice* ldev, HeroPipel
 	return hero_object_pool(HeroPipelineCacheVulkan, dealloc)(&ldev_vulkan->pipeline_cache_pool, id);
 }
 
-HeroResult _hero_vulkan_pipeline_init(HeroLogicalDevice* ldev, HeroPipelineSetup* setup, HeroPipelineId* id_out, HeroPipeline** out) {
+HeroResult _hero_vulkan_pipeline_graphics_init(HeroLogicalDevice* ldev, HeroPipelineGraphicsSetup* setup, HeroPipelineId* id_out, HeroPipeline** out) {
 	HeroResult result;
 	VkResult vk_result;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
@@ -6496,6 +6542,7 @@ VK_PIPELINE_INIT_SHADER_END: {}
 	}
 
 	pipeline_vulkan->handle = vk_pipeline;
+	pipeline_vulkan->public_.type = HERO_PIPELINE_TYPE_GRAPHICS;
 	*out = &pipeline_vulkan->public_;
 
 	return HERO_SUCCESS;
@@ -7254,6 +7301,7 @@ HeroResult _hero_vulkan_command_recorder_start(HeroLogicalDevice* ldev, HeroComm
 		return result;
 	}
 	HeroCommandRecorder* command_recorder = &command_recorder_vulkan->public_;
+	HERO_ZERO_ELMT(command_recorder_vulkan);
 
 	//
 	// allocate a vulkan command buffer
@@ -7319,7 +7367,6 @@ HeroResult _hero_vulkan_command_recorder_end(HeroCommandRecorder* command_record
 
 	command_pool_buffer_vulkan->command_buffer = command_recorder_vulkan->command_buffer;
 	command_pool_buffer_vulkan->is_static = command_recorder_vulkan->public_.is_static;
-
 	command_recorder_vulkan->command_buffer = VK_NULL_HANDLE;
 	return HERO_SUCCESS;
 }
@@ -7403,9 +7450,9 @@ HeroResult _hero_vulkan_cmd_render_pass_start(HeroCommandRecorder* command_recor
 
 	ldev_vulkan->vkCmdBeginRenderPass(vk_command_buffer, &render_pass_being_info, VK_SUBPASS_CONTENTS_INLINE);
 
-	command_recorder_vulkan->bound_pipeline = VK_NULL_HANDLE;
+	command_recorder_vulkan->bound_pipeline_graphics = VK_NULL_HANDLE;
 	for_range(i, 0, HERO_GFX_DESCRIPTOR_SET_COUNT) {
-		command_recorder_vulkan->bound_descriptor_sets[i] = VK_NULL_HANDLE;
+		command_recorder_vulkan->bound_graphics_descriptor_sets[i] = VK_NULL_HANDLE;
 	}
 	for_range(i, 0, HERO_BUFFER_BINDINGS_CAP) {
 		command_recorder_vulkan->bound_vertex_buffers[i] = VK_NULL_HANDLE;
@@ -7455,6 +7502,10 @@ HeroResult _hero_vulkan_cmd_draw_start(HeroCommandRecorder* command_recorder, He
 		return result;
 	}
 
+	if (pipeline_vulkan->public_.type != HERO_PIPELINE_TYPE_GRAPHICS) {
+		return HERO_ERROR(GFX_PIPELINE_MUST_BE_GRAPHICS);
+	}
+
 	HeroRenderPassVulkan* render_pass_vulkan;
 	result = hero_object_pool(HeroRenderPassVulkan, get)(&ldev_vulkan->render_pass_pool, command_recorder->render_pass_id, &render_pass_vulkan);
 	if (result < 0) {
@@ -7477,12 +7528,13 @@ HeroResult _hero_vulkan_cmd_draw_start(HeroCommandRecorder* command_recorder, He
 		return HERO_ERROR(GFX_RENDER_PASS_LAYOUT_MISMATCH);
 	}
 
-	if (pipeline_vulkan->handle != command_recorder_vulkan->bound_pipeline) {
+	if (pipeline_vulkan->handle != command_recorder_vulkan->bound_pipeline_graphics) {
 		ldev_vulkan->vkCmdBindPipeline(vk_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_vulkan->handle);
+		command_recorder_vulkan->bound_pipeline_graphics = pipeline_vulkan->handle;
 	}
 
-	if (command_recorder_vulkan->bound_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_GLOBAL] != shader_globals_vulkan->descriptor_set.handle) {
-		command_recorder_vulkan->bound_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_GLOBAL] = shader_globals_vulkan->descriptor_set.handle;
+	if (command_recorder_vulkan->bound_graphics_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_GLOBAL] != shader_globals_vulkan->descriptor_set.handle) {
+		command_recorder_vulkan->bound_graphics_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_GLOBAL] = shader_globals_vulkan->descriptor_set.handle;
 
 		//
 		// TODO
@@ -7501,8 +7553,8 @@ HeroResult _hero_vulkan_cmd_draw_start(HeroCommandRecorder* command_recorder, He
 		);
 	}
 
-	if (command_recorder_vulkan->bound_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_MATERIAL] != material_vulkan->descriptor_set.handle) {
-		command_recorder_vulkan->bound_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_MATERIAL] = material_vulkan->descriptor_set.handle;
+	if (command_recorder_vulkan->bound_graphics_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_MATERIAL] != material_vulkan->descriptor_set.handle) {
+		command_recorder_vulkan->bound_graphics_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_MATERIAL] = material_vulkan->descriptor_set.handle;
 
 		//
 		// TODO
@@ -7643,6 +7695,58 @@ HeroResult _hero_vulkan_cmd_draw_set_instances(HeroCommandRecorder* command_reco
 	return HERO_SUCCESS;
 }
 
+HeroResult _hero_vulkan_cmd_compute_dispatch(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, HeroShaderGlobalsId shader_globals_id, U32 group_count_x, U32 group_count_y, U32 group_count_z) {
+	HeroResult result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+	HeroCommandRecorderVulkan* command_recorder_vulkan = (HeroCommandRecorderVulkan*)command_recorder;
+	VkCommandBuffer vk_command_buffer = command_recorder_vulkan->command_buffer;
+
+	HeroShaderVulkan* shader_vulkan;
+	result = hero_object_pool(HeroShaderVulkan, get)(&ldev_vulkan->shader_pool, compute_shader_id, &shader_vulkan);
+	if (result < 0) {
+		return result;
+	}
+
+	HeroShaderGlobalsVulkan* shader_globals_vulkan;
+	result = hero_object_pool(HeroShaderGlobalsVulkan, get)(&ldev_vulkan->shader_globals_pool, shader_globals_id, &shader_globals_vulkan);
+	if (result < 0) {
+		return result;
+	}
+
+	if (shader_vulkan->public_.stages.type != HERO_SHADER_TYPE_COMPUTE) {
+		return HERO_ERROR(GFX_SHADER_MUST_BE_COMPUTE);
+	}
+
+	if (command_recorder_vulkan->bound_pipeline_compute != shader_vulkan->compute_pipeline) {
+		ldev_vulkan->vkCmdBindPipeline(vk_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader_vulkan->compute_pipeline);
+		command_recorder_vulkan->bound_pipeline_compute = shader_vulkan->compute_pipeline;
+	}
+
+	if (command_recorder_vulkan->bound_compute_descriptor_set != shader_globals_vulkan->descriptor_set.handle) {
+		command_recorder_vulkan->bound_compute_descriptor_set = shader_globals_vulkan->descriptor_set.handle;
+
+		//
+		// TODO
+		U32 dynamic_descriptors_count = 0;
+		U32* dynamic_descriptor_offsets = NULL;
+
+		ldev_vulkan->vkCmdBindDescriptorSets(
+			vk_command_buffer,
+			VK_PIPELINE_BIND_POINT_COMPUTE,
+			shader_vulkan->pipeline_layout,
+			HERO_GFX_DESCRIPTOR_SET_GLOBAL,
+			1,
+			&shader_globals_vulkan->descriptor_set.handle,
+			dynamic_descriptors_count,
+			dynamic_descriptor_offsets
+		);
+	}
+
+	ldev_vulkan->vkCmdDispatch(vk_command_buffer, group_count_x, group_count_y, group_count_z);
+
+	return HERO_SUCCESS;
+}
+
 HeroGfxSysVulkan hero_gfx_sys_vulkan;
 
 #endif // HERO_VULKAN_ENABLE
@@ -7719,7 +7823,7 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.frame_buffer_get = _hero_vulkan_frame_buffer_get;
 			hero_gfx_sys.backend_vtable.pipeline_cache_init = _hero_vulkan_pipeline_cache_init;
 			hero_gfx_sys.backend_vtable.pipeline_cache_deinit = _hero_vulkan_pipeline_cache_deinit;
-			hero_gfx_sys.backend_vtable.pipeline_init = _hero_vulkan_pipeline_init;
+			hero_gfx_sys.backend_vtable.pipeline_graphics_init = _hero_vulkan_pipeline_graphics_init;
 			hero_gfx_sys.backend_vtable.pipeline_deinit = _hero_vulkan_pipeline_deinit;
 			hero_gfx_sys.backend_vtable.pipeline_get = _hero_vulkan_pipeline_get;
 			hero_gfx_sys.backend_vtable.material_init = _hero_vulkan_material_init;
@@ -7745,6 +7849,7 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.cmd_draw_set_vertex_buffer = _hero_vulkan_cmd_draw_set_vertex_buffer;
 			hero_gfx_sys.backend_vtable.cmd_draw_set_push_constants = _hero_vulkan_cmd_draw_set_push_constants;
 			hero_gfx_sys.backend_vtable.cmd_draw_set_instances = _hero_vulkan_cmd_draw_set_instances;
+			hero_gfx_sys.backend_vtable.cmd_compute_dispatch = _hero_vulkan_cmd_compute_dispatch;
 			result = _hero_vulkan_init(setup);
 			break;
 		};

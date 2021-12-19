@@ -55,6 +55,7 @@ enum {
 	HERO_ERROR_GFX_SHADER_MISSING_FRAGMENT,
 	HERO_ERROR_GFX_SHADER_MISSING_MESH,
 	HERO_ERROR_GFX_SHADER_MISSING_COMPUTE,
+	HERO_ERROR_GFX_SHADER_MUST_BE_COMPUTE,
 
 	HERO_ERROR_GFX_RENDER_PASS_LAYOUT_MISMATCH,
 
@@ -67,6 +68,10 @@ enum {
 
 	HERO_ERROR_GFX_PIPELINE_SHADER_ID_CANNOT_BE_NULL,
 	HERO_ERROR_GFX_PIPELINE_RENDER_PASS_LAYOUT_ID_CANNOT_BE_NULL,
+	HERO_ERROR_GFX_PIPELINE_SHADER_MUST_BE_COMPUTE,
+
+	HERO_ERROR_GFX_PIPELINE_MUST_BE_GRAPHICS,
+	HERO_ERROR_GFX_PIPELINE_MUST_BE_COMPUTE,
 
 	HERO_ERROR_GFX_MATERIAL_PIPELINE_ID_CANNOT_BE_NULL,
 	HERO_ERROR_GFX_MATERIAL_SHADER_GLOBALS_ID_CANNOT_BE_NULL,
@@ -918,7 +923,10 @@ typedef struct HeroShaderStages HeroShaderStages;
 struct HeroShaderStages {
 	HeroShaderType type;
 	union {
-		HeroShaderStage compute;
+		struct {
+			HeroShaderStage compute;
+			HeroPipelineCacheId cache_id;
+		} compute;
 		struct {
 			HeroShaderStage vertex;
 			HeroShaderStage tessellation_control;
@@ -1268,15 +1276,22 @@ HeroResult hero_pipeline_cache_deinit(HeroLogicalDevice* ldev, HeroPipelineCache
 //
 // ===========================================
 
+typedef U8 HeroPipelineType;
+enum {
+	HERO_PIPELINE_TYPE_GRAPHICS,
+	HERO_PIPELINE_TYPE_COMPUTE,
+};
+
 typedef struct HeroPipeline HeroPipeline;
 struct HeroPipeline {
+	HeroPipelineType type;
 	HeroShaderId shader_id;
 	HeroRenderPassLayoutId render_pass_layout_id;
 	HeroVertexLayoutId vertex_layout_id;
 };
 
-typedef struct HeroPipelineSetup HeroPipelineSetup;
-struct HeroPipelineSetup {
+typedef struct HeroPipelineGraphicsSetup HeroPipelineGraphicsSetup;
+struct HeroPipelineGraphicsSetup {
 	HeroRenderState* render_state;
 	HeroShaderId shader_id;
 	HeroRenderPassLayoutId render_pass_layout_id;
@@ -1284,7 +1299,7 @@ struct HeroPipelineSetup {
 	HeroPipelineCacheId cache_id;
 };
 
-HeroResult hero_pipeline_init(HeroLogicalDevice* ldev, HeroPipelineSetup* setup, HeroPipelineId* id_out);
+HeroResult hero_pipeline_graphics_init(HeroLogicalDevice* ldev, HeroPipelineGraphicsSetup* setup, HeroPipelineId* id_out);
 HeroResult hero_pipeline_deinit(HeroLogicalDevice* ldev, HeroPipelineId id);
 HeroResult hero_pipeline_get(HeroLogicalDevice* ldev, HeroPipelineId id, HeroPipeline** out);
 
@@ -1419,6 +1434,8 @@ HeroResult hero_cmd_draw_set_texture(HeroCommandRecorder* command_recorder, U16 
 HeroResult hero_cmd_draw_set_uniform_buffer(HeroCommandRecorder* command_recorder, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
 HeroResult hero_cmd_draw_set_storage_buffer(HeroCommandRecorder* command_recorder, U16 binding_idx, U16 elmt_idx, HeroBufferId buffer_id, U64 buffer_offset);
 HeroResult hero_cmd_draw_set_dynamic_descriptor_offset(HeroCommandRecorder* command_recorder, U16 binding_idx, U16 elmt_idx, U32 dynamic_offset);
+
+HeroResult hero_cmd_compute_dispatch(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, HeroShaderGlobalsId shader_globals_id, U32 group_count_x, U32 group_count_y, U32 group_count_z);
 
 // ===========================================
 //
@@ -1711,7 +1728,7 @@ typedef HeroResult (*HeroFrameBufferGetFn)(HeroLogicalDevice* ldev, HeroFrameBuf
 typedef HeroResult (*HeroPipelineCacheInitFn)(HeroLogicalDevice* ldev, HeroPipelineCacheSetup* setup, HeroPipelineCacheId* id_out);
 typedef HeroResult (*HeroPipelineCacheDeinitFn)(HeroLogicalDevice* ldev, HeroPipelineCacheId id);
 
-typedef HeroResult (*HeroPipelineInitFn)(HeroLogicalDevice* ldev, HeroPipelineSetup* setup, HeroPipelineId* id_out, HeroPipeline** out);
+typedef HeroResult (*HeroPipelineGraphicsInitFn)(HeroLogicalDevice* ldev, HeroPipelineGraphicsSetup* setup, HeroPipelineId* id_out, HeroPipeline** out);
 typedef HeroResult (*HeroPipelineDeinitFn)(HeroLogicalDevice* ldev, HeroPipelineId id, HeroPipeline* pipeline);
 typedef HeroResult (*HeroPipelineGetFn)(HeroLogicalDevice* ldev, HeroPipelineId id, HeroPipeline** out);
 
@@ -1741,6 +1758,7 @@ typedef HeroResult (*HeroCmdDrawEndIndexedFn)(HeroCommandRecorder* command_recor
 typedef HeroResult (*HeroCmdDrawSetVertexBufferFn)(HeroCommandRecorder* command_recorder, HeroBufferId buffer_id, U32 binding, U64 offset);
 typedef HeroResult (*HeroCmdDrawSetPushConstantsFn)(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size);
 typedef HeroResult (*HeroCmdDrawSetInstancesFn)(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count);
+typedef HeroResult (*HeroCmdComputeDispatchFn)(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, HeroShaderGlobalsId shader_globals_id, U32 group_count_x, U32 group_count_y, U32 group_count_z);
 
 typedef struct HeroGfxBackendVTable HeroGfxBackendVTable;
 struct HeroGfxBackendVTable {
@@ -1797,7 +1815,7 @@ struct HeroGfxBackendVTable {
 	HeroFrameBufferGetFn                                frame_buffer_get;
 	HeroPipelineCacheInitFn                             pipeline_cache_init;
 	HeroPipelineCacheDeinitFn                           pipeline_cache_deinit;
-	HeroPipelineInitFn                                  pipeline_init;
+	HeroPipelineGraphicsInitFn                          pipeline_graphics_init;
 	HeroPipelineDeinitFn                                pipeline_deinit;
 	HeroPipelineGetFn                                   pipeline_get;
 	HeroMaterialInitFn                                  material_init;
@@ -1823,6 +1841,7 @@ struct HeroGfxBackendVTable {
 	HeroCmdDrawSetVertexBufferFn                        cmd_draw_set_vertex_buffer;
 	HeroCmdDrawSetPushConstantsFn                       cmd_draw_set_push_constants;
 	HeroCmdDrawSetInstancesFn                           cmd_draw_set_instances;
+	HeroCmdComputeDispatchFn                            cmd_compute_dispatch;
 };
 
 // ===========================================
