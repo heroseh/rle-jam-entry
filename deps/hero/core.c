@@ -2641,17 +2641,26 @@ void mat4x4_mul_quat(Mat4x4* out, Mat4x4* m, Quat q) {
 
 Vec3 mat4x4_mul_point(Mat4x4* m, Vec3 pt) {
 	return VEC3_INIT(
-		(pt.x * m->col[0].x) + (pt.y * m->col[1].y) + (pt.z * m->col[2].z) + m->col[3].x,
-		(pt.x * m->col[1].x) + (pt.y * m->col[1].y) + (pt.z * m->col[2].z) + m->col[3].y,
-		(pt.x * m->col[2].x) + (pt.y * m->col[1].y) + (pt.z * m->col[2].z) + m->col[3].z
+		(pt.x * m->col[0].x) + (pt.y * m->col[1].x) + (pt.z * m->col[2].x) + m->col[3].x,
+		(pt.x * m->col[0].y) + (pt.y * m->col[1].y) + (pt.z * m->col[2].y) + m->col[3].y,
+		(pt.x * m->col[0].z) + (pt.y * m->col[1].z) + (pt.z * m->col[2].z) + m->col[3].z
 	);
 }
 
 Vec3 mat4x4_mul_vector(Mat4x4* m, Vec3 v) {
 	return VEC3_INIT(
-		(v.x * m->col[0].x) + (v.y * m->col[1].y) + (v.z * m->col[2].z),
-		(v.x * m->col[1].x) + (v.y * m->col[1].y) + (v.z * m->col[2].z),
-		(v.x * m->col[2].x) + (v.y * m->col[1].y) + (v.z * m->col[2].z)
+		(v.x * m->col[0].x) + (v.y * m->col[1].x) + (v.z * m->col[2].x),
+		(v.x * m->col[0].y) + (v.y * m->col[1].y) + (v.z * m->col[2].y),
+		(v.x * m->col[0].z) + (v.y * m->col[1].z) + (v.z * m->col[2].z)
+	);
+}
+
+Vec4 mat4x4_mul_vec4(Mat4x4* m, Vec4 v) {
+	return VEC4_INIT(
+		(v.x * m->col[0].x) + (v.y * m->col[1].x) + (v.z * m->col[2].x) + (v.w * m->col[3].x),
+		(v.x * m->col[0].y) + (v.y * m->col[1].y) + (v.z * m->col[2].y) + (v.w * m->col[3].y),
+		(v.x * m->col[0].z) + (v.y * m->col[1].z) + (v.z * m->col[2].z) + (v.w * m->col[3].z),
+		(v.x * m->col[0].w) + (v.y * m->col[1].w) + (v.z * m->col[2].w) + (v.w * m->col[3].w)
 	);
 }
 

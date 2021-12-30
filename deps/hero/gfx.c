@@ -1321,7 +1321,13 @@ HeroResult hero_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder
 	return hero_gfx_sys.backend_vtable.cmd_draw_set_vertex_buffer(command_recorder, buffer_id, binding, offset);
 }
 
-HeroResult hero_cmd_draw_set_push_constants(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size);
+HeroResult hero_cmd_draw_set_push_constants(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size) {
+	if (command_recorder->material_id.raw == 0) {
+		return HERO_ERROR(NOT_STARTED);
+	}
+
+	return hero_gfx_sys.backend_vtable.cmd_draw_set_push_constants(command_recorder, data, offset, size);
+}
 
 HeroResult hero_cmd_draw_set_instances(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count) {
 	if (command_recorder->material_id.raw == 0) {
@@ -5012,6 +5018,8 @@ HeroResult _hero_vulkan_shader_metadata_calculate(HeroLogicalDevice* ldev, HeroS
 
 	qsort(descriptor_bindings, inspect.key_to_descriptor_map.count, sizeof(HeroSpirVDescriptorBinding), descriptor_binding_sort_fn);
 
+	metadata->spir_v.push_constants_size = inspect.push_constants_size;
+
 	*out = metadata;
 	return HERO_SUCCESS;
 }
@@ -7577,6 +7585,7 @@ HeroResult _hero_vulkan_cmd_draw_start(HeroCommandRecorder* command_recorder, He
 	command_recorder_vulkan->vertex_buffer_binding_end = 0;
 	command_recorder_vulkan->instances_start_idx = 0;
 	command_recorder_vulkan->instances_count = 1;
+	command_recorder_vulkan->pipeline_layout = shader_vulkan->pipeline_layout;
 
 	return HERO_SUCCESS;
 }
@@ -7682,7 +7691,14 @@ HeroResult _hero_vulkan_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_
 }
 
 HeroResult _hero_vulkan_cmd_draw_set_push_constants(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size) {
-	HERO_ABORT("TODO");
+	HeroCommandRecorderVulkan* command_recorder_vulkan = (HeroCommandRecorderVulkan*)command_recorder;
+	VkCommandBuffer vk_command_buffer = command_recorder_vulkan->command_buffer;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+
+	VkShaderStageFlags stage_flags = VK_SHADER_STAGE_ALL_GRAPHICS; // TODO get from shader metadata
+	VkPipelineLayout pipeline_layout = command_recorder_vulkan->pipeline_layout;
+	ldev_vulkan->vkCmdPushConstants(vk_command_buffer, pipeline_layout, stage_flags, offset, size, data);
+
 	return HERO_SUCCESS;
 }
 

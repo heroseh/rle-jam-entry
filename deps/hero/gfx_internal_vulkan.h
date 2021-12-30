@@ -173,6 +173,7 @@ typedef struct HeroCommandPoolBufferVulkan HeroCommandPoolBufferVulkan;
 	HERO_VULKAN_DEVICE_FN(vkCmdCopyBuffer) \
 	HERO_VULKAN_DEVICE_FN(vkCmdCopyBufferToImage) \
 	HERO_VULKAN_DEVICE_FN(vkCmdClearAttachments) \
+	HERO_VULKAN_DEVICE_FN(vkCmdPushConstants) \
 	HERO_VULKAN_DEVICE_FN(vkQueueSubmit) \
 	HERO_VULKAN_DEVICE_FN(vkQueuePresentKHR) \
 	HERO_VULKAN_DEVICE_FN(vkDeviceWaitIdle) \
@@ -515,6 +516,7 @@ struct HeroCommandRecorderVulkan {
 	VkCommandBuffer command_buffer;
 	VkPipeline bound_pipeline_graphics;
 	VkPipeline bound_pipeline_compute;
+	VkPipelineLayout pipeline_layout;
 	VkDescriptorSet bound_graphics_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_COUNT];
 	VkDescriptorSet bound_compute_descriptor_set;
 	VkBuffer bound_vertex_buffers[HERO_BUFFER_BINDINGS_CAP];

@@ -81,7 +81,7 @@ void main() {
 	F32 height = texture(u_tile_height_map, f_uv).r;
 	vec3 color;
 	if (show_height_map == 1) {
-		color = vec3(height);
+		color = vec3(height / 256.0);
 	} else {
 		if (height <= deep_sea_max) {
 			vec3 low = vec3(0.0, 0.20, 0.34);

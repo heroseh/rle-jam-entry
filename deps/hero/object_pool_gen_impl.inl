@@ -72,7 +72,7 @@ static inline HeroResult HERO_OBJECT_POOL_FN(iter_next)(HERO_OBJECT_POOL* object
 }
 
 static inline HeroResult HERO_OBJECT_POOL_FN(iter_prev)(HERO_OBJECT_POOL* object_pool, HERO_OBJECT_ID_TYPE* id_mut, HERO_OBJECT_TYPE** ptr_out) {
-	return _hero_object_pool_iter_next((HeroObjectPool*)object_pool, &id_mut->raw, sizeof(HERO_OBJECT_TYPE), HERO_OBJECT_ID_IDX_BITS, (void**)ptr_out);
+	return _hero_object_pool_iter_prev((HeroObjectPool*)object_pool, &id_mut->raw, sizeof(HERO_OBJECT_TYPE), HERO_OBJECT_ID_IDX_BITS, (void**)ptr_out);
 }
 
 #undef HERO_OBJECT_ID_TYPE

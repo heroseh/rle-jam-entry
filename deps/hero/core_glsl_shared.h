@@ -281,7 +281,7 @@ HERO_INLINE void hero_bitfield_insert_s64(U64* bits, S64 value, U32 bit_shift, U
 )
 
 #define hero_color_chan_get(color, chan) (((color) >> (chan)) & 0xff)
-#define hero_color_chan_set(color, chan, value) (hero_color_chan_clear(color) | (v << (chan)))
+#define hero_color_chan_set(color, chan, value) (hero_color_chan_clear(color, chan) | (value << (chan)))
 #define hero_color_chan_clear(color, chan) ((color) & ~(0xff << chan))
 #define hero_color_r(color) (((color) >> HERO_COLOR_CHAN_R) & 0xff)
 #define hero_color_g(color) (((color) >> HERO_COLOR_CHAN_G) & 0xff)

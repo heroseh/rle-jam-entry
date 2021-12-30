@@ -93,6 +93,13 @@ enum {
 	HERO_UI_IMAGE_SCALE_MODE_NONE,         // image is not scaled, the original size is used.
 };
 
+typedef U8 HeroUIImageFlip;
+enum {
+	HERO_UI_IMAGE_FLIP_NONE = 0,
+	HERO_UI_IMAGE_FLIP_X =    0x1,
+	HERO_UI_IMAGE_FLIP_Y =    0x2,
+};
+
 typedef U8 HeroUIFocusState;
 enum {
 	HERO_UI_FOCUS_STATE_NONE = 0x0,
@@ -106,6 +113,17 @@ enum {
 	HERO_UI_FOCUS_STATE_HELD = 0x8,
 	// signals has been released this frame
 	HERO_UI_FOCUS_STATE_RELEASED = 0x10,
+};
+
+typedef U8 HeroUIAlign;
+enum {
+	HERO_UI_ALIGN_X_CENTER = 0x0,
+	HERO_UI_ALIGN_X_LEFT =   0x1,
+	HERO_UI_ALIGN_X_RIGHT =  0x3,
+
+	HERO_UI_ALIGN_Y_CENTER = 0x0,
+	HERO_UI_ALIGN_Y_TOP =    0x4,
+	HERO_UI_ALIGN_Y_BOTTOM = 0xC,
 };
 
 // ===========================================
@@ -188,14 +206,17 @@ typedef U32 HeroUIWidgetSibId;
 
 typedef U32 HeroUIWidgetFlags;
 enum {
-	HERO_UI_WIDGET_FLAGS_CREATED_THIS_FRAME =            0x1,
-	HERO_UI_WIDGET_FLAGS_IS_FOCUSABLE =                  0x2,
-	HERO_UI_WIDGET_FLAGS_IS_PRESSABLE =                  0x4,
-	HERO_UI_WIDGET_FLAGS_IS_SELECTABLE =                 0x8,
-	HERO_UI_WIDGET_FLAGS_IS_TOGGLEABLE =                0x10,
-	HERO_UI_WIDGET_FLAGS_CHILD_HAS_CUT_VERTICAL =       0x20,
-	HERO_UI_WIDGET_FLAGS_CHILD_HAS_CUT_HORIZONTAL =     0x40,
-	HERO_UI_WIDGET_FLAGS_CHILD_HAS_CUT_CENTER =         0x80,
+	HERO_UI_WIDGET_FLAGS_CREATED_THIS_FRAME =             0x1,
+	HERO_UI_WIDGET_FLAGS_IS_FOCUSABLE =                   0x2,
+	HERO_UI_WIDGET_FLAGS_IS_PRESSABLE =                   0x4,
+	HERO_UI_WIDGET_FLAGS_IS_SELECTABLE =                  0x8,
+	HERO_UI_WIDGET_FLAGS_IS_TOGGLEABLE =                 0x10,
+	HERO_UI_WIDGET_FLAGS_CHILD_HAS_CUT_VERTICAL =        0x20,
+	HERO_UI_WIDGET_FLAGS_CHILD_HAS_CUT_HORIZONTAL =      0x40,
+	HERO_UI_WIDGET_FLAGS_CHILD_HAS_CUT_CENTER =          0x80,
+	HERO_UI_WIDGET_FLAGS_NEXT_LAYER =                   0x100,
+	HERO_UI_WIDGET_FLAGS_CUSTOM_OFFSET =                0x200,
+	HERO_UI_WIDGET_FLAGS_FORCE_NEXT_STATE =             0x400,
 };
 
 typedef U8 HeroUIWidgetState;
@@ -239,9 +260,13 @@ struct HeroUIWidget {
 	HeroColor            image_bg_color;
 	HeroColor            image_fg_color;
 	HeroUIImageScaleMode image_scale_mode;
+	HeroUIImageFlip      image_flip;
 	Vec2                 image_size;
 	bool                 image_grayscale;
 	HeroUIFocusState     focus_state;
+	Vec2                 custom_offset;
+	F32                  custom_perp_cut_length;
+	HeroUIAlign          custom_align;
 };
 
 HeroResult hero_ui_widget_get(HeroUIWindow* window, HeroUIWidgetId id, HeroUIWidget** ptr_out);
@@ -312,11 +337,15 @@ HeroResult hero_ui_widget_draw_circle_border(HeroUIWindow* window, Vec2 center_p
 
 typedef struct HeroUIWindowBuild HeroUIWindowBuild;
 struct HeroUIWindowBuild {
-	HeroUIWidget* parent;
-	HeroUIWidget* sibling_prev;
-	HeroUIWidgetId parent_id;
-	HeroUIWidgetId sibling_prev_id;
-	HeroGfxFrameIdx last_updated_frame_idx;
+	HeroUIWidget*     parent;
+	HeroUIWidget*     sibling_prev;
+	HeroUIWidgetId    parent_id;
+	HeroUIWidgetId    sibling_prev_id;
+	HeroGfxFrameIdx   last_updated_frame_idx;
+	Vec2              custom_offset;
+	HeroUIAlign       custom_align;
+	F32               custom_perp_cut_length;
+	HeroUIWidgetState next_forced_state;
 
 	HeroUIWidgetFlags next_widget_flags;
 };
@@ -450,13 +479,18 @@ HeroUIWidgetState hero_ui_widget_state(HeroUIWindow* window, HeroUIWidgetId widg
 //
 // ===========================================
 
+void hero_ui_widget_next_layer_start(HeroUIWindow* window, HeroUIWidgetSibId sib_id);
+void hero_ui_widget_next_layer_end(HeroUIWindow* window);
+void hero_ui_widget_custom_offset(HeroUIWindow* window, Vec2 offset, F32 perp_cut_length, HeroUIAlign align);
+void hero_ui_widget_next_forced_state(HeroUIWindow* window, HeroUIWidgetState state);
+
 HeroUIWidgetId hero_ui_box_start(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIWidgetStyle* styles);
 void hero_ui_box_end(HeroUIWindow* window);
 HeroUIWidgetId hero_ui_box(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIWidgetStyle* styles);
 HeroResult hero_ui_box_render(HeroUIWindow* window, HeroUIWidget* widget);
 
-HeroUIWidgetId hero_ui_image(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroUIImageId image_id, HeroColor image_tint, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIWidgetStyle* styles);
-HeroUIWidgetId hero_ui_image_grayscale(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroUIImageId image_id, HeroColor bg_color, HeroColor fg_color, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIWidgetStyle* styles);
+HeroUIWidgetId hero_ui_image(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroUIImageId image_id, HeroColor image_tint, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIImageFlip flip, HeroUIWidgetStyle* styles);
+HeroUIWidgetId hero_ui_image_grayscale(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroUIImageId image_id, HeroColor bg_color, HeroColor fg_color, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIImageFlip flip, HeroUIWidgetStyle* styles);
 HeroResult hero_ui_image_render(HeroUIWindow* window, HeroUIWidget* widget);
 
 HeroUIWidgetId hero_ui_text(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroString string, HeroUIWidgetStyle* styles);
@@ -467,7 +501,8 @@ void hero_ui_button_end(HeroUIWindow* window);
 
 HeroUIWidgetId hero_ui_text_button(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroString string, HeroUIWidgetStyle* styles);
 HeroUIWidgetId hero_ui_text_toggle_button(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroString string, HeroUIWidgetStyle* styles);
-HeroUIWidgetId hero_ui_image_button(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIImageId image_id, HeroColor image_tint, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIWidgetStyle* styles);
+HeroUIWidgetId hero_ui_image_button(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIImageId image_id, HeroColor image_tint, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIImageFlip flip, HeroUIWidgetStyle* styles);
+HeroUIWidgetId hero_ui_image_grayscale_button(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIImageId image_id, HeroColor bg_color, HeroColor fg_color, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIImageFlip flip, HeroUIWidgetStyle* styles);
 
 // ===========================================
 //

@@ -213,6 +213,7 @@ void _hero_assert_failed(const char* cond, const char* file, int line, const cha
 HERO_NORETURN void _hero_abort(const char* file, int line, const char* message, ...);
 
 #define for_range(i, start, end) for (Uptr i = start; i < end; i += 1)
+#define for_range_s(i, start, end) for (Sptr i = start; i < end; i += 1)
 
 // ===========================================
 //
@@ -240,7 +241,7 @@ static inline F32 hero_bilerp(F32 tl, F32 tr, F32 bl, F32 br, F32 tx, F32 ty){
 static inline bool hero_approx_eq(F32 a, F32 b) { return fabs(a - b) <= HERO_EPSILON; }
 static inline F32 hero_sign(F32 v) { return copysignf(1.f, v); }
 
-#define HERO_ENUM_FLAG(value) (1 << (value))
+#define ENUM_FLAG(value) (1 << (value))
 
 #define HERO_BITSET_CONTAINS_ALL(bitset, flags) (((bitset) & (flags)) == (bitset))
 #define HERO_BITSET_CONTAINS_ANY(bitset, flags) (((bitset) & (flags)) != 0)
@@ -1371,6 +1372,7 @@ void mat4x4_mul(Mat4x4* out, Mat4x4* a, Mat4x4* b);
 void mat4x4_mul_quat(Mat4x4* out, Mat4x4* m, Quat q); // must be an orthoganal matrix
 Vec3 mat4x4_mul_point(Mat4x4* m, Vec3 pt);
 Vec3 mat4x4_mul_vector(Mat4x4* m, Vec3 v);
+Vec4 mat4x4_mul_vec4(Mat4x4* m, Vec4 v);
 
 // ===========================================
 //

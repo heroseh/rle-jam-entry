@@ -85,8 +85,8 @@ float signed_distance_aabb(vec2 coord, vec2 half_size, float radius) {
 	return length(max(diff, 0.0)) + min(max(diff.x, diff.y), 0.0) - radius;
 }
 
-float signed_distance_op_onion(float d, float radius) {
-	return abs(d) - radius;
+float signed_distance_op_border(float d, float radius) {
+   return abs(d - radius / 2.0) - radius / 2.0;
 }
 
 void main() {
@@ -106,7 +106,7 @@ void main() {
 			F32 border_width = f_uv.y;
 			float d = signed_distance_aabb(relative_position, half_size - border_width, radius);
 			if (draw_type == HERO_UI_DRAW_CMD_TYPE_AABB_BORDER) {
-				d = signed_distance_op_onion(d, border_width);
+				d = signed_distance_op_border(d, border_width);
 			}
 			if (d >= 0.0) {
 				discard;
@@ -141,7 +141,7 @@ void main() {
 			float d = signed_distance_circle(relative_position, radius);
 			if (draw_type == HERO_UI_DRAW_CMD_TYPE_CIRCLE_BORDER) {
 				F32 border_width = f_uv.y;
-				d = signed_distance_op_onion(d, border_width);
+				d = signed_distance_op_border(d, border_width);
 			}
 			if (d >= 0.0) {
 				discard;

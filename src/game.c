@@ -2,8 +2,15 @@
 
 #define ENABLE_VOXEL_RAYTRACTER 0
 #define GAME_ENTITIES_CAP 128
-#define GAME_ENTITY_MOVE_SPEED 2.5f
-#define GAME_CAMERA_TARGET_OFFSET VEC3_INIT(0.5f, 10.f, -10.f)
+#define GAME_PLAYER_MOVE_SPEED 3.f
+#define GAME_CAMERA_TARGET_OFFSET VEC3_INIT(0.5f, 8.f, -10.f)
+#define GAME_MOVE_RADIUS_COLOR_VALID hero_color_init(0x20, 0xaa, 0x30, 0xff)
+#define GAME_MOVE_RADIUS_COLOR_VALID_SPLASH hero_color_init(0x20, 0x70, 0xaa, 0xff)
+#define GAME_MOVE_RADIUS_COLOR_INVALID hero_color_init(0xff, 0x20, 0x30, 0xff)
+#define GAME_MOVE_RADIUS_COLOR_TARGET hero_color_init(0x00, 0x66, 0x10, 0xff)
+#define GAME_MOVE_RADIUS_COLOR_TARGET_SPLASH hero_color_init(0x00, 0x20, 0x66, 0xff)
+#define GAME_PLAYER_MOVE_ANIMATE_SECS 1.f
+#define GAME_PLAYER_AIM_DIRECTION_ROTATE_SPEED_RADIUS_PER_SEC HERO_DEGREES_TO_RADIANS(180.f)
 
 #define FNL_IMPL
 #include <deps/FastNoiseLite.h>
@@ -76,9 +83,9 @@ GameIslandGenConfig game_island_gen_configs[GAME_ISLAND_GEN_CONFIG_COUNT] = {
 		.fractal_type = 1,
 		.octaves = 7,
 		.lacunarity = 2.160000,
-		.deep_sea_max = 0.100000,
-		.sea_max = 0.200000,
-		.ground_max = 0.490000,
+		.deep_sea_max = 25.6,
+		.sea_max = 51.2,
+		.ground_max = 125.44,
 		.falloff_map_intensity = 50.000000,
 	},
 	{
@@ -87,9 +94,9 @@ GameIslandGenConfig game_island_gen_configs[GAME_ISLAND_GEN_CONFIG_COUNT] = {
 		.fractal_type = 2,
 		.octaves = 7,
 		.lacunarity = 1.900000,
-		.deep_sea_max = 0.100000,
-		.sea_max = 0.200000,
-		.ground_max = 0.540000,
+		.deep_sea_max = 25.6,
+		.sea_max = 51.2,
+		.ground_max = 138.24,
 		.falloff_map_intensity = 10.0,
 	},
 	{
@@ -98,9 +105,9 @@ GameIslandGenConfig game_island_gen_configs[GAME_ISLAND_GEN_CONFIG_COUNT] = {
 		.fractal_type = 3,
 		.octaves = 7,
 		.lacunarity = 2.160000,
-		.deep_sea_max = 0.100000,
-		.sea_max = 0.200000,
-		.ground_max = 0.490000,
+		.deep_sea_max = 25.6,
+		.sea_max = 51.2,
+		.ground_max = 125.44,
 		.falloff_map_intensity = 50.000000,
 	},
 };
@@ -122,8 +129,10 @@ void game_island_gen(GameIslandGenConfig* config, F32* tile_height_map_out) {
 			F32 falloff_height = (vec2_len(falloff_offset) + config->falloff_map_intensity) * map_to_norm_scale;
 			F32 height = fnlGetNoise2D(&noise_state, x, y) * 0.5f + 0.5f; // convert to 0.0 - 1.0 from -1.0 - 1.0
 			height -= falloff_height;
+			height = HERO_MAX(height, 0.01f);
+			height *= 256.f;
 
-			tile_height_map_out[row_start + x] = HERO_MAX(height, 0.01f);
+			tile_height_map_out[row_start + x] = height;
 		}
 	}
 }
@@ -189,7 +198,7 @@ HeroResult game_scene_island_gen_debug_update(GameScene* s, GameScene** replace_
 	hero_ui_box_start(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_LEN_FILL, NULL);
 		hero_ui_box_start(window, __LINE__, HERO_UI_CUT_CENTER_HORIZONTAL, HERO_UI_LEN_AUTO, NULL);
 			hero_ui_box_start(window, __LINE__, HERO_UI_CUT_CENTER_VERTICAL, HERO_UI_LEN_AUTO, NULL);
-				hero_ui_image(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_IMAGE_ID(scene->colored_height_map_image_atlas_id, 0), -1, 1.f, HERO_UI_IMAGE_SCALE_MODE_NONE, NULL);
+				hero_ui_image(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_IMAGE_ID(scene->colored_height_map_image_atlas_id, 0), -1, 1.f, HERO_UI_IMAGE_SCALE_MODE_NONE, HERO_UI_IMAGE_FLIP_Y, NULL);
 			hero_ui_box_end(window);
 		hero_ui_box_end(window);
 	hero_ui_box_end(window);
@@ -327,28 +336,31 @@ Vec3 game_direction_vectors[GAME_DIRECTION_COUNT] = {
 	[GAME_DIRECTION_RIGHT] = VEC3_RIGHT,
 };
 
-HeroResult _game_scene_play_init_voxel_height_map(U32 cell_x, U32 cell_y, F32* tile_height_map, F32* voxel_height_map) {
-	U32 tile_x = cell_x * GAME_ISLAND_CELL_AXIS_TILES_COUNT;
-	U32 tile_y = cell_y * GAME_ISLAND_CELL_AXIS_TILES_COUNT;
-	U32 row_start = tile_y * GAME_ISLAND_AXIS_TILES_COUNT + tile_x;
-	U32 next_row_start = row_start + GAME_ISLAND_AXIS_TILES_COUNT;
+HeroResult _game_scene_play_init_voxel_height_map(GameScenePlay* scene) {
+	F32* voxel_height_map = hero_alloc_array(F32, hero_system_alctor, 0, GAME_ISLAND_AXIS_VOXELS_COUNT * GAME_ISLAND_AXIS_VOXELS_COUNT);
+	if (voxel_height_map == NULL) {
+		return HERO_ERROR(ALLOCATION_FAILURE);
+	}
 
-	F32 tl = tile_height_map[row_start];
-	F32 tr = tile_height_map[row_start];
-	F32 bl = tile_height_map[next_row_start];
-	F32 br = tile_height_map[next_row_start + 1];
+	U32 row_start = 0;
+	U32 next_row_start = GAME_ISLAND_AXIS_TILES_COUNT;
+
+	F32 tl = scene->tile_height_map[row_start];
+	F32 tr = scene->tile_height_map[row_start + 1];
+	F32 bl = scene->tile_height_map[next_row_start];
+	F32 br = scene->tile_height_map[next_row_start + 1];
 	U32 voxel_start = 0;
-	for_range(y, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
-		for_range(x, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+	for_range(y, 0, GAME_ISLAND_AXIS_TILES_COUNT) {
+		for_range(x, 0, GAME_ISLAND_AXIS_TILES_COUNT) {
 
 			F32 tvy = 0.f;
-			F32 tstep = 1.f / (F32)GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+			F32 tstep = 1.f / (F32)GAME_ISLAND_TILE_AXIS_VOXELS_COUNT;
 			U32 voxel_idx = voxel_start;
-			for_range(vy, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+			for_range(vy, 0, GAME_ISLAND_TILE_AXIS_VOXELS_COUNT) {
 				F32 tvx = 0.f;
-				for_range(vx, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+				for_range(vx, 0, GAME_ISLAND_TILE_AXIS_VOXELS_COUNT) {
 					F32 voxel_height = hero_bilerp(tl, tr, bl, br, tvx, tvy);
-					voxel_height_map[voxel_idx] = voxel_height * 256.f;
+					voxel_height_map[voxel_idx] = voxel_height;
 					tvx += tstep;
 					voxel_idx += 1;
 				}
@@ -356,33 +368,35 @@ HeroResult _game_scene_play_init_voxel_height_map(U32 cell_x, U32 cell_y, F32* t
 				tvy += tstep;
 
 				// increment to next row
-				voxel_idx += GAME_PLAY_CELL_AXIS_VOXELS_COUNT - GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+				voxel_idx += GAME_ISLAND_AXIS_VOXELS_COUNT - GAME_ISLAND_TILE_AXIS_VOXELS_COUNT;
 			}
 
 			// increment to next column
-			voxel_start += GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+			voxel_start += GAME_ISLAND_TILE_AXIS_VOXELS_COUNT;
 
-			if (x + 1 < GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+			if (x + 2 < GAME_ISLAND_AXIS_TILES_COUNT) {
 				tl = tr;
 				bl = br;
-				tr = tile_height_map[row_start + x + 1];
-				br = tile_height_map[next_row_start + x + 1];
+				tr = scene->tile_height_map[row_start + x + 1];
+				br = scene->tile_height_map[next_row_start + x + 1];
 			}
 		}
 
-		if (y + 1 < GAME_ISLAND_CELL_AXIS_TILES_COUNT) {
+		if (y + 2 < GAME_ISLAND_AXIS_TILES_COUNT) {
 			row_start += GAME_ISLAND_AXIS_TILES_COUNT;
-			tl = tile_height_map[row_start];
-			tr = tile_height_map[row_start + 1];
+			tl = scene->tile_height_map[row_start];
+			tr = scene->tile_height_map[row_start + 1];
 
-			next_row_start = row_start + GAME_ISLAND_AXIS_TILES_COUNT;
-			bl = tile_height_map[next_row_start];
-			br = tile_height_map[next_row_start + 1];
+			next_row_start += GAME_ISLAND_AXIS_TILES_COUNT;
+			bl = scene->tile_height_map[next_row_start];
+			br = scene->tile_height_map[next_row_start + 1];
 
 			// go to the next row
-			voxel_start = ((y + 1) * GAME_PLAY_CELL_AXIS_VOXELS_COUNT) * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
+			voxel_start = ((y + 1) * GAME_ISLAND_AXIS_VOXELS_COUNT) * GAME_ISLAND_TILE_AXIS_VOXELS_COUNT;
 		}
 	}
+
+	scene->voxel_height_map = voxel_height_map;
 
 	return HERO_SUCCESS;
 }
@@ -392,9 +406,10 @@ HeroResult game_scene_play_load(GameScene* s) {
 	GameScenePlay* scene = (GameScenePlay*)s;
 	HeroResult result;
 
-	scene->camera_forward = VEC3_FORWARD;
-	scene->camera_position = VEC3_INIT(0.f, 118.f, -8.f);
-	scene->camera_rotation = QUAT_IDENTITY;
+	scene->camera.forward = VEC3_FORWARD;
+	scene->camera.position = VEC3_INIT(0.f, 118.f, -8.f);
+	scene->camera.rotation = QUAT_IDENTITY;
+	scene->player_move_aim_direction = VEC2_UP;
 
 	F32* tile_height_map = hero_alloc_array(F32, hero_system_alctor, 0, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
 	if (tile_height_map == NULL) {
@@ -405,18 +420,15 @@ HeroResult game_scene_play_load(GameScene* s) {
 	GameIslandGenConfig config = game_island_gen_configs[0];
 	game_island_gen(&config, scene->tile_height_map);
 
-	static int init = 0;
-	if (!init) {
-		init = 1;
-		U32 cell_x = 12;
-		U32 cell_y = 12;
-		F32* voxel_height_map = hero_alloc_array(F32, hero_system_alctor, 0, GAME_PLAY_CELL_AXIS_VOXELS_COUNT * GAME_PLAY_CELL_AXIS_VOXELS_COUNT);
-		if (voxel_height_map == NULL) {
-			return HERO_ERROR(ALLOCATION_FAILURE);
-		}
-		_game_scene_play_init_voxel_height_map(cell_x, cell_y, tile_height_map, voxel_height_map);
-		scene->render_data.voxel_height_map = voxel_height_map;
+	result = _game_scene_play_init_voxel_height_map(scene);
+	HERO_RESULT_ASSERT(result);
+
+	U32* terrain_tile_tint_map = hero_alloc_array(U32, hero_system_alctor, 0, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+	if (terrain_tile_tint_map == NULL) {
+		return HERO_ERROR(ALLOCATION_FAILURE);
 	}
+	scene->terrain_tile_tint_map = terrain_tile_tint_map;
+	HERO_ZERO_ELMT_MANY(terrain_tile_tint_map, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
 
 	{
 		HeroUIImageAtlasSetup setup = {
@@ -435,10 +447,33 @@ HeroResult game_scene_play_load(GameScene* s) {
 
 	hero_object_pool(GameEntity, init)(&scene->entity_pool, GAME_ENTITIES_CAP, hero_system_alctor, 0);
 
-	GameEntity* player;
-	result = game_scene_play_entity_add(scene, GAME_ENTITY_TYPE_HUMAN, &player, &scene->player_entity_id);
-	HERO_RESULT_ASSERT(result);
-	player->flags |= GAME_ENTITY_FLAGS_PLAYER;
+	U32 cell_x = 7;
+	U32 cell_y = 15;
+	{
+		GameEntity* player;
+		result = game_scene_play_entity_add(scene, GAME_ENTITY_TYPE_HUMAN, &player, &scene->player_entity_id);
+		HERO_RESULT_ASSERT(result);
+		player->flags |= GAME_ENTITY_FLAGS_PLAYER;
+
+		player->position = VEC3_INIT(cell_x * GAME_ISLAND_CELL_AXIS_TILES_COUNT, 0.f, cell_y * GAME_ISLAND_CELL_AXIS_TILES_COUNT);
+		strncpy(player->name, "player", sizeof(player->name));
+		game_scene_play_camera_set_target_entity(scene, scene->player_entity_id);
+	}
+
+	{
+		GameEntity* enemy;
+		result = game_scene_play_entity_add(scene, GAME_ENTITY_TYPE_HUMAN, &enemy, &scene->enemy_entity_id);
+		HERO_RESULT_ASSERT(result);
+		enemy->position = VEC3_INIT(cell_x * GAME_ISLAND_CELL_AXIS_TILES_COUNT + 3.f, 0.f, cell_y * GAME_ISLAND_CELL_AXIS_TILES_COUNT + 0.f);
+
+		result = game_scene_play_entity_add(scene, GAME_ENTITY_TYPE_HUMAN, &enemy, NULL);
+		HERO_RESULT_ASSERT(result);
+		enemy->position = VEC3_INIT(cell_x * GAME_ISLAND_CELL_AXIS_TILES_COUNT + 2.f, 0.f, cell_y * GAME_ISLAND_CELL_AXIS_TILES_COUNT + 0.f);
+
+		result = game_scene_play_entity_add(scene, GAME_ENTITY_TYPE_HUMAN, &enemy, NULL);
+		HERO_RESULT_ASSERT(result);
+		enemy->position = VEC3_INIT(cell_x * GAME_ISLAND_CELL_AXIS_TILES_COUNT + 2.f, 0.f, cell_y * GAME_ISLAND_CELL_AXIS_TILES_COUNT + 1.f);
+	}
 
 	return HERO_SUCCESS;
 }
@@ -456,6 +491,7 @@ HeroResult game_scene_play_update(GameScene* s, GameScene** replace_with_scene_o
 	HeroResult result;
 
 	scene->render_data.entity_billboards.count = 0;
+	scene->render_data.terrain_tile_tint_map = NULL;
 
 	HeroUIWindow* window;
 	result = hero_ui_window_get(game.ui_window_id, &window);
@@ -463,48 +499,33 @@ HeroResult game_scene_play_update(GameScene* s, GameScene** replace_with_scene_o
 		return result;
 	}
 
-	hero_ui_image(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_IMAGE_ID(scene->ui_image_atlas_id, 0), -1, 1.f, HERO_UI_IMAGE_SCALE_MODE_NONE, NULL);
+	game_scene_play_camera_update(scene);
+
+	hero_ui_image(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_IMAGE_ID(scene->ui_image_atlas_id, 0), -1, 1.f, HERO_UI_IMAGE_SCALE_MODE_NONE, HERO_UI_IMAGE_FLIP_NONE, NULL);
+
+	hero_ui_widget_next_layer_start(window, __LINE__);
+
+	//hero_ui_box(window, __LINE__, HERO_UI_CUT_LEFT, 100.f, hero_ui_ss.box);
 
 	{
-		GameEntity* player;
-		HeroResult result = game_scene_play_entity_get(scene, scene->player_entity_id, &player);
-		if (result < 0) {
-			return result;
+		GameInputState input_state = {0};
+		for_range(input, 0, GAME_INPUT_COUNT) {
+			HeroScanCode scan_code = game_input_default_keyboard_map[input];
+			if (hero_keyboard_scan_code_is_pressed(scan_code)) {
+				input_state.is_pressed |= ENUM_FLAG(input);
+			}
+
+			if (hero_keyboard_scan_code_has_been_pressed(scan_code)) {
+				input_state.has_been_pressed |= ENUM_FLAG(input);
+			}
+
+			if (hero_keyboard_scan_code_has_been_released(scan_code)) {
+				input_state.has_been_released |= ENUM_FLAG(input);
+			}
 		}
 
-		GameDirection direction = GAME_DIRECTION_NONE;
-		if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_W)) {
-			direction = GAME_DIRECTION_UP;
-		}
-		if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_A)) {
-			direction = GAME_DIRECTION_LEFT;
-		}
-		if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_S)) {
-			direction = GAME_DIRECTION_DOWN;
-		}
-		if (hero_keyboard_scan_code_is_pressed(HERO_KEY_CODE_D)) {
-			direction = GAME_DIRECTION_RIGHT;
-		}
-		if (hero_keyboard_scan_code_has_been_released(HERO_KEY_CODE_W) && player->direction == GAME_DIRECTION_UP) {
-			player->stop_on_next_tile_start = floorf(player->position.z);
-			player->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
-		}
-		if (hero_keyboard_scan_code_has_been_released(HERO_KEY_CODE_S) && player->direction == GAME_DIRECTION_DOWN) {
-			player->stop_on_next_tile_start = ceilf(player->position.z);
-			player->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
-		}
-		if (hero_keyboard_scan_code_has_been_released(HERO_KEY_CODE_A) && player->direction == GAME_DIRECTION_LEFT) {
-			player->stop_on_next_tile_start = ceilf(player->position.x);
-			player->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
-		}
-		if (hero_keyboard_scan_code_has_been_released(HERO_KEY_CODE_D) && player->direction == GAME_DIRECTION_RIGHT) {
-			player->stop_on_next_tile_start = floorf(player->position.x);
-			player->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
-		}
-
-		if (player->direction == GAME_DIRECTION_NONE) {
-			player->direction = direction;
-		}
+		result = game_scene_play_player_handle_input(scene, input_state);
+		HERO_RESULT_ASSERT(result);
 	}
 #if 0
 	if (hero_window_sys.mouse.rel_x || hero_window_sys.mouse.rel_y) {
@@ -546,14 +567,150 @@ HeroResult game_scene_play_update(GameScene* s, GameScene** replace_with_scene_o
 	}
 #endif
 
-	GameEntity* entity = NULL;
-	GameEntityId entity_id = {0};
-	while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
-		result = game_scene_play_entity_update(scene, entity_id, entity);
-		if (result < 0) {
-			return result;
+	hero_ui_box_start(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_LEN_FILL, NULL);
+	{
+		if (scene->npc_move_time != 0.f) {
+			scene->npc_move_time += game.dt * GAME_PLAYER_MOVE_SPEED;
+		}
+
+		{
+			//
+			// update the player first so all of the npc entities can start moving in the same frame
+			GameEntity* player;
+			HeroResult result = game_scene_play_entity_get(scene, scene->player_entity_id, &player);
+			if (result < 0) {
+				return result;
+			}
+			result = game_scene_play_entity_update(scene, scene->player_entity_id, player);
+			if (result < 0) {
+				return result;
+			}
+		}
+
+#if 0
+						GameInputState state = {0};
+						state.is_pressed |= ENUM_FLAG(GAME_INPUT_DOWN);
+
+						result = game_scene_play_entity_handle_input(scene, scene->enemy_entity_id, state);
+						HERO_RESULT_ASSERT(result);
+#endif
+
+		GameEntity* entity = NULL;
+		GameEntityId entity_id = {0};
+		while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+			if (entity_id.raw != scene->player_entity_id.raw) {
+				result = game_scene_play_entity_update(scene, entity_id, entity);
+				if (result < 0) {
+					return result;
+				}
+			}
+		}
+
+		{
+			GameEntity* player;
+			HeroResult result = game_scene_play_entity_get(scene, scene->player_entity_id, &player);
+			if (result < 0) {
+				return result;
+			}
+
+			// TODO: we have this next layer so it fixes being centered
+			// atm there is only health bars that have a custom_offset so this dialog should be able to be a sibling of those bars right?
+			hero_ui_widget_next_layer_start(window, __LINE__);
+
+			hero_ui_box_start(window, __LINE__, HERO_UI_CUT_CENTER_HORIZONTAL, HERO_UI_LEN_AUTO, NULL);
+
+			switch (scene->player_action_state) {
+				case GAME_PLAYER_ACTION_STATE_MOVE_DIALOG: {
+					hero_ui_text(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_string_lit("Select a move"), game_ui_ss.dialog_text);
+					hero_ui_box_start(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_ui_ss.box);
+
+					for_range(move_idx, 0, 4) {
+						HeroUIWidgetState widget_state = HERO_UI_WIDGET_STATE_DEFAULT;
+						if (move_idx == scene->player_selected_move_idx) {
+							widget_state = HERO_UI_WIDGET_STATE_FOCUSED;
+						}
+						hero_ui_widget_next_forced_state(window, widget_state);
+
+						hero_ui_text(window, move_idx, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, game_moves[move_idx].name, game_ui_ss.move_text);
+					}
+					hero_ui_box_end(window);
+					break;
+				};
+				case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_ENTITY: {
+					hero_ui_text(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_string_lit("Target an entity"), game_ui_ss.dialog_text);
+					break;
+				};
+				case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_TILE: {
+					hero_ui_text(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_string_lit("Target a tile"), game_ui_ss.dialog_text);
+					break;
+				};
+			}
+
+			hero_ui_box_end(window);
+			hero_ui_widget_next_layer_end(window);
+		}
+
+		if (scene->npc_move_time > 1.f) {
+			scene->npc_move_time = 0.f;
 		}
 	}
+	hero_ui_box_end(window);
+
+	hero_ui_widget_next_layer_end(window);
+
+	hero_ui_widget_next_layer_start(window, __LINE__);
+
+	scene->glow_intensity += game.dt * 0.8f;
+	if (scene->glow_intensity > 1.f) scene->glow_intensity = 0.1f;
+
+	hero_ui_box_start(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, NULL);
+	hero_ui_box_start(window, __LINE__, HERO_UI_CUT_RIGHT, HERO_UI_LEN_AUTO, hero_ui_ss.box);
+	switch (scene->player_action_state) {
+		case GAME_PLAYER_ACTION_STATE_MOVING: {
+			hero_ui_text(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_LEN_AUTO, hero_string_lit("X: Moves"), game_ui_ss.controls_hint_text);
+			break;
+		};
+		case GAME_PLAYER_ACTION_STATE_MOVE_DIALOG: {
+			if (scene->player_target_entity_id.raw == 0) {
+				hero_ui_widget_next_forced_state(window, HERO_UI_WIDGET_STATE_DISABLED);
+			}
+			hero_ui_text(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_LEN_AUTO, hero_string_lit("A: Accept"), game_ui_ss.controls_hint_text);
+			hero_ui_text(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_LEN_AUTO, hero_string_lit("B: Close"), game_ui_ss.controls_hint_text);
+			if (game_moves[scene->player_selected_move_idx].target_mode != GAME_MOVE_TARGET_MODE_DIRECTION) {
+				hero_ui_widget_next_forced_state(window, HERO_UI_WIDGET_STATE_DISABLED);
+			}
+			hero_ui_text(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_LEN_AUTO, hero_string_lit("L/R: Aim"), game_ui_ss.controls_hint_text);
+			break;
+		};
+		case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_ENTITY:
+		case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_TILE: {
+			hero_ui_text(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_LEN_AUTO, hero_string_lit("A: Confirm"), game_ui_ss.controls_hint_text);
+			hero_ui_text(window, __LINE__, HERO_UI_CUT_LEFT, HERO_UI_LEN_AUTO, hero_string_lit("B: Back"), game_ui_ss.controls_hint_text);
+			break;
+		};
+		case GAME_PLAYER_ACTION_STATE_MOVE_ANIMATE: {
+			scene->player_move_animate_time += game.dt;
+			if (scene->player_move_animate_time >= GAME_PLAYER_MOVE_ANIMATE_SECS) {
+				scene->player_action_state = GAME_PLAYER_ACTION_STATE_MOVING;
+				scene->flags &= ~GAME_SCENE_PLAY_GLOW;
+				game_scene_play_camera_set_target_entity(scene, scene->player_entity_id);
+
+				GameEntity* entity = NULL;
+				GameEntityId entity_id = {0};
+				while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+					entity->animate_og_health = entity->health;
+				}
+
+				HERO_ZERO_ELMT_MANY(scene->terrain_tile_tint_map, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+				scene->render_data.terrain_tile_tint_map = scene->terrain_tile_tint_map;
+			}
+			break;
+		};
+	}
+	hero_ui_box_end(window);
+	hero_ui_box_end(window);
+
+	hero_ui_widget_next_layer_end(window);
 
 	return HERO_SUCCESS;
 }
@@ -564,10 +721,18 @@ HeroResult game_scene_play_update_render_data(GameScene* s) {
 	GameScenePlayRenderData* dst = &game.gfx.play.scene_render_data;
 
 	dst->tile_height_map = scene->tile_height_map;
-	dst->voxel_height_map = scene->render_data.voxel_height_map;
-	dst->camera_forward = scene->camera_forward;
-	dst->camera_position = scene->camera_position;
-	dst->camera_rotation = scene->camera_rotation;
+	dst->voxel_height_map = NULL;
+	dst->camera_forward = scene->camera.forward;
+	dst->camera_position = scene->camera.position;
+	dst->camera_rotation = scene->camera.rotation;
+	dst->terrain_tile_tint_map = scene->render_data.terrain_tile_tint_map;
+
+	static bool init = false;
+	if (!init) {
+		dst->voxel_height_map = scene->voxel_height_map;
+		dst->terrain_tile_tint_map = scene->terrain_tile_tint_map;
+		init = true;
+	}
 
 	dst->entity_billboards.count = 0;
 	GameRenderEntityBillboard* dst_renders;
@@ -606,14 +771,18 @@ HeroResult game_scene_play_entity_add(GameScenePlay* scene, GameEntityType type,
 		return result;
 	}
 	if (entity_out) *entity_out = entity;
-	*id_out = id;
+	if (id_out) *id_out = id;
 	entity->type = type;
+	entity->health = 100;
+	entity->animate_og_health = entity->health;
 
 	switch (type) {
 		case GAME_ENTITY_TYPE_HUMAN: {
 			entity->flags |=
 				GAME_ENTITY_FLAGS_AUTO_Y_FROM_HEIGHT_MAP |
 				GAME_ENTITY_FLAGS_BILLBOARD              ;
+			entity->steps_per_move = 2;
+			strncpy(entity->name, "human", sizeof(entity->name));
 			break;
 		};
 		default: HERO_ABORT("unhandled entity type %u\n", type);
@@ -626,6 +795,21 @@ HeroResult game_scene_play_entity_get(GameScenePlay* scene, GameEntityId id, Gam
 	return hero_object_pool(GameEntity, get)(&scene->entity_pool, id, out);
 }
 
+F32 game_scene_play_tile_max_voxel_height(GameScenePlay* scene, U32 tile_x, U32 tile_y) {
+	F32 height = 0.f;
+	U32 voxel_start_x = tile_x * GAME_ISLAND_TILE_AXIS_VOXELS_COUNT;
+	U32 voxel_start_y = tile_y * GAME_ISLAND_TILE_AXIS_VOXELS_COUNT;
+
+	for_range(voxel_y, voxel_start_y, voxel_start_y + GAME_ISLAND_TILE_AXIS_VOXELS_COUNT) {
+		for_range(voxel_x, voxel_start_x, voxel_start_x + GAME_ISLAND_TILE_AXIS_VOXELS_COUNT) {
+			F32 voxel_height = scene->voxel_height_map[voxel_y * GAME_ISLAND_AXIS_VOXELS_COUNT + voxel_x];
+			height = HERO_MAX(height, voxel_height);
+		}
+	}
+
+	return height;
+}
+
 HeroResult game_scene_play_entity_update(GameScenePlay* scene, GameEntityId id, GameEntity* entity) {
 	HeroResult result;
 	switch (entity->type) {
@@ -635,8 +819,25 @@ HeroResult game_scene_play_entity_update(GameScenePlay* scene, GameEntityId id, 
 		default: HERO_ABORT("unhandled entity type %u\n", entity->type);
 	}
 
-	Vec3 move_vec = vec3_mul_scalar(game_direction_vectors[entity->direction], GAME_ENTITY_MOVE_SPEED * game.dt);
+	//
+	// tell the npc to begin stop moving so it will stop at the next tile.
+	/*
+	if (scene->npc_move_time >= 1.f) {
+		GameInputState state = {0};
+		result = game_scene_play_entity_handle_input(scene, id, state);
+		HERO_RESULT_ASSERT(result);
+	}
+	*/
+
+	//
+	// move the entity
+	F32 move_speed = (entity->flags & GAME_ENTITY_FLAGS_PLAYER) ? GAME_PLAYER_MOVE_SPEED : (F32)entity->steps_per_move * GAME_PLAYER_MOVE_SPEED;
+	Vec3 move_vec = vec3_mul_scalar(game_direction_vectors[entity->direction], move_speed * game.dt);
+	Vec2 prev_xy = VEC2_INIT(entity->position.x, entity->position.z);
 	entity->position = vec3_add(entity->position, move_vec);
+
+	//
+	// stop the entity if we are stopping and we have passed the next tile.
 	if (entity->flags & GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE) {
 		F32 diff = 1.f;
 		switch (entity->direction) {
@@ -658,22 +859,13 @@ HeroResult game_scene_play_entity_update(GameScenePlay* scene, GameEntityId id, 
 		}
 	}
 
+	//
+	// automatically set he y axis position to the voxel height map and interpolate between tiles when moving
 	if (entity->flags & GAME_ENTITY_FLAGS_AUTO_Y_FROM_HEIGHT_MAP) {
 		U32 tile_x = (U32)floorf(entity->position.x);
 		U32 tile_y = (U32)floorf(entity->position.z);
 
-		F32 height = 0.f;
-		{
-			U32 voxel_start_x = tile_x * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
-			U32 voxel_start_y = tile_y * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
-
-			for_range(voxel_y, voxel_start_y, voxel_start_y + GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
-				for_range(voxel_x, voxel_start_x, voxel_start_x + GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
-					F32 voxel_height = scene->render_data.voxel_height_map[voxel_y * GAME_PLAY_CELL_AXIS_VOXELS_COUNT + voxel_x];
-					height = HERO_MAX(height, voxel_height);
-				}
-			}
-		}
+		F32 height = game_scene_play_tile_max_voxel_height(scene, tile_x, tile_y);
 
 		F32 next_height = 0.f;
 		F32 interp_ratio = 0.f;
@@ -691,17 +883,7 @@ HeroResult game_scene_play_entity_update(GameScenePlay* scene, GameEntityId id, 
 					break;
 			}
 
-			{
-				U32 voxel_start_x = tile_x * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
-				U32 voxel_start_y = tile_y * GAME_PLAY_TILE_AXIS_VOXELS_COUNT;
-
-				for_range(voxel_y, voxel_start_y, voxel_start_y + GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
-					for_range(voxel_x, voxel_start_x, voxel_start_x + GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
-						F32 voxel_height = scene->render_data.voxel_height_map[voxel_y * GAME_PLAY_CELL_AXIS_VOXELS_COUNT + voxel_x];
-						next_height = HERO_MAX(next_height, voxel_height);
-					}
-				}
-			}
+			next_height = game_scene_play_tile_max_voxel_height(scene, tile_x, tile_y);
 		}
 
 		switch (entity->direction) {
@@ -719,27 +901,643 @@ HeroResult game_scene_play_entity_update(GameScenePlay* scene, GameEntityId id, 
 		}
 	}
 
-	if (entity->flags & GAME_ENTITY_FLAGS_BILLBOARD) {
-		GameRenderEntityBillboard* render;
-		result = hero_stack(GameRenderEntityBillboard, push)(&scene->render_data.entity_billboards, hero_system_alctor, 0, &render);
+	//
+	// rendering
+	{
+		if (entity->flags & GAME_ENTITY_FLAGS_BILLBOARD) {
+			GameRenderEntityBillboard* render;
+			result = hero_stack(GameRenderEntityBillboard, push)(&scene->render_data.entity_billboards, hero_system_alctor, 0, &render);
+			if (result < 0) {
+				return result;
+			}
+
+			render->type = entity->type;
+			render->position = entity->position;
+			render->ascii = game_scene_play_entity_ascii(entity);
+			render->color = hero_color_init(0xff, 0x66, 0xcc, 0xff);
+			if (!(scene->flags & GAME_SCENE_PLAY_GLOW) || entity->flags & GAME_ENTITY_FLAGS_PLAYER) {
+				render->tint = 0;
+			} else {
+				F32 glow_intensity = scene->glow_intensity;
+				if ((scene->player_action_state == GAME_PLAYER_ACTION_STATE_MOVE_TARGET_ENTITY || scene->player_action_state == GAME_PLAYER_ACTION_STATE_MOVE_TARGET_TILE) && entity->flags & GAME_ENTITY_FLAGS_VALID_SPLASH) {
+					render->tint = GAME_MOVE_RADIUS_COLOR_TARGET_SPLASH;
+					glow_intensity = 1.f - glow_intensity;
+				} else if (scene->player_action_state == GAME_PLAYER_ACTION_STATE_MOVE_TARGET_ENTITY && id.raw == scene->player_target_entity_id.raw) {
+					render->tint = GAME_MOVE_RADIUS_COLOR_TARGET;
+					glow_intensity = 1.f - glow_intensity;
+				} else if (entity->flags & GAME_ENTITY_FLAGS_INVALID_RANGE) {
+					render->tint = GAME_MOVE_RADIUS_COLOR_INVALID;
+				} else if (entity->flags & GAME_ENTITY_FLAGS_VALID_SPLASH) {
+					render->tint = GAME_MOVE_RADIUS_COLOR_VALID_SPLASH;
+				} else {
+					render->tint = GAME_MOVE_RADIUS_COLOR_VALID;
+				}
+				render->tint = hero_color_chan_set(render->tint, HERO_COLOR_CHAN_A, (U8)(glow_intensity * 255.f));
+			}
+		}
+	}
+
+	//
+	// player specific logic
+	if (entity->flags & GAME_ENTITY_FLAGS_PLAYER) {
+		if (floorf(prev_xy.x) != floorf(entity->position.x) || floorf(prev_xy.y) != floorf(entity->position.z)) {
+			entity->step_idx += 1;
+			if (entity->step_idx == entity->steps_per_move) {
+				entity->step_idx = 0;
+				scene->npc_move_time = game.dt * GAME_PLAYER_MOVE_SPEED;
+			}
+		}
+
+		static int init = 0;
+		if (!init) {
+			scene->camera.position = entity->position;
+			init = 1;
+		}
+	}
+
+	{
+		HeroUIWindow* window;
+		result = hero_ui_window_get(game.ui_window_id, &window);
 		if (result < 0) {
 			return result;
 		}
+		hero_ui_box_start(window, id.raw, HERO_UI_CUT_LEFT, HERO_UI_LEN_FILL, NULL);
 
-		render->type = entity->type;
-		render->position = entity->position;
-		render->ascii = game_scene_play_entity_ascii(entity);
+		Vec3 pos = entity->position;
+		pos.x += 0.5f;
+		Vec2 screen_pos = game_scene_play_world_to_screen_space_point(scene, pos);
+
+		F32 width = 150.f;
+		hero_ui_widget_custom_offset(window, screen_pos, width, HERO_UI_ALIGN_X_CENTER | HERO_UI_ALIGN_Y_TOP);
+		hero_ui_box_start(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, NULL);
+
+			hero_ui_text(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_string_c(entity->name), game_ui_ss.health_bar_text);
+
+			U32 health = entity->health;
+			if (scene->player_action_state == GAME_PLAYER_ACTION_STATE_MOVE_ANIMATE && entity->health != entity->animate_og_health) {
+				F32 interp_ratio = 1.f - (scene->player_move_animate_time / GAME_PLAYER_MOVE_ANIMATE_SECS);
+				health = (U32)hero_lerp((F32)health, (F32)entity->animate_og_health, interp_ratio);
+			}
+
+			hero_ui_box_start(window, __LINE__, HERO_UI_CUT_TOP, width / 5.f, game_ui_ss.health_bar);
+				F32 inner_width = width - game_ui_ss.health_bar[0].padding.left - game_ui_ss.health_bar[0].padding.right - (game_ui_ss.health_bar[0].border_width * 2.f);
+				hero_ui_box(window, __LINE__, HERO_UI_CUT_LEFT, ((F32)health / 100.f) * inner_width, game_ui_ss.health_bar_inner);
+			hero_ui_box_end(window);
+
+			snprintf(entity->health_string, sizeof(entity->health_string), "%u/%u", health, 100);
+			hero_ui_text(window, __LINE__, HERO_UI_CUT_TOP, HERO_UI_LEN_AUTO, hero_string_c(entity->health_string), game_ui_ss.health_bar_text);
+		hero_ui_box_end(window);
+
+		hero_ui_box_end(window);
 	}
 
-	if (entity->flags & GAME_ENTITY_FLAGS_PLAYER) {
+	return HERO_SUCCESS;
+}
 
-		scene->camera_position = vec3_add(entity->position, GAME_CAMERA_TARGET_OFFSET);
-		scene->camera_forward = vec3_norm(vec3_sub(vec3_add(entity->position, VEC3_INIT(0.5f, 0.f, 0.5f)), scene->camera_position));
-		F32 pitch = asinf(-scene->camera_forward.y);
-		F32 yaw = atan2f(scene->camera_forward.x, scene->camera_forward.z);
-		Quat x_rotation = quat_rotate(yaw, VEC3_INIT(0.f, 1.f, 0.f));
-		Quat y_rotation = quat_rotate(pitch, VEC3_INIT(1.f, 0.f, 0.f));
-		scene->camera_rotation = quat_norm(quat_mul(x_rotation, y_rotation));
+void game_scene_play_splash_tile_origin(GameScenePlay* scene, U32* tile_x_out, U32* tile_y_out) {
+	U32 splash_tile_x;
+	U32 splash_tile_y;
+	switch (scene->player_action_state) {
+		case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_ENTITY: {
+			GameEntity* target;
+			HeroResult result = game_scene_play_entity_get(scene, scene->player_target_entity_id, &target);
+			HERO_RESULT_ASSERT(result);
+			printf("scene->player_target_entity_id.raw = %u\n", scene->player_target_entity_id.raw);
+
+			splash_tile_x = (U32)floorf(target->position.x);
+			splash_tile_y = (U32)floorf(target->position.z);
+			break;
+		};
+		case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_TILE: {
+			splash_tile_x = scene->player_target_tile_x;
+			splash_tile_y = scene->player_target_tile_y;
+			break;
+		};
+		default: {
+			GameEntity* player;
+			HeroResult result = game_scene_play_entity_get(scene, scene->player_entity_id, &player);
+			HERO_RESULT_ASSERT(result);
+
+			splash_tile_x = (U32)floorf(player->position.x);
+			splash_tile_y = (U32)floorf(player->position.z);
+			break;
+		};
+	}
+
+	*tile_x_out = splash_tile_x;
+	*tile_y_out = splash_tile_y;
+}
+
+void game_scene_play_combat_enemy_entity_filter(GameScenePlay* scene, GameEntityFilterArgs* args_out) {
+	HeroResult result;
+	GameMove* move = &game_moves[scene->player_selected_move_idx];
+
+	GameEntity* player;
+	result = game_scene_play_entity_get(scene, scene->player_entity_id, &player);
+	HERO_RESULT_ASSERT(result);
+
+	U32 splash_origin_tile_x;
+	U32 splash_origin_tile_y;
+	game_scene_play_splash_tile_origin(scene, &splash_origin_tile_x, &splash_origin_tile_y);
+
+	F32 spread_angle = move->target_mode == GAME_MOVE_TARGET_MODE_DIRECTION ? move->spread_angle : 0.f;
+
+	args_out->origin_tile_x = (U32)floorf(player->position.x);
+	args_out->origin_tile_y = (U32)floorf(player->position.z);
+	args_out->radius = move->range_radius;
+	args_out->spread_angle = spread_angle;
+	args_out->aim_direction = scene->player_move_aim_direction;
+	args_out->splash_origin_tile_x = splash_origin_tile_x;
+	args_out->splash_origin_tile_y = splash_origin_tile_y;
+	args_out->splash_radius = move->splash_radius;
+	args_out->ignore_entity_id = scene->player_entity_id;
+}
+
+void game_scene_play_combat_update_tints(GameScenePlay* scene, GameEntityFilterArgs* filter_args) {
+	HeroResult result;
+	//
+	// get the entity filter if the user does not provide one
+	GameEntityFilterArgs _args;
+	if (filter_args == NULL) {
+		game_scene_play_combat_enemy_entity_filter(scene, &_args);
+		filter_args = &_args;
+	}
+
+	//
+	// update the entity tints
+	{
+		game_scene_play_entity_filter_start(scene, filter_args);
+
+		GameEntity* entity = NULL;
+		GameEntityId entity_id = {0};
+		while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+			game_scene_play_entity_filter_check(scene, entity_id, entity, filter_args);
+			entity->flags &= ~(GAME_ENTITY_FLAGS_INVALID_RANGE | GAME_ENTITY_FLAGS_VALID_SPLASH);
+
+			if (!filter_args->_valid) {
+				entity->flags |= GAME_ENTITY_FLAGS_INVALID_RANGE;
+			} else if (filter_args->_splash) {
+				entity->flags |= GAME_ENTITY_FLAGS_VALID_SPLASH;
+			}
+		}
+		HERO_RESULT_ASSERT(result);
+	}
+
+	//
+	// now update the tile map tints
+	//
+
+	GameMove* move = &game_moves[scene->player_selected_move_idx];
+
+	U32 color;
+	if (scene->player_target_entity_id.raw) {
+		color = GAME_MOVE_RADIUS_COLOR_VALID;
+	} else {
+		color = GAME_MOVE_RADIUS_COLOR_INVALID;
+	}
+	color = hero_color_chan_set(color, HERO_COLOR_CHAN_A, (U8)(scene->glow_intensity * 255.f));
+
+	HERO_ZERO_ELMT_MANY(scene->terrain_tile_tint_map, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+	switch (move->target_mode) {
+		case GAME_MOVE_TARGET_MODE_DIRECTION: {
+			Vec2 cone_dir = scene->player_move_aim_direction;
+			F32 half_angle_cos = cosf(move->spread_angle / 2.f);
+			F32 squared_half_angle_cos = half_angle_cos * fabsf(half_angle_cos);
+
+			for_range_s(y, -(move->range_radius + 1), move->range_radius + 1) {
+				for_range_s(x, -(move->range_radius + 1), move->range_radius + 1) {
+					Vec2 offset = VEC2_INIT((F32)x, (F32)y);
+					F32 squared_distance = vec2_dot(offset, offset);
+					if (squared_distance > filter_args->_squared_radius) {
+						continue;
+					}
+
+					F32 tile_angle_cos = vec2_dot(offset, cone_dir);
+					F32 squared_tile_angle_cos = tile_angle_cos * fabsf(tile_angle_cos);
+					F32 result = squared_half_angle_cos * squared_distance;
+					if (result > squared_tile_angle_cos) {
+						continue;
+					}
+
+					scene->terrain_tile_tint_map[(filter_args->origin_tile_y + y) * GAME_ISLAND_AXIS_TILES_COUNT + (filter_args->origin_tile_x + x)] = color;
+				}
+			}
+			break;
+		};
+		default: {
+			S32 radius = move->range_radius + move->splash_radius + 1;
+			for_range_s(y, -radius, radius) {
+				for_range_s(x, -radius, radius) {
+					Vec2 offset = VEC2_INIT((F32)x, (F32)y);
+					F32 squared_distance = vec2_dot(offset, offset);
+
+					bool is_in_spash_radius = false;
+					HeroColor tile_color = color;
+					if (filter_args->_squared_splash_radius > 0.f) {
+						Vec2 tile_coord = vec2_add(VEC2_INIT((F32)filter_args->origin_tile_x, (F32)filter_args->origin_tile_y), VEC2_INIT((F32)x, (F32)y));
+						Vec2 splash_offset = vec2_sub(tile_coord, VEC2_INIT((F32)filter_args->splash_origin_tile_x, (F32)filter_args->splash_origin_tile_y));
+						F32 squared_splash_distance = vec2_dot(splash_offset, splash_offset);
+						if (squared_splash_distance <= filter_args->_squared_splash_radius) {
+							tile_color = GAME_MOVE_RADIUS_COLOR_VALID_SPLASH;
+							tile_color = hero_color_chan_set(tile_color, HERO_COLOR_CHAN_A, (U8)(scene->glow_intensity * 255.f));
+
+							is_in_spash_radius = true;
+						}
+					}
+
+					if (!is_in_spash_radius && squared_distance > filter_args->_squared_radius) {
+						continue;
+					}
+
+					scene->terrain_tile_tint_map[(filter_args->origin_tile_y + y) * GAME_ISLAND_AXIS_TILES_COUNT + (filter_args->origin_tile_x + x)] = tile_color;
+				}
+			}
+			break;
+		};
+	}
+
+	scene->render_data.terrain_tile_tint_map = scene->terrain_tile_tint_map;
+}
+
+void game_scene_play_combat_select_move(GameScenePlay* scene, U32 move_idx) {
+	scene->player_selected_move_idx = move_idx;
+
+	GameEntityFilterArgs filter_args;
+	game_scene_play_combat_enemy_entity_filter(scene, &filter_args);
+
+	GameEntityId entity_id = {0};
+	HeroResult result = game_scene_play_entity_find_closest_in_range(scene, &filter_args, &entity_id);
+	HERO_RESULT_ASSERT(result);
+	scene->player_target_entity_id = entity_id;
+
+	game_scene_play_combat_update_tints(scene, &filter_args);
+}
+
+void game_scene_play_entity_perform_turn(GameScenePlay* scene, GameEntityId id, GameEntityTurn* turn) {
+	GameEntity* entity;
+	HeroResult result = game_scene_play_entity_get(scene, id, &entity);
+	HERO_RESULT_ASSERT(result);
+
+	switch (turn->type) {
+	case GAME_ENTITY_TURN_TYPE_NONE:
+		break;
+	case GAME_ENTITY_TURN_TYPE_MOVE_TILE: {
+		GameDirection direction = turn->data.move_tile.direction;
+
+		if (direction != entity->direction) {
+			switch (entity->direction) {
+			case GAME_DIRECTION_UP:
+				entity->stop_on_next_tile_start = floorf(entity->position.z);
+				entity->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
+				break;
+			case GAME_DIRECTION_DOWN:
+				entity->stop_on_next_tile_start = ceilf(entity->position.z);
+				entity->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
+				break;
+			case GAME_DIRECTION_LEFT:
+				entity->stop_on_next_tile_start = ceilf(entity->position.x);
+				entity->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
+				break;
+			case GAME_DIRECTION_RIGHT:
+				entity->stop_on_next_tile_start = floorf(entity->position.x);
+				entity->flags |= GAME_ENTITY_FLAGS_STOP_ON_NEXT_TILE;
+				break;
+			}
+		}
+
+		if (entity->direction == GAME_DIRECTION_NONE) {
+			entity->direction = direction;
+		}
+		break;
+	};
+	case GAME_ENTITY_TURN_TYPE_USE_MOVE: {
+		GameMove* move = turn->data.use_move.move;
+
+		switch (move->target_mode) {
+			case GAME_MOVE_TARGET_MODE_ENTITY:
+				if (move->splash_radius > 0.f) {
+					GameEntity* target;
+					HeroResult result = game_scene_play_entity_get(scene, turn->data.use_move.data.target_entity_id, &target);
+					HERO_RESULT_ASSERT(result);
+
+					GameEntityFilterArgs filter_args = {0};
+					filter_args.origin_tile_x = (U32)floorf(entity->position.x);
+					filter_args.origin_tile_y = (U32)floorf(entity->position.z);
+					filter_args.radius = move->range_radius;
+					filter_args.splash_origin_tile_x = (U32)floorf(target->position.x);
+					filter_args.splash_origin_tile_y = (U32)floorf(target->position.z);
+					filter_args.splash_radius = move->splash_radius;
+					filter_args.ignore_entity_id = id;
+					game_scene_play_entity_filter_start(scene, &filter_args);
+
+					GameEntity* entity = NULL;
+					GameEntityId entity_id = {0};
+					while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+						game_scene_play_entity_filter_check(scene, entity_id, entity, &filter_args);
+
+						if (filter_args._valid && filter_args._splash) {
+							game_scene_play_entity_apply_damage(scene, entity_id);
+						}
+					}
+					HERO_RESULT_ASSERT(result);
+				} else {
+					game_scene_play_entity_apply_damage(scene, turn->data.use_move.data.target_entity_id);
+				}
+				break;
+			case GAME_MOVE_TARGET_MODE_DIRECTION: {
+				GameEntityFilterArgs filter_args = {0};
+				filter_args.origin_tile_x = (U32)floorf(entity->position.x);
+				filter_args.origin_tile_y = (U32)floorf(entity->position.z);
+				filter_args.radius = move->range_radius;
+				filter_args.aim_direction = turn->data.use_move.data.target_direction;
+				filter_args.spread_angle = move->spread_angle;
+				filter_args.ignore_entity_id = id;
+				game_scene_play_entity_filter_start(scene, &filter_args);
+
+				GameEntity* entity = NULL;
+				GameEntityId entity_id = {0};
+				while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+					game_scene_play_entity_filter_check(scene, entity_id, entity, &filter_args);
+					if (filter_args._valid) {
+						game_scene_play_entity_apply_damage(scene, entity_id);
+					}
+				}
+				HERO_RESULT_ASSERT(result);
+				break;
+			};
+			case GAME_MOVE_TARGET_MODE_TILE: {
+				GameEntityFilterArgs filter_args = {0};
+				filter_args.origin_tile_x = (U32)floorf(entity->position.x);
+				filter_args.origin_tile_y = (U32)floorf(entity->position.z);
+				filter_args.radius = move->range_radius;
+				filter_args.splash_origin_tile_x = turn->data.use_move.data.target_tile.x;
+				filter_args.splash_origin_tile_y = turn->data.use_move.data.target_tile.y;
+				filter_args.splash_radius = move->splash_radius;
+				filter_args.ignore_entity_id = id;
+				game_scene_play_entity_filter_start(scene, &filter_args);
+
+				GameEntity* entity = NULL;
+				GameEntityId entity_id = {0};
+				while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+					game_scene_play_entity_filter_check(scene, entity_id, entity, &filter_args);
+
+					if (filter_args._valid && filter_args._splash) {
+						game_scene_play_entity_apply_damage(scene, entity_id);
+					}
+				}
+				HERO_RESULT_ASSERT(result);
+				break;
+			};
+			case GAME_MOVE_TARGET_MODE_SELF: {
+				GameEntityFilterArgs filter_args = {0};
+				filter_args.origin_tile_x = (U32)floorf(entity->position.x);
+				filter_args.origin_tile_y = (U32)floorf(entity->position.z);
+				filter_args.radius = move->range_radius;
+				filter_args.ignore_entity_id = id;
+				game_scene_play_entity_filter_start(scene, &filter_args);
+
+				GameEntity* entity = NULL;
+				GameEntityId entity_id = {0};
+				while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+					game_scene_play_entity_filter_check(scene, entity_id, entity, &filter_args);
+
+					if (filter_args._valid) {
+						game_scene_play_entity_apply_damage(scene, entity_id);
+					}
+				}
+				HERO_RESULT_ASSERT(result);
+				break;
+			};
+		}
+
+		break;
+	};
+	case GAME_ENTITY_TURN_TYPE_USE_ABILITY:
+		HERO_ABORT("UNIMPLEMENTED");
+		break;
+	case GAME_ENTITY_TURN_TYPE_USE_ITEM:
+		HERO_ABORT("UNIMPLEMENTED");
+		break;
+	}
+}
+
+HeroResult game_scene_play_player_handle_input(GameScenePlay* scene, GameInputState state) {
+	HeroResult result;
+
+	GameEntity* player;
+	result = game_scene_play_entity_get(scene, scene->player_entity_id, &player);
+	HERO_RESULT_ASSERT(result);
+
+	GameEntityTurn* entity_turn = &scene->player_entity_turn;
+
+	GamePlayerActionState prev_state = scene->player_action_state;
+	GamePlayerActionState next_state = scene->player_action_state;
+	switch (scene->player_action_state) {
+		case GAME_PLAYER_ACTION_STATE_MOVING:
+			if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_A)) {
+			} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_B)) {
+			} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_X)) {
+				next_state = GAME_PLAYER_ACTION_STATE_MOVE_DIALOG;
+			} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_Y)) {
+			} else {
+				GameDirection direction = GAME_DIRECTION_NONE;
+				if (state.is_pressed & ENUM_FLAG(GAME_INPUT_UP)) {
+					direction = GAME_DIRECTION_UP;
+				}
+				if (state.is_pressed & ENUM_FLAG(GAME_INPUT_LEFT)) {
+					direction = GAME_DIRECTION_LEFT;
+				}
+				if (state.is_pressed & ENUM_FLAG(GAME_INPUT_DOWN)) {
+					direction = GAME_DIRECTION_DOWN;
+				}
+				if (state.is_pressed & ENUM_FLAG(GAME_INPUT_RIGHT)) {
+					direction = GAME_DIRECTION_RIGHT;
+				}
+				entity_turn->type = GAME_ENTITY_TURN_TYPE_MOVE_TILE;
+				entity_turn->data.move_tile.direction = direction;
+				game_scene_play_entity_perform_turn(scene, scene->player_entity_id, &scene->player_entity_turn);
+			}
+			break;
+		case GAME_PLAYER_ACTION_STATE_INTERACT_DIALOG:
+			break;
+		case GAME_PLAYER_ACTION_STATE_MOVE_DIALOG:
+			if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_A)) {
+				if (scene->player_target_entity_id.raw) {
+					GameMove* move = &game_moves[scene->player_selected_move_idx];
+					entity_turn->data.use_move.move = move;
+					switch (move->target_mode) {
+						case GAME_MOVE_TARGET_MODE_ENTITY: {
+							next_state = GAME_PLAYER_ACTION_STATE_MOVE_TARGET_ENTITY;
+							break;
+						};
+						case GAME_MOVE_TARGET_MODE_DIRECTION:
+							entity_turn->data.use_move.data.target_direction = scene->player_move_aim_direction;
+							// fallthrough
+						case GAME_MOVE_TARGET_MODE_SELF:
+							game_scene_play_entity_perform_turn(scene, scene->player_entity_id, &scene->player_entity_turn);
+							next_state = GAME_PLAYER_ACTION_STATE_MOVE_ANIMATE;
+							break;
+						case GAME_MOVE_TARGET_MODE_TILE:
+							next_state = GAME_PLAYER_ACTION_STATE_MOVE_TARGET_TILE;
+							break;
+					}
+				}
+			} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_B)) {
+				next_state = GAME_PLAYER_ACTION_STATE_MOVING;
+			} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_UP)) {
+				U32 move_idx = scene->player_selected_move_idx == 0 ? 3 : scene->player_selected_move_idx - 1;
+				game_scene_play_combat_select_move(scene, move_idx);
+			} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_DOWN)) {
+				U32 move_idx = scene->player_selected_move_idx == 3 ? 0 : scene->player_selected_move_idx + 1;
+				game_scene_play_combat_select_move(scene, move_idx);
+			} else if (state.is_pressed & ENUM_FLAG(GAME_INPUT_LEFT)) {
+				scene->player_move_aim_direction = vec2_rotate(scene->player_move_aim_direction, HERO_DEGREES_TO_RADIANS(90.f) + (-GAME_PLAYER_AIM_DIRECTION_ROTATE_SPEED_RADIUS_PER_SEC * game.dt));
+				game_scene_play_combat_select_move(scene, scene->player_selected_move_idx);
+			} else if (state.is_pressed & ENUM_FLAG(GAME_INPUT_RIGHT)) {
+				scene->player_move_aim_direction = vec2_rotate(scene->player_move_aim_direction, HERO_DEGREES_TO_RADIANS(90.f) + (GAME_PLAYER_AIM_DIRECTION_ROTATE_SPEED_RADIUS_PER_SEC * game.dt));
+				game_scene_play_combat_select_move(scene, scene->player_selected_move_idx);
+			}
+			break;
+		case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_ENTITY: {
+			if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_A)) {
+				entity_turn->data.use_move.data.target_entity_id = scene->player_target_entity_id;
+				game_scene_play_entity_perform_turn(scene, scene->player_entity_id, &scene->player_entity_turn);
+				next_state = GAME_PLAYER_ACTION_STATE_MOVE_ANIMATE;
+			} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_B)) {
+				next_state = GAME_PLAYER_ACTION_STATE_MOVE_DIALOG;
+			} else {
+				bool has_been_pressed = false;
+				bool is_backwards = false;
+
+				if (state.has_been_pressed & (ENUM_FLAG(GAME_INPUT_UP) | ENUM_FLAG(GAME_INPUT_LEFT))) {
+					has_been_pressed = true;
+					is_backwards = false;
+				} else if (state.has_been_pressed & (ENUM_FLAG(GAME_INPUT_DOWN) | ENUM_FLAG(GAME_INPUT_RIGHT))) {
+					has_been_pressed = true;
+					is_backwards = true;
+				}
+
+				if (has_been_pressed) {
+					GameMove* move = &game_moves[scene->player_selected_move_idx];
+					GameEntityFilterArgs filter_args = {0};
+					filter_args.origin_tile_x = (U32)floorf(player->position.x);
+					filter_args.origin_tile_y = (U32)floorf(player->position.z);
+					filter_args.radius = move->range_radius;
+					filter_args.ignore_entity_id = scene->player_entity_id;
+
+					game_scene_play_entity_iter_next_in_range(scene, &scene->player_target_entity_id, &filter_args, is_backwards);
+					game_scene_play_camera_set_target_entity(scene, scene->player_target_entity_id);
+					if (move->splash_radius > 0.f) {
+						game_scene_play_combat_update_tints(scene, NULL);
+					}
+				}
+			}
+			break;
+		};
+		case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_TILE: {
+			if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_A)) {
+				entity_turn->data.use_move.data.target_tile.x = scene->player_target_tile_x;
+				entity_turn->data.use_move.data.target_tile.y = scene->player_target_tile_y;
+				game_scene_play_entity_perform_turn(scene, scene->player_entity_id, &scene->player_entity_turn);
+				next_state = GAME_PLAYER_ACTION_STATE_MOVE_ANIMATE;
+			} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_B)) {
+				next_state = GAME_PLAYER_ACTION_STATE_MOVE_DIALOG;
+			} else {
+				bool has_been_pressed = false;
+				bool is_backwards = false;
+
+				U32 og_target_tile_x = scene->player_target_tile_x;
+				U32 og_target_tile_y = scene->player_target_tile_y;
+
+				if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_UP)) {
+					scene->player_target_tile_y += 1;
+				} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_DOWN)) {
+					scene->player_target_tile_y -= 1;
+				} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_LEFT)) {
+					scene->player_target_tile_x -= 1;
+				} else if (state.has_been_pressed & ENUM_FLAG(GAME_INPUT_RIGHT)) {
+					scene->player_target_tile_x += 1;
+				}
+
+				GameMove* move = &game_moves[scene->player_selected_move_idx];
+				F32 squared_radius = (F32)move->range_radius * (F32)move->range_radius;
+				if (og_target_tile_x != scene->player_target_tile_x || og_target_tile_y != scene->player_target_tile_y) {
+					Vec2 offset = vec2_sub(VEC2_INIT((F32)scene->player_target_tile_x, (F32)scene->player_target_tile_y), VEC2_INIT(floorf(player->position.x), floorf(player->position.z)));
+					F32 squared_distance = vec2_dot(offset, offset);
+
+					if (squared_distance <= squared_radius) {
+						game_scene_play_combat_update_tints(scene, NULL);
+						game_scene_play_camera_set_target_tile(scene, scene->player_target_tile_x, scene->player_target_tile_y);
+					} else {
+						scene->player_target_tile_x = og_target_tile_x;
+						scene->player_target_tile_y = og_target_tile_y;
+					}
+				}
+			}
+			break;
+		};
+		case GAME_PLAYER_ACTION_STATE_MOVE_ANIMATE:
+			break;
+		case GAME_PLAYER_ACTION_STATE_ITEM:
+			break;
+		case GAME_PLAYER_ACTION_STATE_ABILITY_DIALOG:
+			break;
+		case GAME_PLAYER_ACTION_STATE_ABILITY_TARGET_ENTITY:
+			break;
+		case GAME_PLAYER_ACTION_STATE_ABILITY_TARGET_DIRECTION:
+			break;
+	}
+
+	//
+	// if the state has changed then setup the next state
+	if (prev_state != next_state) {
+		scene->player_action_state = next_state;
+		switch (next_state) {
+		case GAME_PLAYER_ACTION_STATE_MOVING: {
+			scene->flags &= ~GAME_SCENE_PLAY_GLOW;
+			game_scene_play_camera_set_target_entity(scene, scene->player_entity_id);
+
+			if (prev_state == GAME_PLAYER_ACTION_STATE_MOVE_ANIMATE) {
+				GameEntity* entity = NULL;
+				GameEntityId entity_id = {0};
+				while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+					entity->animate_og_health = entity->health;
+				}
+			}
+
+			HERO_ZERO_ELMT_MANY(scene->terrain_tile_tint_map, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+			scene->render_data.terrain_tile_tint_map = scene->terrain_tile_tint_map;
+			break;
+		};
+		case GAME_PLAYER_ACTION_STATE_INTERACT_DIALOG:
+			break;
+		case GAME_PLAYER_ACTION_STATE_MOVE_DIALOG:
+			scene->flags |= GAME_SCENE_PLAY_GLOW;
+			entity_turn->type = GAME_ENTITY_TURN_TYPE_USE_MOVE;
+			game_scene_play_camera_set_target_entity(scene, scene->player_entity_id);
+			if (prev_state == GAME_PLAYER_ACTION_STATE_MOVING) {
+				game_scene_play_combat_select_move(scene, 0);
+			} else {
+				game_scene_play_combat_update_tints(scene, NULL);
+			}
+			break;
+		case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_ENTITY: {
+			game_scene_play_camera_set_target_entity(scene, scene->player_target_entity_id);
+			if (game_moves[scene->player_selected_move_idx].splash_radius > 0.f) {
+				game_scene_play_combat_update_tints(scene, NULL);
+			}
+			break;
+		};
+		case GAME_PLAYER_ACTION_STATE_MOVE_TARGET_TILE: {
+			scene->player_target_tile_x = (U32)floorf(player->position.x);
+			scene->player_target_tile_y = (U32)floorf(player->position.z);
+			break;
+		};
+		case GAME_PLAYER_ACTION_STATE_MOVE_ANIMATE: {
+			scene->player_move_animate_time = 0.f;
+			break;
+		};
+		}
 	}
 
 	return HERO_SUCCESS;
@@ -750,7 +1548,220 @@ U8 game_scene_play_entity_ascii(GameEntity* entity) {
 		return '@';
 	}
 
+	switch (entity->type) {
+		case GAME_ENTITY_TYPE_HUMAN:
+			return 'H';
+	}
+
 	return '\0';
+}
+
+void game_scene_play_entity_filter_start(GameScenePlay* scene, GameEntityFilterArgs* args) {
+	args->_squared_radius = args->radius * args->radius;
+	args->_prev_squared_distance = 0.f;
+	args->_valid = false;
+	args->_splash = false;
+	args->_half_angle_cos = cosf(args->spread_angle / 2.f);
+	args->_squared_half_angle_cos = args->_half_angle_cos * fabsf(args->_half_angle_cos);
+	args->_squared_splash_radius = args->splash_radius * args->splash_radius;
+}
+
+void game_scene_play_entity_filter_check(GameScenePlay* scene, GameEntityId entity_id, GameEntity* entity, GameEntityFilterArgs* args) {
+	args->_valid = false;
+	args->_splash = false;
+
+	if (entity_id.raw == args->ignore_entity_id.raw) {
+		return;
+	}
+
+	S32 offset_x = (S32)floorf(entity->position.x) - args->origin_tile_x;
+	S32 offset_y = (S32)floorf(entity->position.z) - args->origin_tile_y;
+
+	U32 squared_distance = (offset_x * offset_x) + (offset_y * offset_y);
+	args->_prev_squared_distance = squared_distance;
+	if (squared_distance > args->_squared_radius) {
+		return;
+	}
+	if (args->spread_angle > 0.f) {
+		Vec2 offset = VEC2_INIT((F32)offset_x, (F32)offset_y);
+		F32 entity_angle_cos = vec2_dot(offset, args->aim_direction);
+		F32 squared_tile_angle_cos = entity_angle_cos * fabsf(entity_angle_cos);
+		F32 result = args->_squared_half_angle_cos * squared_distance;
+		if (result > squared_tile_angle_cos) {
+			return;
+		}
+	}
+	args->_valid = true;
+
+	if (args->_squared_splash_radius > 0.f) {
+		S32 splash_offset_x = (S32)floorf(entity->position.x) - args->splash_origin_tile_x;
+		S32 splash_offset_y = (S32)floorf(entity->position.z) - args->splash_origin_tile_y;
+		U32 squared_splash_distance = (splash_offset_x * splash_offset_x) + (splash_offset_y * splash_offset_y);
+		if (squared_splash_distance <= args->_squared_splash_radius) {
+			args->_splash = true;
+		}
+	}
+}
+
+HeroResult game_scene_play_entity_find_closest_in_range(GameScenePlay* scene, GameEntityFilterArgs* args, GameEntityId* id_out) {
+	HeroResult result;
+	game_scene_play_entity_filter_start(scene, args);
+
+	GameEntity* entity = NULL;
+	GameEntityId entity_id = {0};
+	F32 closest_squared_distance = INFINITY;
+	GameEntityId closest_entity_id = {0};
+	while ((result = hero_object_pool(GameEntity, iter_next)(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+		game_scene_play_entity_filter_check(scene, entity_id, entity, args);
+		if (!args->_valid) {
+			continue;
+		}
+
+		if (args->_prev_squared_distance < closest_squared_distance && args->_prev_squared_distance <= args->_squared_radius) {
+			closest_entity_id = entity_id;
+			closest_squared_distance = args->_prev_squared_distance;
+		}
+	}
+	HERO_RESULT_ASSERT(result);
+
+	if (closest_entity_id.raw) {
+		*id_out = closest_entity_id;
+		return HERO_SUCCESS;
+	} else {
+		return HERO_ERROR_DOES_NOT_EXIST;
+	}
+}
+
+HeroResult game_scene_play_entity_iter_next_in_range(GameScenePlay* scene, GameEntityId* id_mut, GameEntityFilterArgs* args, bool backwards) {
+	HeroResult result;
+	game_scene_play_entity_filter_start(scene, args);
+
+	GameEntity* entity = NULL;
+	GameEntityId entity_id = {0};
+
+START_AGAIN: {}
+
+	HeroResult (*iter_fn)(HeroObjectPool(GameEntity)* entity_pool, GameEntityId* id_mut, GameEntity** out) =
+		backwards
+			? hero_object_pool(GameEntity, iter_prev)
+			: hero_object_pool(GameEntity, iter_next);
+
+	while ((result = iter_fn(&scene->entity_pool, &entity_id, &entity)) != HERO_SUCCESS_FINISHED) {
+		game_scene_play_entity_filter_check(scene, entity_id, entity, args);
+		if (!args->_valid) {
+			continue;
+		}
+
+		if (args->_prev_squared_distance <= args->_squared_radius) {
+			*id_mut = entity_id;
+			return HERO_SUCCESS;
+		}
+	}
+	HERO_RESULT_ASSERT(result);
+
+	//
+	// go round again if we didn't start from the beginning and found nothing.
+	if (id_mut->raw != 0 && entity_id.raw == 0) {
+		goto START_AGAIN;
+	}
+
+	return HERO_ERROR_DOES_NOT_EXIST;
+}
+
+void game_scene_play_entity_apply_damage(GameScenePlay* scene, GameEntityId target_id) {
+	GameEntity* target;
+	HeroResult result = game_scene_play_entity_get(scene, target_id, &target);
+	HERO_RESULT_ASSERT(result);
+
+	target->animate_og_health = target->health;
+
+	GameMove* move = &game_moves[scene->player_selected_move_idx];
+	U32 damage = move->damage;
+	if (target->health <= damage) {
+		target->health = 0;
+	} else {
+		target->health -= damage;
+	}
+}
+
+void game_scene_play_camera_set_target_tile(GameScenePlay* scene, U32 tile_x, U32 tile_y) {
+	GameCamera* camera = &scene->camera;
+	camera->target_entity_id.raw = 0;
+
+	F32 y = game_scene_play_tile_max_voxel_height(scene, tile_x, tile_y);
+	camera->target_position = VEC3_INIT(tile_x, y, tile_y);
+}
+
+void game_scene_play_camera_set_target_entity(GameScenePlay* scene, GameEntityId entity_id) {
+	GameCamera* camera = &scene->camera;
+	if (camera->target_entity_id.raw == entity_id.raw) {
+		return;
+	}
+
+	camera->target_entity_id = entity_id;
+}
+
+void game_scene_play_camera_update(GameScenePlay* scene) {
+	GameCamera* camera = &scene->camera;
+	Vec3 position;
+	if (camera->target_entity_id.raw) {
+		GameEntity* entity;
+		HeroResult result = game_scene_play_entity_get(scene, camera->target_entity_id, &entity);
+		HERO_RESULT_ASSERT(result);
+
+		position = entity->position;
+	} else {
+		position = camera->target_position;
+	}
+
+	Vec3 target_vec = vec3_sub(vec3_add(position, GAME_CAMERA_TARGET_OFFSET), camera->position);
+	F32 distance = vec3_len(target_vec);
+
+	F32 move_distance = HERO_MAX(distance, GAME_PLAYER_MOVE_SPEED);
+	move_distance *= game.dt;
+	move_distance = HERO_MIN(move_distance, distance);
+
+	Vec3 target_dir = vec3_norm(target_vec);
+	Vec3 move_vec = vec3_mul_scalar(target_dir, move_distance);
+
+	camera->position = vec3_add(camera->position, move_vec);
+
+	static int init = 0;
+	if (!init) {
+		Vec3 camera_target_pos = vec3_sub(camera->position, GAME_CAMERA_TARGET_OFFSET);
+		camera->forward = vec3_norm(vec3_sub(vec3_add(camera_target_pos, VEC3_INIT(0.5f, 0.f, 0.5f)), camera->position));
+		F32 pitch = asinf(-camera->forward.y);
+		F32 yaw = atan2f(camera->forward.x, camera->forward.z);
+		Quat x_rotation = quat_rotate(yaw, VEC3_INIT(0.f, 1.f, 0.f));
+		Quat y_rotation = quat_rotate(pitch, VEC3_INIT(1.f, 0.f, 0.f));
+		camera->rotation = quat_norm(quat_mul(x_rotation, y_rotation));
+		init = 1;
+	}
+
+	game_scene_play_update_mvp(scene);
+}
+
+void game_scene_play_update_mvp(GameScenePlay* scene) {
+	Mat4x4 view_to_ndc;
+	mat4x4_perspective(&view_to_ndc, HERO_DEGREES_TO_RADIANS(45.f), (float)1920 / (float)1080, 0.1f, 100.f);
+
+	Mat4x4 world_to_view;
+	mat4x4_identity(&world_to_view);
+
+	mat4x4_mul_quat(&world_to_view, &world_to_view, quat_conj(scene->camera.rotation));
+
+	mat4x4_translate(&world_to_view, vec3_neg(scene->camera.position));
+
+	mat4x4_mul(&scene->mvp, &world_to_view, &view_to_ndc);
+}
+
+Vec2 game_scene_play_world_to_screen_space_point(GameScenePlay* scene, Vec3 position) {
+	Vec4 screen_pos = mat4x4_mul_vec4(&scene->mvp, VEC4_INIT(position.x, position.y, position.z, 1.f));
+	screen_pos.x = screen_pos.x / fabsf(screen_pos.w) * 960.f + 960.f;
+	screen_pos.y = screen_pos.y / fabsf(screen_pos.w) * 540.f + 540.f;
+	screen_pos.y = 1080.f - screen_pos.y;
+
+	return VEC2_INIT(screen_pos.x, screen_pos.y);
 }
 
 // ===========================================
@@ -1414,6 +2425,7 @@ struct GameBillboardVertex {
 	Vec3 pos;
 	Vec2 uv;
 	U32 color;
+	U32 tint;
 };
 
 static HeroVertexAttribInfo game_gfx_billboard_attribs[] = {
@@ -1429,6 +2441,11 @@ static HeroVertexAttribInfo game_gfx_billboard_attribs[] = {
 	},
 	{ // GameBillboardVertex.color
 		.location = 2,
+		.elmt_type = HERO_VERTEX_ELMT_TYPE_U32,
+		.vector_type = HERO_VERTEX_VECTOR_TYPE_1,
+	},
+	{ // GameBillboardVertex.tint
+		.location = 3,
 		.elmt_type = HERO_VERTEX_ELMT_TYPE_U32,
 		.vector_type = HERO_VERTEX_VECTOR_TYPE_1,
 	},
@@ -1461,7 +2478,7 @@ HeroResult _game_gfx_play_terrain_tile_init() {
 			.type = HERO_BUFFER_TYPE_VERTEX,
 			.memory_location = HERO_MEMORY_LOCATION_SHARED,
 			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
-			.elmts_count = GAME_PLAY_TILE_VOXELS_VERTICES_COUNT,
+			.elmts_count = GAME_ISLAND_TILE_VOXELS_VERTICES_COUNT,
 			.typed.vertex.layout_id = gfx->terrain_tile_vertex_layout_id,
 			.typed.vertex.binding_idx = 0,
 		};
@@ -1476,7 +2493,7 @@ HeroResult _game_gfx_play_terrain_tile_init() {
 			.type = HERO_BUFFER_TYPE_INDEX,
 			.memory_location = HERO_MEMORY_LOCATION_SHARED,
 			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
-			.elmts_count = GAME_PLAY_TILE_VOXELS_INDICES_COUNT,
+			.elmts_count = GAME_ISLAND_TILE_VOXELS_INDICES_COUNT,
 			.typed.index_type = HERO_INDEX_TYPE_U32,
 		};
 
@@ -1485,20 +2502,20 @@ HeroResult _game_gfx_play_terrain_tile_init() {
 	}
 
 	GameTerrainTileVertex* vertices;
-	result = hero_buffer_write(game.gfx.ldev, gfx->terrain_tile_vertex_buffer_id, 0, GAME_PLAY_TILE_VOXELS_VERTICES_COUNT, (void**)&vertices);
+	result = hero_buffer_write(game.gfx.ldev, gfx->terrain_tile_vertex_buffer_id, 0, GAME_ISLAND_TILE_VOXELS_VERTICES_COUNT, (void**)&vertices);
 	HERO_RESULT_ASSERT(result);
 
 	U32* indices;
-	result = hero_buffer_write(game.gfx.ldev, gfx->terrain_tile_index_buffer_id, 0, GAME_PLAY_TILE_VOXELS_INDICES_COUNT, (void**)&indices);
+	result = hero_buffer_write(game.gfx.ldev, gfx->terrain_tile_index_buffer_id, 0, GAME_ISLAND_TILE_VOXELS_INDICES_COUNT, (void**)&indices);
 	HERO_RESULT_ASSERT(result);
 
 	F32 pos_y = 0.f;
 	U32 vertices_start_idx = 0;
 	U32 indices_start_idx = 0;
-	for_range(vy, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+	for_range(vy, 0, GAME_ISLAND_TILE_AXIS_VOXELS_COUNT) {
 		F32 pos_x = 0.f;
 
-		for_range(vx, 0, GAME_PLAY_TILE_AXIS_VOXELS_COUNT) {
+		for_range(vx, 0, GAME_ISLAND_TILE_AXIS_VOXELS_COUNT) {
 			//
 			// top
 			//
@@ -1507,15 +2524,15 @@ HeroResult _game_gfx_play_terrain_tile_init() {
 				.normal = VEC3_UP,
 			};
 			vertices[vertices_start_idx + 1] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x, 1.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.pos = VEC3_INIT(pos_x, 1.f, pos_y + GAME_ISLAND_TILE_VOXEL_STEP),
 				.normal = VEC3_UP,
 			};
 			vertices[vertices_start_idx + 2] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.pos = VEC3_INIT(pos_x + GAME_ISLAND_TILE_VOXEL_STEP, 1.f, pos_y + GAME_ISLAND_TILE_VOXEL_STEP),
 				.normal = VEC3_UP,
 			};
 			vertices[vertices_start_idx + 3] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y),
+				.pos = VEC3_INIT(pos_x + GAME_ISLAND_TILE_VOXEL_STEP, 1.f, pos_y),
 				.normal = VEC3_UP,
 			};
 
@@ -1531,11 +2548,11 @@ HeroResult _game_gfx_play_terrain_tile_init() {
 				.normal = VEC3_BACKWARD,
 			};
 			vertices[vertices_start_idx + 6] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y),
+				.pos = VEC3_INIT(pos_x + GAME_ISLAND_TILE_VOXEL_STEP, 1.f, pos_y),
 				.normal = VEC3_BACKWARD,
 			};
 			vertices[vertices_start_idx + 7] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 0.f, pos_y),
+				.pos = VEC3_INIT(pos_x + GAME_ISLAND_TILE_VOXEL_STEP, 0.f, pos_y),
 				.normal = VEC3_BACKWARD,
 			};
 
@@ -1543,11 +2560,11 @@ HeroResult _game_gfx_play_terrain_tile_init() {
 			// left
 			//
 			vertices[vertices_start_idx + 8] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x, 0.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.pos = VEC3_INIT(pos_x, 0.f, pos_y + GAME_ISLAND_TILE_VOXEL_STEP),
 				.normal = VEC3_LEFT,
 			};
 			vertices[vertices_start_idx + 9] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x, 1.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.pos = VEC3_INIT(pos_x, 1.f, pos_y + GAME_ISLAND_TILE_VOXEL_STEP),
 				.normal = VEC3_LEFT,
 			};
 			vertices[vertices_start_idx + 10] = (GameTerrainTileVertex) {
@@ -1564,19 +2581,19 @@ HeroResult _game_gfx_play_terrain_tile_init() {
 			// right
 			//
 			vertices[vertices_start_idx + 12] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 0.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.pos = VEC3_INIT(pos_x + GAME_ISLAND_TILE_VOXEL_STEP, 0.f, pos_y + GAME_ISLAND_TILE_VOXEL_STEP),
 				.normal = VEC3_LEFT,
 			};
 			vertices[vertices_start_idx + 13] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y + GAME_PLAY_TILE_VOXEL_STEP),
+				.pos = VEC3_INIT(pos_x + GAME_ISLAND_TILE_VOXEL_STEP, 1.f, pos_y + GAME_ISLAND_TILE_VOXEL_STEP),
 				.normal = VEC3_LEFT,
 			};
 			vertices[vertices_start_idx + 14] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 1.f, pos_y),
+				.pos = VEC3_INIT(pos_x + GAME_ISLAND_TILE_VOXEL_STEP, 1.f, pos_y),
 				.normal = VEC3_LEFT,
 			};
 			vertices[vertices_start_idx + 15] = (GameTerrainTileVertex) {
-				.pos = VEC3_INIT(pos_x + GAME_PLAY_TILE_VOXEL_STEP, 0.f, pos_y),
+				.pos = VEC3_INIT(pos_x + GAME_ISLAND_TILE_VOXEL_STEP, 0.f, pos_y),
 				.normal = VEC3_LEFT,
 			};
 
@@ -1621,12 +2638,12 @@ HeroResult _game_gfx_play_terrain_tile_init() {
 			indices[indices_start_idx + 22] = vertices_start_idx + 13;
 			indices[indices_start_idx + 23] = vertices_start_idx + 12;
 
-			vertices_start_idx += GAME_PLAY_VOXEL_VERTICES_COUNT;
-			indices_start_idx += GAME_PLAY_VOXEL_INDICES_COUNT;
-			pos_x += GAME_PLAY_TILE_VOXEL_STEP;
+			vertices_start_idx += GAME_ISLAND_VOXEL_VERTICES_COUNT;
+			indices_start_idx += GAME_ISLAND_VOXEL_INDICES_COUNT;
+			pos_x += GAME_ISLAND_TILE_VOXEL_STEP;
 		}
 
-		pos_y += GAME_PLAY_TILE_VOXEL_STEP;
+		pos_y += GAME_ISLAND_TILE_VOXEL_STEP;
 	}
 
 	return HERO_SUCCESS;
@@ -1856,14 +2873,34 @@ HeroResult game_gfx_play_init() {
 	{
 		HeroImageSetup setup = {
 			.type = HERO_IMAGE_TYPE_2D,
+			.internal_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
+			.format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
+			.flags = HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS | HERO_IMAGE_FLAGS_STORAGE,
+			.samples = HERO_SAMPLE_COUNT_1,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
+			.width = GAME_ISLAND_AXIS_TILES_COUNT,
+			.height = GAME_ISLAND_AXIS_TILES_COUNT,
+			.depth = 1,
+			.mip_levels = 1,
+			.array_layers_count = 1,
+		};
+
+		result = hero_image_init(game.gfx.ldev, &setup, &gfx->terrain_tile_tint_image_id);
+		HERO_RESULT_ASSERT(result);
+	}
+
+	{
+		HeroImageSetup setup = {
+			.type = HERO_IMAGE_TYPE_2D,
 			.internal_format = HERO_IMAGE_FORMAT_R32_SFLOAT,
 			.format = HERO_IMAGE_FORMAT_R32_SFLOAT,
 			.flags = HERO_IMAGE_FLAGS_USED_FOR_GRAPHICS | HERO_IMAGE_FLAGS_STORAGE,
 			.samples = HERO_SAMPLE_COUNT_1,
 			.memory_location = HERO_MEMORY_LOCATION_SHARED,
 			.queue_support_flags = HERO_QUEUE_SUPPORT_FLAGS_GRAPHICS,
-			.width = GAME_PLAY_CELL_AXIS_VOXELS_COUNT,
-			.height = GAME_PLAY_CELL_AXIS_VOXELS_COUNT,
+			.width = GAME_ISLAND_AXIS_VOXELS_COUNT,
+			.height = GAME_ISLAND_AXIS_VOXELS_COUNT,
 			.depth = 1,
 			.mip_levels = 1,
 			.array_layers_count = 1,
@@ -1907,6 +2944,9 @@ HeroResult game_gfx_play_init() {
 		HERO_RESULT_ASSERT(result);
 
 		result = hero_shader_globals_set_image_storage(ldev, gfx->terrain_tile_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_VOXEL_HEIGHT_MAP, 0, gfx->voxel_height_image_id);
+		HERO_RESULT_ASSERT(result);
+
+		result = hero_shader_globals_set_image_storage(ldev, gfx->terrain_tile_shader_globals_id, GAME_PLAY_GLOBAL_BINDING_TERRAIN_TILE_TINT_MAP, 0, gfx->terrain_tile_tint_image_id);
 		HERO_RESULT_ASSERT(result);
 
 		result = hero_shader_globals_update(ldev, gfx->terrain_tile_shader_globals_id);
@@ -2124,20 +3164,40 @@ HeroResult game_gfx_play_deinit() {
 	return HERO_SUCCESS;
 }
 
+typedef struct GameGfxPlayTerrianPushConstants GameGfxPlayTerrianPushConstants;
+struct GameGfxPlayTerrianPushConstants {
+	U32 view_tile_left_start;
+	U32 view_tile_bottom_start;
+	U32 view_tile_width;
+};
+
+int game_render_entity_billboard_sort_fn(const void* a, const void* b) {
+	const GameRenderEntityBillboard* a_ = a;
+	const GameRenderEntityBillboard* b_ = b;
+	if (a_->position.z < b_->position.z) {
+		return 1;
+	} else {
+		return -1;
+	}
+}
+
 HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 	GameGfxPlay* gfx = &game.gfx.play;
 	HeroResult result;
 
-	U32 cell_x = 12;
-	U32 cell_y = 12;
+	if (gfx->scene_render_data.terrain_tile_tint_map) {
+		// TODO support sub updates
+		U32* tile_tint_map;
+		HeroResult result = hero_image_write(game.gfx.ldev, gfx->terrain_tile_tint_image_id, NULL, (void**)&tile_tint_map);
+		HERO_RESULT_ASSERT(result);
+		HERO_COPY_ELMT_MANY(tile_tint_map, gfx->scene_render_data.terrain_tile_tint_map, GAME_ISLAND_AXIS_TILES_COUNT * GAME_ISLAND_AXIS_TILES_COUNT);
+	}
 
-	static int init = 0;
-	if (!init) {
-		init += 1;
+	if (gfx->scene_render_data.voxel_height_map) {
 		F32* voxel_height_map;
 		HeroResult result = hero_image_write(game.gfx.ldev, gfx->voxel_height_image_id, NULL, (void**)&voxel_height_map);
 		HERO_RESULT_ASSERT(result);
-		HERO_COPY_ELMT_MANY(voxel_height_map, gfx->scene_render_data.voxel_height_map, GAME_PLAY_CELL_AXIS_VOXELS_COUNT * GAME_PLAY_CELL_AXIS_VOXELS_COUNT);
+		HERO_COPY_ELMT_MANY(voxel_height_map, gfx->scene_render_data.voxel_height_map, GAME_ISLAND_AXIS_VOXELS_COUNT * GAME_ISLAND_AXIS_VOXELS_COUNT);
 	}
 
 	GamePlayGlobalUBO* global_ubo;
@@ -2165,8 +3225,24 @@ HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 	result = hero_cmd_compute_dispatch(command_recorder, gfx->voxel_raytrace_shader_id, gfx->voxel_raytrace_shader_globals_id, 1920 / 32, 1088 / 32, 1);
 	HERO_RESULT_ASSERT(result);
 #endif
+
+
 	result = hero_cmd_render_pass_start(command_recorder, gfx->render_pass_id, gfx->frame_buffer_id, NULL, NULL);
 	HERO_RESULT_ASSERT(result);
+
+	U32 view_width = 38;
+	U32 view_height = 28;
+	F32 view_x_offset = (F32)view_width / 2.f;
+	F32 view_y_offset = (F32)view_height / 2.f;
+	Vec3 camera_target = vec3_sub(gfx->scene_render_data.camera_position, GAME_CAMERA_TARGET_OFFSET);
+	U32 view_tile_left_start = (U32)(camera_target.x - view_x_offset);
+	U32 view_tile_bottom_start = (U32)(camera_target.z - view_y_offset + 4.f);
+
+	GameGfxPlayTerrianPushConstants pc = {
+		.view_tile_left_start = view_tile_left_start,
+		.view_tile_bottom_start = view_tile_bottom_start,
+		.view_tile_width = view_width,
+	};
 
 	result = hero_cmd_draw_start(command_recorder, gfx->terrain_tile_material_id);
 	HERO_RESULT_ASSERT(result);
@@ -2174,10 +3250,13 @@ HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 	result = hero_cmd_draw_set_vertex_buffer(command_recorder, gfx->terrain_tile_vertex_buffer_id, 0, 0);
 	HERO_RESULT_ASSERT(result);
 
-	result = hero_cmd_draw_set_instances(command_recorder, 0, GAME_ISLAND_CELL_AXIS_TILES_COUNT * GAME_ISLAND_CELL_AXIS_TILES_COUNT);
+	result = hero_cmd_draw_set_instances(command_recorder, 0, view_width * view_height);
 	HERO_RESULT_ASSERT(result);
 
-	result = hero_cmd_draw_end_indexed(command_recorder, gfx->terrain_tile_index_buffer_id, 0, GAME_PLAY_TILE_VOXELS_INDICES_COUNT, 0);
+	result = hero_cmd_draw_set_push_constants(command_recorder, &pc, 0, sizeof(pc));
+	HERO_RESULT_ASSERT(result);
+
+	result = hero_cmd_draw_end_indexed(command_recorder, gfx->terrain_tile_index_buffer_id, 0, GAME_ISLAND_TILE_VOXELS_INDICES_COUNT, 0);
 	HERO_RESULT_ASSERT(result);
 
 	{
@@ -2220,6 +3299,7 @@ HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 
 		U32 vertices_start_idx = 0;
 		U32 indices_start_idx = 0;
+		qsort(gfx->scene_render_data.entity_billboards.data, gfx->scene_render_data.entity_billboards.count, sizeof(GameRenderEntityBillboard), game_render_entity_billboard_sort_fn);
 		for_range(i, 0, gfx->scene_render_data.entity_billboards.count) {
 			GameRenderEntityBillboard* b = &gfx->scene_render_data.entity_billboards.data[i];
 
@@ -2234,25 +3314,29 @@ HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 			vertices[vertices_start_idx + 0] = (GameBillboardVertex) {
 				.pos = vec3_add(top_left, b->position),
 				.uv = VEC2_INIT(uv_x, uv_y),
-				.color = color,
+				.color = b->color,
+				.tint = b->tint,
 			};
 
 			vertices[vertices_start_idx + 1] = (GameBillboardVertex) {
 				.pos = vec3_add(top_right, b->position),
 				.uv = VEC2_INIT(uv_ex, uv_y),
-				.color = color,
+				.color = b->color,
+				.tint = b->tint,
 			};
 
 			vertices[vertices_start_idx + 2] = (GameBillboardVertex) {
 				.pos = vec3_add(bottom_right, b->position),
 				.uv = VEC2_INIT(uv_ex, uv_ey),
-				.color = color,
+				.color = b->color,
+				.tint = b->tint,
 			};
 
 			vertices[vertices_start_idx + 3] = (GameBillboardVertex) {
 				.pos = vec3_add(bottom_left, b->position),
 				.uv = VEC2_INIT(uv_x, uv_ey),
-				.color = color,
+				.color = b->color,
+				.tint = b->tint,
 			};
 
 			indices[indices_start_idx + 0] = vertices_start_idx + 0;

@@ -22,10 +22,17 @@ layout (location = 0) in vec3 v_position;
 layout (location = 1) in vec3 v_normal;
 
 layout (location = 0) out smooth vec3 f_normal;
-layout (location = 1) out smooth vec4 f_color;
+layout (location = 1) out smooth vec3 f_color;
+layout (location = 2) out flat vec4 f_tint;
 
 out gl_PerVertex {
 	vec4 gl_Position;
+};
+
+layout (push_constant) uniform constants {
+	U32 view_tile_left_start;
+	U32 view_tile_bottom_start;
+	U32 view_tile_width;
 };
 
 // ===========================================
@@ -36,18 +43,30 @@ out gl_PerVertex {
 
 void main() {
 	f_normal = v_normal;
-	f_color = vec4(0.5, 0.5, 0.5, 1.0);
+	f_color = vec3(0.5, 0.5, 0.5);
 
-	U32 tile_offset_x = gl_InstanceIndex % GAME_ISLAND_CELL_AXIS_TILES_COUNT;
-	U32 tile_offset_z = gl_InstanceIndex / GAME_ISLAND_CELL_AXIS_TILES_COUNT;
+	U32 tile_x = view_tile_left_start + (gl_InstanceIndex % view_tile_width);
+	U32 tile_z = view_tile_bottom_start + (gl_InstanceIndex / view_tile_width);
 
-	vec3 pos = v_position + vec3(F32(tile_offset_x), 0.0, F32(tile_offset_z));
+	vec3 pos = v_position + vec3(F32(tile_x), 0.0, F32(tile_z));
+
+	U32 voxel_idx = (gl_VertexIndex / GAME_ISLAND_VOXEL_VERTICES_COUNT);
+	U32 voxel_offset_x = voxel_idx % GAME_ISLAND_TILE_AXIS_VOXELS_COUNT;
+	U32 voxel_offset_z = voxel_idx / GAME_ISLAND_TILE_AXIS_VOXELS_COUNT;
+	U32 voxel_x = (tile_x * GAME_ISLAND_TILE_AXIS_VOXELS_COUNT) + voxel_offset_x;
+	U32 voxel_z = (tile_z * GAME_ISLAND_TILE_AXIS_VOXELS_COUNT) + voxel_offset_z;
+	F32 y = imageLoad(u_voxel_height_map, ivec2(voxel_x, voxel_z)).r;
+	f_tint = imageLoad(u_terrain_tile_tint_map, ivec2(tile_x, tile_z));
+
+	if (f_tint.a > 0.0 && (voxel_offset_x == 2 || voxel_offset_z == 2)) {
+		f_tint.rgb *= 0.6;
+		f_tint.a = 1.0;
+	}
 
 	if (pos.y != 0.0) {
-		U32 voxel_idx = (gl_VertexIndex / GAME_PLAY_VOXEL_VERTICES_COUNT);
-		U32 voxel_offset_x = (tile_offset_x * GAME_PLAY_TILE_AXIS_VOXELS_COUNT) + (voxel_idx % GAME_PLAY_TILE_AXIS_VOXELS_COUNT);
-		U32 voxel_offset_z = (tile_offset_z * GAME_PLAY_TILE_AXIS_VOXELS_COUNT) + (voxel_idx / GAME_PLAY_TILE_AXIS_VOXELS_COUNT);
-		pos.y = imageLoad(u_voxel_height_map, ivec2(voxel_offset_x, voxel_offset_z)).r;
+		pos.y = y;
+	} else {
+		pos.y = y - 4.f; // TODO this will cause a the bottom half of the voxel to be missing if the neighbouring has a difference > 4.f
 	}
 
 	gl_Position = mvp * vec4(pos, 1.0);
@@ -70,7 +89,8 @@ void main() {
 //
 // ===========================================
 layout (location = 0) in smooth vec3 f_normal;
-layout (location = 1) in smooth vec4 f_color;
+layout (location = 1) in smooth vec3 f_color;
+layout (location = 2) in flat vec4 f_tint;
 
 layout (location = 0) out vec4 out_frag_color;
 
@@ -81,15 +101,17 @@ layout (location = 0) out vec4 out_frag_color;
 // ===========================================
 
 void main() {
-	vec4 color = f_color;
+	vec3 color = f_color;
 	vec3 normal = normalize(f_normal);
 
-	vec3 light_dir = vec3(0.0, -1.0, 0.0);
+	float brightness = 1.0;
+	if (abs(normal.x) > abs(normal.y) && abs(normal.x) > abs(normal.z)) {
+		brightness = 0.3;
+	} else if (abs(normal.z) > abs(normal.y) && abs(normal.z) > abs(normal.x)) {
+		brightness = 0.15;
+	}
 
-	float NdotL = dot(normal, light_dir);
-	float intensity = max(0.0, -NdotL);
-
-	out_frag_color = vec4(color.rgb * intensity, 1.0);
+	out_frag_color = vec4(mix(color, f_tint.rgb, f_tint.a) * brightness, 1.0);
 }
 
 #endif // FRAGMENT

@@ -335,11 +335,12 @@ void _hero_ui_widget_layout(HeroUIWindow* window, HeroUIWidget* widget) {
 
 	//
 	// convert the layout from an outer layout to an inner layout
-	HeroAabb layout = widget->area;
+	HeroAabb inner_area = widget->area;
 	if (widget->styles) {
 		HeroUIWidgetStyle* style = hero_ui_widget_style(widget);
-		hero_ui_area_outer_to_inner(&layout, style);
+		hero_ui_area_outer_to_inner(&inner_area, style);
 	}
+	HeroAabb layout = inner_area;
 
 	//
 	// if the widget has children that want to proportionally fill
@@ -390,13 +391,57 @@ void _hero_ui_widget_layout(HeroUIWindow* window, HeroUIWidget* widget) {
 		}
 
 		HeroAabb child_area;
-		switch (cut) {
-			case HERO_UI_CUT_CENTER_HORIZONTAL: child_area = hero_aabb_cut_center_horizontal(&layout, cut_length + style->margin.left + style->margin.right); break;
-			case HERO_UI_CUT_CENTER_VERTICAL: child_area = hero_aabb_cut_center_vertical(&layout, cut_length + style->margin.top + style->margin.bottom); break;
-			case HERO_UI_CUT_LEFT: child_area = hero_aabb_cut_left(&layout, cut_length + style->margin.left + style->margin.right); break;
-			case HERO_UI_CUT_TOP: child_area = hero_aabb_cut_top(&layout, cut_length + style->margin.top + style->margin.bottom); break;
-			case HERO_UI_CUT_RIGHT: child_area = hero_aabb_cut_right(&layout, cut_length + style->margin.left + style->margin.right); break;
-			case HERO_UI_CUT_BOTTOM: child_area = hero_aabb_cut_bottom(&layout, cut_length + style->margin.top + style->margin.bottom); break;
+		if (child->flags & HERO_UI_WIDGET_FLAGS_CUSTOM_OFFSET) {
+			Vec2 size;
+			if (hero_ui_cut_is_horizontal(child->cut)) {
+				size.x = cut_length;
+				size.y = child->custom_perp_cut_length;
+			} else {
+				size.x = child->custom_perp_cut_length;
+				size.y = cut_length;
+			}
+
+			Vec2 top_left = child->custom_offset;
+
+			switch (child->custom_align & HERO_UI_ALIGN_X_RIGHT) {
+				case HERO_UI_ALIGN_X_CENTER:
+					top_left.x -= size.x / 2.f;
+					break;
+				case HERO_UI_ALIGN_X_LEFT:
+					break;
+				case HERO_UI_ALIGN_X_RIGHT:
+					top_left.x -= size.x;
+					break;
+			}
+
+			switch (child->custom_align & HERO_UI_ALIGN_Y_BOTTOM) {
+				case HERO_UI_ALIGN_Y_CENTER:
+					top_left.y -= size.y / 2.f;
+					break;
+				case HERO_UI_ALIGN_Y_TOP:
+					break;
+				case HERO_UI_ALIGN_Y_BOTTOM:
+					top_left.y -= size.y;
+					break;
+			}
+
+			child_area.x = top_left.x;
+			child_area.y = top_left.y;
+			child_area.ex = top_left.x + size.x;
+			child_area.ey = top_left.y + size.y;
+		} else if (child->flags & HERO_UI_WIDGET_FLAGS_NEXT_LAYER) {
+			//
+			// reset the layout to the parent's original size.
+			child_area = inner_area;
+		} else {
+			switch (cut) {
+				case HERO_UI_CUT_CENTER_HORIZONTAL: child_area = hero_aabb_cut_center_horizontal(&layout, cut_length + style->margin.left + style->margin.right); break;
+				case HERO_UI_CUT_CENTER_VERTICAL: child_area = hero_aabb_cut_center_vertical(&layout, cut_length + style->margin.top + style->margin.bottom); break;
+				case HERO_UI_CUT_LEFT: child_area = hero_aabb_cut_left(&layout, cut_length + style->margin.left + style->margin.right); break;
+				case HERO_UI_CUT_TOP: child_area = hero_aabb_cut_top(&layout, cut_length + style->margin.top + style->margin.bottom); break;
+				case HERO_UI_CUT_RIGHT: child_area = hero_aabb_cut_right(&layout, cut_length + style->margin.left + style->margin.right); break;
+				case HERO_UI_CUT_BOTTOM: child_area = hero_aabb_cut_bottom(&layout, cut_length + style->margin.top + style->margin.bottom); break;
+			}
 		}
 
 		child->area = child_area;
@@ -419,8 +464,8 @@ void _hero_ui_widget_render(HeroUIWindow* window, HeroUIWidget* widget) {
 	HeroUIWidgetStyle* style = hero_ui_widget_style(widget);
 
 	HeroAabb* area = &widget->area;
-	float width = area->ex - area->x - style->margin.left - style->margin.right - style->padding.left - style->padding.right - style->border_width - style->border_width;
-	float height = area->ey - area->y - style->margin.top - style->margin.bottom - style->padding.top - style->padding.bottom - style->border_width - style->border_width;
+	float width = area->ex - area->x - style->margin.left - style->margin.right;
+	float height = area->ey - area->y - style->margin.top - style->margin.bottom;
 	if (width <= 0.f || height <= 0.f) {
 		return;
 	}
@@ -428,6 +473,12 @@ void _hero_ui_widget_render(HeroUIWindow* window, HeroUIWidget* widget) {
 	if (widget->render_fn) {
 		result = widget->render_fn(window, widget);
 		HERO_RESULT_ASSERT(result);
+	}
+
+	width -= style->padding.left - style->padding.right - style->border_width - style->border_width;
+	height -= style->padding.top - style->padding.bottom - style->border_width - style->border_width;
+	if (width <= 0.f || height <= 0.f) {
+		return;
 	}
 
 	_hero_ui_widget_render_children(window, widget);
@@ -473,6 +524,7 @@ HeroResult hero_ui_widget_draw_aabb(HeroUIWindow* window, HeroAabb* aabb, F32 ra
 	draw_cmd->data.aabb.aabb = *aabb;
 	draw_cmd->data.aabb.radius = radius;
 	draw_cmd->data.aabb.color = color;
+	draw_cmd->data.aabb.border_width = 0.f;
 
 	return HERO_SUCCESS;
 }
@@ -581,6 +633,7 @@ HeroResult hero_ui_widget_draw_circle(HeroUIWindow* window, Vec2 center_pos, F32
 	draw_cmd->data.circle.center_pos = center_pos;
 	draw_cmd->data.circle.radius = radius;
 	draw_cmd->data.circle.color = color;
+	draw_cmd->data.circle.border_width = 0.f;
 
 	return HERO_SUCCESS;
 }
@@ -1384,7 +1437,7 @@ HeroResult hero_ui_sys_init(HeroUISysSetup* setup) {
 		blend_color_attachment.dst_color_blend_factor = HERO_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
 		blend_color_attachment.color_blend_op = HERO_BLEND_OP_ADD;
 		blend_color_attachment.src_alpha_blend_factor = HERO_BLEND_FACTOR_ONE;
-		blend_color_attachment.dst_alpha_blend_factor = HERO_BLEND_FACTOR_ZERO;
+		blend_color_attachment.dst_alpha_blend_factor = HERO_BLEND_FACTOR_ONE;
 		blend_color_attachment.alpha_blend_op = HERO_BLEND_OP_ADD;
 
 		render_state.blend.attachments = &blend_color_attachment;
@@ -1529,6 +1582,27 @@ HeroUIFocusState _hero_ui_widget_update_focus_state(HeroUIWindow* window, HeroUI
 	}
 }
 
+void hero_ui_widget_next_layer_start(HeroUIWindow* window, HeroUIWidgetSibId sib_id) {
+	window->build.next_widget_flags |= HERO_UI_WIDGET_FLAGS_NEXT_LAYER;
+	hero_ui_box_start(window, sib_id, HERO_UI_CUT_LEFT, HERO_UI_LEN_FILL, NULL);
+}
+
+void hero_ui_widget_next_layer_end(HeroUIWindow* window) {
+	hero_ui_box_end(window);
+}
+
+void hero_ui_widget_custom_offset(HeroUIWindow* window, Vec2 offset, F32 perp_cut_length, HeroUIAlign align) {
+	window->build.next_widget_flags |= HERO_UI_WIDGET_FLAGS_CUSTOM_OFFSET;
+	window->build.custom_offset = offset;
+	window->build.custom_align = align;
+	window->build.custom_perp_cut_length = perp_cut_length;
+}
+
+void hero_ui_widget_next_forced_state(HeroUIWindow* window, HeroUIWidgetState state) {
+	window->build.next_widget_flags |= HERO_UI_WIDGET_FLAGS_FORCE_NEXT_STATE;
+	window->build.next_forced_state = state;
+}
+
 HeroUIWidgetId hero_ui_box_start(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIWidgetStyle* styles) {
 	HeroUIWindowBuild* build = &window->build;
 
@@ -1601,6 +1675,12 @@ HeroUIWidgetId hero_ui_box_start(HeroUIWindow* window, HeroUIWidgetSibId sib_id,
 	window->build.next_widget_flags = 0;
 	widget->auto_perp_cut_length = 0.f;
 
+	if (widget->flags & HERO_UI_WIDGET_FLAGS_CUSTOM_OFFSET) {
+		widget->custom_offset = build->custom_offset;
+		widget->custom_align = build->custom_align;
+		widget->custom_perp_cut_length = build->custom_perp_cut_length;
+	}
+
 	//
 	// make widget focusable or not and can change on the fly.
 	if (widget->flags & HERO_UI_WIDGET_FLAGS_IS_FOCUSABLE) {
@@ -1648,6 +1728,10 @@ HeroUIWidgetId hero_ui_box_start(HeroUIWindow* window, HeroUIWidgetSibId sib_id,
 		}
 	} else if (widget->state == HERO_UI_WIDGET_STATE_FOCUSED) {
 		widget->state = HERO_UI_WIDGET_STATE_DEFAULT;
+	}
+
+	if (widget->flags & HERO_UI_WIDGET_FLAGS_FORCE_NEXT_STATE) {
+		widget->state = build->next_forced_state;
 	}
 
 	//
@@ -1723,9 +1807,9 @@ void hero_ui_box_end(HeroUIWindow* window) {
 	//
 	// add the rest of the inner padding for the auto perpendicular cut length.
 	if (hero_ui_cut_is_horizontal(widget->cut)) {
-		widget->auto_perp_cut_length += style->padding.left + style->padding.right;
-	} else if (hero_ui_cut_is_vertical(widget->cut)) {
 		widget->auto_perp_cut_length += style->padding.top + style->padding.bottom;
+	} else if (hero_ui_cut_is_vertical(widget->cut)) {
+		widget->auto_perp_cut_length += style->padding.left + style->padding.right;
 	}
 	widget->auto_perp_cut_length += style->border_width * 2.f;
 
@@ -1755,9 +1839,9 @@ void hero_ui_box_end(HeroUIWindow* window) {
 			child_outer_length = widget->auto_perp_cut_length;
 		}
 
-		if (hero_ui_cut_is_horizontal(widget->cut)) {
+		if (hero_ui_cut_is_horizontal(parent->cut)) {
 			child_outer_length += style->margin.left + style->margin.right;
-		} else if (hero_ui_cut_is_vertical(widget->cut)) {
+		} else if (hero_ui_cut_is_vertical(parent->cut)) {
 			child_outer_length += style->margin.top + style->margin.bottom;
 		}
 
@@ -1862,7 +1946,7 @@ HeroResult hero_ui_box_render(HeroUIWindow* window, HeroUIWidget* widget) {
 	return HERO_SUCCESS;
 }
 
-HeroUIWidgetId _hero_ui_image(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, bool is_grayscale, HeroUIImageId image_id, HeroColor image_bg_color, HeroColor image_fg_color, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIWidgetStyle* styles) {
+HeroUIWidgetId _hero_ui_image(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, bool is_grayscale, HeroUIImageId image_id, HeroColor image_bg_color, HeroColor image_fg_color, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIImageFlip flip, HeroUIWidgetStyle* styles) {
 	HeroUIWidgetId widget_id = hero_ui_box_start(window, sib_id, cut, HERO_UI_LEN_AUTO, styles);
 
 	HeroUIWidget* widget;
@@ -1894,18 +1978,19 @@ HeroUIWidgetId _hero_ui_image(HeroUIWindow* window, HeroUIWidgetSibId sib_id, He
 	widget->image_fg_color = image_fg_color;
 	widget->image_grayscale = is_grayscale;
 	widget->image_scale_mode = scale_mode;
+	widget->image_flip = flip;
 	widget->image_size = size;
 
 	hero_ui_box_end(window);
 	return widget_id;
 }
 
-HeroUIWidgetId hero_ui_image(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroUIImageId image_id, HeroColor image_tint, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIWidgetStyle* styles) {
-	return _hero_ui_image(window, sib_id, cut, false, image_id, image_tint, 0, scale, scale_mode, styles);
+HeroUIWidgetId hero_ui_image(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroUIImageId image_id, HeroColor image_tint, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIImageFlip flip, HeroUIWidgetStyle* styles) {
+	return _hero_ui_image(window, sib_id, cut, false, image_id, image_tint, 0, scale, scale_mode, flip, styles);
 }
 
-HeroUIWidgetId hero_ui_image_grayscale(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroUIImageId image_id, HeroColor bg_color, HeroColor fg_color, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIWidgetStyle* styles) {
-	return _hero_ui_image(window, sib_id, cut, true, image_id, bg_color, fg_color, scale, scale_mode, styles);
+HeroUIWidgetId hero_ui_image_grayscale(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, HeroUIImageId image_id, HeroColor bg_color, HeroColor fg_color, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIImageFlip flip, HeroUIWidgetStyle* styles) {
+	return _hero_ui_image(window, sib_id, cut, true, image_id, bg_color, fg_color, scale, scale_mode, flip, styles);
 }
 
 HeroResult hero_ui_image_render(HeroUIWindow* window, HeroUIWidget* widget) {
@@ -1960,6 +2045,18 @@ HeroResult hero_ui_image_render(HeroUIWindow* window, HeroUIWidget* widget) {
 			area.ex = area.x + image_width;
 			area.ey = area.y + image_height;
 			break;
+	}
+
+	if (widget->image_flip & HERO_UI_IMAGE_FLIP_X) {
+		F32 tmp = area.x;
+		area.x = area.ex;
+		area.ex = tmp;
+	}
+
+	if (widget->image_flip & HERO_UI_IMAGE_FLIP_Y) {
+		F32 tmp = area.y;
+		area.y = area.ey;
+		area.ey = tmp;
 	}
 
 	if (widget->image_grayscale) {
@@ -2051,13 +2148,13 @@ HeroUIWidgetId hero_ui_text_toggle_button(HeroUIWindow* window, HeroUIWidgetSibI
 	return hero_ui_text(window, sib_id, cut, cut_length, string, styles);
 }
 
-HeroUIWidgetId hero_ui_image_button(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIImageId image_id, HeroColor image_tint, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIWidgetStyle* styles) {
+HeroUIWidgetId hero_ui_image_button(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIImageId image_id, HeroColor image_tint, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIImageFlip flip, HeroUIWidgetStyle* styles) {
 	window->build.next_widget_flags |= HERO_UI_WIDGET_FLAGS_IS_FOCUSABLE | HERO_UI_WIDGET_FLAGS_IS_PRESSABLE;
-	return hero_ui_image(window, sib_id, cut, image_id, image_tint, scale, scale_mode, styles);
+	return hero_ui_image(window, sib_id, cut, image_id, image_tint, scale, scale_mode, flip, styles);
 }
 
-HeroUIWidgetId hero_ui_image_grayscale_button(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIImageId image_id, HeroColor bg_color, HeroColor fg_color, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIWidgetStyle* styles) {
+HeroUIWidgetId hero_ui_image_grayscale_button(HeroUIWindow* window, HeroUIWidgetSibId sib_id, HeroUICut cut, F32 cut_length, HeroUIImageId image_id, HeroColor bg_color, HeroColor fg_color, F32 scale, HeroUIImageScaleMode scale_mode, HeroUIImageFlip flip, HeroUIWidgetStyle* styles) {
 	window->build.next_widget_flags |= HERO_UI_WIDGET_FLAGS_IS_FOCUSABLE | HERO_UI_WIDGET_FLAGS_IS_PRESSABLE;
-	return hero_ui_image_grayscale(window, sib_id, cut, image_id, bg_color, fg_color, scale, scale_mode, styles);
+	return hero_ui_image_grayscale(window, sib_id, cut, image_id, bg_color, fg_color, scale, scale_mode, flip, styles);
 }
 
