@@ -82,6 +82,10 @@ enum {
 
 	HERO_ERROR_GFX_COMMAND_POOL_STATIC_SUPPORT_NOT_ENABLED,
 
+	HERO_ERROR_GFX_NO_SWAPCHAIN_OR_READBACK_OUTPUT,
+	HERO_ERROR_GFX_DUPLICATE_SWAPCHAIN_IN_IMAGE_ATTACHMENTS,
+	HERO_ERROR_GFX_GRAPH_CANNOT_BE_EMPTY,
+
 	HERO_ERROR_GFX_SPIR_V_BINARY_INVALID_FORMAT,
 	HERO_ERROR_GFX_SPIR_V_BINARY_CORRUPT,
 	HERO_ERROR_GFX_SPIR_V_BINARY_UNSUPPORTED_VERSION,
@@ -159,6 +163,7 @@ enum {
 	HERO_GFX_ALLOC_TAG_MATERIAL_POOL,
 	HERO_GFX_ALLOC_TAG_SWAPCHAIN_POOL,
 	HERO_GFX_ALLOC_TAG_COMMAND_POOL_POOL,
+	HERO_GFX_ALLOC_TAG_RENDER_GRAPH_POOL,
 
 	HERO_GFX_ALLOC_TAG_SHADER_METADATA,
 	HERO_GFX_ALLOC_TAG_SPIR_V_KEY_TO_DESCRIPTOR_MAP,
@@ -191,6 +196,7 @@ HERO_TYPEDEF_OBJECT_ID(HeroMaterialId);
 HERO_TYPEDEF_OBJECT_ID(HeroSwapchainId);
 HERO_TYPEDEF_OBJECT_ID(HeroCommandPoolId);
 HERO_TYPEDEF_OBJECT_ID(HeroCommandPoolBufferId);
+HERO_TYPEDEF_OBJECT_ID(HeroRenderGraphId);
 
 #define HERO_STACK_ELMT_TYPE HeroImageId
 #include "stack_gen.inl"
@@ -287,7 +293,7 @@ enum {
 	HERO_IMAGE_FORMAT_COUNT,
 };
 
-#define HERO_IMAGE_FORMAT_IS_DEPTH(format) ((format) >= HERO_IMAGE_FORMAT_D16 && (format) <= HERO_IMAGE_FORMAT_D32_S8);
+#define HERO_IMAGE_FORMAT_IS_DEPTH(format) ((format) >= HERO_IMAGE_FORMAT_D16 && (format) <= HERO_IMAGE_FORMAT_D32_S8)
 
 extern U8 hero_image_format_bytes_per_pixel[HERO_IMAGE_FORMAT_COUNT];
 
@@ -476,16 +482,17 @@ struct HeroLogicalDeviceSetup {
 	U32 materials_cap;
 	U32 swapchains_cap;
 	U32 command_pools_cap;
+	U32 render_graphs_cap;
 };
 
 typedef struct HeroLogicalDevice HeroLogicalDevice;
 struct HeroLogicalDevice {
-	HeroPhysicalDevice*                    physical_device;
-	HeroObjectPool(HeroVertexArray)        vertex_array_pool;
-	HeroIAlctor                            alctor;
-	HeroQueueSupportFlags                  queue_support_flags;
-	HeroGfxFrameIdx                        last_submitted_frame_idx;
-	HeroGfxFrameIdx                        last_completed_frame_idx;
+	HeroPhysicalDevice*             physical_device;
+	HeroObjectPool(HeroVertexArray) vertex_array_pool;
+	HeroIAlctor                     alctor;
+	HeroQueueSupportFlags           queue_support_flags;
+	HeroGfxFrameIdx                 last_submitted_frame_idx;
+	HeroGfxFrameIdx                 last_completed_frame_idx;
 };
 
 HeroResult hero_logical_device_init(HeroPhysicalDevice* physical_device, HeroLogicalDeviceSetup* setup, HeroLogicalDevice** out);
@@ -1654,6 +1661,286 @@ struct HeroRenderState {
 // ===========================================
 //
 //
+// Render Graph
+//
+//
+// ===========================================
+
+typedef U16 HeroImageEnum;
+typedef U16 HeroBufferEnum;
+typedef U16 HeroPassEnum;
+typedef U16 HeroPassImageInputEnum;
+typedef U16 HeroPassBufferInputEnum;
+typedef U16 HeroPassImageOutputEnum;
+typedef U16 HeroPassBufferOutputEnum;
+
+#define HERO_IMAGE_ENUM_INVALID              ((U16)-1)
+#define HERO_BUFFER_ENUM_INVALID             ((U16)-1)
+#define HERO_PASS_ENUM_INVALID               ((U16)-1)
+#define HERO_PASS_IMAGE_INPUT_ENUM_INVALID   ((U16)-1)
+#define HERO_PASS_BUFFER_INPUT_ENUM_INVALID  ((U16)-1)
+#define HERO_PASS_IMAGE_OUTPUT_ENUM_INVALID  ((U16)-1)
+#define HERO_PASS_BUFFER_OUTPUT_ENUM_INVALID ((U16)-1)
+#define HERO_ATTACHMENT_IDX_INVALID          ((U16)-1)
+
+typedef U8 HeroImageInfoFlags;
+enum {
+	HERO_IMAGE_INFO_FLAGS_PERSISTENT = 0x1,
+	HERO_IMAGE_INFO_FLAGS_READBACK =   0x2,
+
+	HERO_IMAGE_INFO_FLAGS_IS_USED =  0x4, // is set after hero_render_graph_init if image is read from or set to readback and written too.
+};
+
+struct HeroImageInfo {
+	char* debug_name;
+
+	// if this is set, the following fields are ignored since we get them from the swapchain directly:
+	//     width, height, array_layers_count, mip_levels_count, samples_count_log2, image_format
+	HeroSwapchainId swapchain_id;
+
+	U32 width;
+	U32 height;
+	U32 array_layers_count;
+	U32 mip_levels_count;
+	U32 samples_count_log2;
+	HeroImageFormat image_format;
+	HeroImageInfoFlags flags;
+};
+
+typedef U8 HeroBufferInfoFlags;
+enum {
+	HERO_BUFFER_INFO_FLAGS_TRANSFER_DST = 0x1,
+	HERO_BUFFER_INFO_FLAGS_TRANSFER_SRC = 0x2,
+	HERO_BUFFER_INFO_FLAGS_PERSISTENT =   0x4,
+	HERO_BUFFER_INFO_FLAGS_READBACK =     0x8,
+
+	HERO_BUFFER_INFO_FLAGS_IS_USED =    0x10, // is set after hero_render_graph_init if buffer is read from or set to readback and written too
+};
+
+struct HeroBufferInfo {
+	char* debug_name;
+	U64 size;
+	HeroBufferInfoFlags flags;
+};
+
+typedef struct HeroImageInput HeroImageInput;
+struct HeroImageInput {
+	// the attachment index of the HeroRenderPassLayout.attachments in HeroPassInfo.layout_id
+	// can be HERO_ATTACHMENT_IDX_INVALID
+	U16                     attachment_idx;
+
+	HeroImageEnum           image_enum;
+
+	HeroPassEnum            pass_enum;              // if is set to HERO_PASS_ENUM_INVALID, then image is must be initialized from the CPU or be persistant.
+	HeroPassImageOutputEnum pass_image_output_enum;
+};
+
+typedef struct HeroImageOutput HeroImageOutput;
+struct HeroImageOutput {
+	U32           attachment_idx; // the attachment index of the HeroRenderPassLayout.attachments in HeroPassInfo.layout_id
+	HeroImageEnum image_enum;
+};
+
+typedef struct HeroBufferInput HeroBufferInput;
+struct HeroBufferInput {
+	HeroBufferEnum           buffer_enum;
+	HeroPassEnum             pass_enum;              // if is set to HERO_PASS_ENUM_INVALID, then image is must be initialized from the CPU or be persistant.
+	HeroPassBufferOutputEnum pass_buffer_output_enum;
+};
+
+typedef struct HeroBufferOutput HeroBufferOutput;
+struct HeroBufferOutput {
+	HeroBufferEnum buffer_enum;
+};
+
+typedef struct HeroPassInfo HeroPassInfo;
+typedef struct HeroImageInfo HeroImageInfo;
+typedef struct HeroBufferInfo HeroBufferInfo;
+
+typedef U32 (*HeroPassCmdEstimateFn)(HeroPassInfo* info);
+typedef HeroResult (*HeroPassRecordFn)(HeroPassInfo* info, HeroCommandRecorder* command_recorder);
+
+typedef U8 HeroPassInfoFlags;
+enum {
+	HERO_PASS_INFO_FLAGS_IS_USED = 0x1, // is set after hero_render_graph_init if pass is joined to the graph that outputs to a readback or swapchain resource
+};
+
+struct HeroPassInfo {
+	char* debug_name;
+	HeroRenderPassLayoutId  layout_id; // if NULL {0} then this is a compute pass, otherwise this is a render pass
+	HeroPassInfoFlags       flags;
+	HeroPassCmdEstimateFn   cmd_estimate_fn;
+	HeroPassRecordFn        record_fn;
+	void*                   record_userdata;
+	HeroPassImageOutputEnum depth_stencil_image_output_enum;
+	HeroImageOutput*        image_outputs;
+	HeroImageInput*         image_inputs;
+	HeroBufferOutput*       buffer_outputs;
+	HeroBufferInput*        buffer_inputs;
+	U16                     image_outputs_count;
+	U16                     image_inputs_count;
+	U16                     buffer_outputs_count;
+	U16                     buffer_inputs_count;
+	U16                     execution_unit_idx;
+};
+
+#define HERO_STACK_ELMT_TYPE HeroPassEnum
+#include "stack_gen.inl"
+
+typedef U16 HeroRenderGraphErrorType;
+enum {
+	HERO_RENDER_GRAPH_ERROR_TYPE_NONE,
+
+	//
+	// enums[0] = HeroPassEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_RECORDED_FN,
+	HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_CMD_ESTIMATE_FN,
+	HERO_RENDER_GRAPH_ERROR_TYPE_PASS_INVALID_RENDER_PASS_LAYOUT_ID,
+	HERO_RENDER_GRAPH_ERROR_TYPE_PASS_UNUSED,
+
+	//
+	// enums[0] = HeroImageEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED,
+
+	//
+	// enums[0] = HeroBufferEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = expected_attachments_count
+	// enums[2] = got_attachments_count
+	HERO_RENDER_GRAPH_ERROR_TYPE_PASS_ATTACHMENTS_COUNT_MISMATCH,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageOutputEnum
+	// enums[2] = HeroPassImageOutputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_DUPLICATED_IMAGE,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageInputEnum
+	// enums[2] = HeroPassImageInputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_DUPLICATED_IMAGE,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageInputEnum
+	// enums[2] = HeroPassImageOutputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_USED_AS_INPUT_AND_OUTPUT,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferOutputEnum
+	// enums[2] = HeroPassBufferOutputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_DUPLICATED_BUFFER,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferInputEnum
+	// enums[2] = HeroPassBufferInputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_DUPLICATED_BUFFER,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferInputEnum
+	// enums[2] = HeroPassBufferOutputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_USED_AS_INPUT_AND_OUTPUT,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageOutputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_FORMAT_MISMATCH,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_IMAGE_ENUM_DOES_NOT_EXIST,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_DOES_NOT_EXIST,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageInputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_FORMAT_MISMATCH,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_IMAGE_ENUM_DOES_NOT_EXIST,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_DOES_NOT_EXIST,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_CANNOT_BE_SWAPCHAIN,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_ENUM_DOES_NOT_EXIST,
+	HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_IMAGE_OUTPUT_ENUM_DOES_NOT_EXIST,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferOutputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_BUFFER_ENUM_DOES_NOT_EXIST,
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferInputEnum
+	HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_BUFFER_ENUM_DOES_NOT_EXIST,
+	HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_ENUM_DOES_NOT_EXIST,
+	HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_BUFFER_OUTPUT_ENUM_DOES_NOT_EXIST,
+
+	HERO_RENDER_GRAPH_ERROR_TYPE_COUNT,
+};
+
+extern const char* hero_render_graph_error_type_fmt_strings[HERO_RENDER_GRAPH_ERROR_TYPE_COUNT];
+
+typedef struct HeroRenderGraphError HeroRenderGraphError;
+struct HeroRenderGraphError {
+	HeroRenderGraphErrorType type;
+	U16 enums[4];
+};
+
+typedef struct HeroRenderGraphSetup HeroRenderGraphSetup;
+struct HeroRenderGraphSetup {
+	char*           debug_name;
+	HeroImageInfo*  images;
+	HeroBufferInfo* buffers;
+	HeroPassInfo*   passes;
+	U16             images_count;
+	U16             buffers_count;
+	U16             passes_count;
+
+	HeroRenderGraphError* errors_out;
+	U32 errors_count;
+	U32 errors_cap;
+
+	bool            report_unused_error;
+};
+
+typedef struct HeroRenderGraph HeroRenderGraph;
+struct HeroRenderGraph {
+	char*           debug_name;
+	HeroImageInfo*  images;
+	HeroBufferInfo* buffers;
+	HeroPassInfo*   passes;
+	HeroPassEnum*   execution_units_passes;
+	HeroRangeU16*   execution_units_ranges;
+	U16             images_count;
+	U16             buffers_count;
+	U16             passes_count;
+	U16             execution_units_count;
+};
+
+HeroResult hero_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroRenderGraphId* id_out);
+HeroResult hero_render_graph_deinit(HeroLogicalDevice* ldev, HeroRenderGraphId id);
+HeroResult hero_render_graph_get(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph** out);
+
+HeroResult hero_render_graph_deinit_gpu_resources(HeroLogicalDevice* ldev, HeroRenderGraphId id);
+HeroResult hero_render_graph_execute(HeroLogicalDevice* ldev, HeroRenderGraphId id);
+void hero_render_graph_print_errors(HeroRenderGraphSetup* setup);
+void hero_render_graph_print_execution_units(HeroLogicalDevice* ldev, HeroRenderGraphId id, FILE* f, bool color);
+void hero_render_graph_print_graphviz_dot(HeroLogicalDevice* ldev, HeroRenderGraphId id, FILE* f);
+
+// ===========================================
+//
+//
 // Backend
 //
 //
@@ -1690,7 +1977,7 @@ typedef HeroResult (*HeroImageReadFn)(HeroLogicalDevice* ldev, HeroImage* image,
 typedef HeroResult (*HeroImageWriteFn)(HeroLogicalDevice* ldev, HeroImage* image, HeroImageArea* area, void** destination_out);
 
 typedef HeroResult (*HeroSamplerInitFn)(HeroLogicalDevice* ldev, HeroSamplerSetup* setup, HeroSamplerId* id_out, HeroSampler** out);
-typedef HeroResult (*HeroSamplerDeinitFn)(HeroLogicalDevice* ldev, HeroSamplerId id, HeroSampler* image);
+typedef HeroResult (*HeroSamplerDeinitFn)(HeroLogicalDevice* ldev, HeroSamplerId id, HeroSampler* sampler);
 typedef HeroResult (*HeroSamplerGetFn)(HeroLogicalDevice* ldev, HeroSamplerId id, HeroSampler** out);
 
 typedef HeroResult (*HeroGfxShaderMetadataCalculateFn)(HeroLogicalDevice* ldev, HeroShaderMetadataSetup* setup, HeroShaderMetadata** out);
@@ -1759,6 +2046,12 @@ typedef HeroResult (*HeroCmdDrawSetVertexBufferFn)(HeroCommandRecorder* command_
 typedef HeroResult (*HeroCmdDrawSetPushConstantsFn)(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size);
 typedef HeroResult (*HeroCmdDrawSetInstancesFn)(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count);
 typedef HeroResult (*HeroCmdComputeDispatchFn)(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, HeroShaderGlobalsId shader_globals_id, U32 group_count_x, U32 group_count_y, U32 group_count_z);
+typedef HeroResult (*HeroRenderGraphInitFn)(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroRenderGraphId* id_out, HeroRenderGraph** out);
+typedef HeroResult (*HeroRenderGraphDeinitFn)(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph* render_graph);
+typedef HeroResult (*HeroRenderGraphGetFn)(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph** out);
+
+typedef HeroResult (*HeroRenderGraphDeinitGPUResourcesFn)(HeroLogicalDevice* ldev, HeroRenderGraphId id);
+typedef HeroResult (*HeroRenderGraphExecuteFn)(HeroLogicalDevice* ldev, HeroRenderGraphId id);
 
 typedef struct HeroGfxBackendVTable HeroGfxBackendVTable;
 struct HeroGfxBackendVTable {
@@ -1842,6 +2135,11 @@ struct HeroGfxBackendVTable {
 	HeroCmdDrawSetPushConstantsFn                       cmd_draw_set_push_constants;
 	HeroCmdDrawSetInstancesFn                           cmd_draw_set_instances;
 	HeroCmdComputeDispatchFn                            cmd_compute_dispatch;
+	HeroRenderGraphInitFn                               render_graph_init;
+	HeroRenderGraphDeinitFn                             render_graph_deinit;
+	HeroRenderGraphGetFn                                render_graph_get;
+	HeroRenderGraphDeinitGPUResourcesFn                 render_graph_deinit_gpu_resources;
+	HeroRenderGraphExecuteFn                            render_graph_execute;
 };
 
 // ===========================================

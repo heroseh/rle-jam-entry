@@ -31,6 +31,7 @@ typedef struct HeroMaterialVulkan HeroMaterialVulkan;
 typedef struct HeroSwapchainVulkan HeroSwapchainVulkan;
 typedef struct HeroCommandPoolVulkan HeroCommandPoolVulkan;
 typedef struct HeroCommandPoolBufferVulkan HeroCommandPoolBufferVulkan;
+typedef struct HeroRenderGraphVulkan HeroRenderGraphVulkan;
 
 #define HERO_OBJECT_TYPE HeroVertexLayoutVulkan
 #include "object_pool_gen_def.inl"
@@ -81,6 +82,9 @@ typedef struct HeroCommandPoolBufferVulkan HeroCommandPoolBufferVulkan;
 #include "object_pool_gen_def.inl"
 
 #define HERO_OBJECT_TYPE HeroCommandPoolBufferVulkan
+#include "object_pool_gen_def.inl"
+
+#define HERO_OBJECT_TYPE HeroRenderGraphVulkan
 #include "object_pool_gen_def.inl"
 
 #if HERO_X11_ENABLE
@@ -306,6 +310,7 @@ struct HeroLogicalDeviceVulkan {
 	HeroObjectPool(HeroMaterialVulkan)            material_pool;
 	HeroObjectPool(HeroSwapchainVulkan)           swapchain_pool;
 	HeroObjectPool(HeroCommandPoolVulkan)         command_pool_pool;
+	HeroObjectPool(HeroRenderGraphVulkan)         render_graph_pool;
 
 	VkDevice                handle;
 	U32                     queue_family_idx_uber;
@@ -538,6 +543,42 @@ struct HeroCommandPoolVulkan {
 	HeroObjectPool(HeroCommandPoolBufferVulkan) command_buffer_pool;
 };
 
+typedef struct HeroPassInfoVulkan HeroPassInfoVulkan;
+struct HeroPassInfoVulkan {
+	VkRenderPass render_pass; // VK_NULL_HANDLE when it's a compute pass
+
+	HeroPassInfo public_;
+};
+
+typedef struct HeroImageInfoVulkan HeroImageInfoVulkan;
+struct HeroImageInfoVulkan {
+	VkImage        image;
+	VkImageView    image_view;
+	VkDeviceMemory device_memory;
+	U64            device_memory_offset;
+
+	HeroImageInfo public_;
+};
+
+typedef struct HeroBufferInfoVulkan HeroBufferInfoVulkan;
+struct HeroBufferInfoVulkan {
+	VkBuffer        image;
+	VkDeviceMemory  device_memory;
+	U64             device_memory_offset;
+	U64             device_memory_size;
+
+	HeroBufferInfo public_;
+};
+
+struct HeroRenderGraphVulkan {
+	HeroObjectHeader      header;
+	HeroPassInfoVulkan*   passes;
+	HeroImageInfoVulkan*  images;
+	HeroBufferInfoVulkan* buffers;
+	bool                  initialized_gpu_resources;
+	HeroRenderGraph       public_;
+};
+
 #define HERO_OBJECT_ID_TYPE HeroVertexLayoutId
 #define HERO_OBJECT_TYPE HeroVertexLayoutVulkan
 #include "object_pool_gen_impl.inl"
@@ -606,6 +647,10 @@ struct HeroCommandPoolVulkan {
 #define HERO_OBJECT_TYPE HeroCommandPoolBufferVulkan
 #include "object_pool_gen_impl.inl"
 
+#define HERO_OBJECT_ID_TYPE HeroRenderGraphId
+#define HERO_OBJECT_TYPE HeroRenderGraphVulkan
+#include "object_pool_gen_impl.inl"
+
 // ===========================================
 //
 //
@@ -649,7 +694,7 @@ HeroResult _hero_vulkan_image_map(HeroLogicalDevice* ldev, HeroImage* image, voi
 HeroResult _hero_vulkan_image_read(HeroLogicalDevice* ldev, HeroImage* image, HeroImageArea* area, void* destination);
 
 HeroResult _hero_vulkan_sampler_init(HeroLogicalDevice* ldev, HeroSamplerSetup* setup, HeroSamplerId* id_out, HeroSampler** out);
-HeroResult _hero_vulkan_sampler_deinit(HeroLogicalDevice* ldev, HeroSamplerId id, HeroSampler* image);
+HeroResult _hero_vulkan_sampler_deinit(HeroLogicalDevice* ldev, HeroSamplerId id, HeroSampler* sampler);
 HeroResult _hero_vulkan_sampler_get(HeroLogicalDevice* ldev, HeroSamplerId id, HeroSampler** out);
 
 HeroResult _hero_vulkan_shader_metadata_calculate(HeroLogicalDevice* ldev, HeroShaderMetadataSetup* setup, HeroShaderMetadata** out);
@@ -718,6 +763,14 @@ HeroResult _hero_vulkan_cmd_draw_end_indexed(HeroCommandRecorder* command_record
 HeroResult _hero_vulkan_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroBufferId buffer_id, U32 binding, U64 offset);
 HeroResult _hero_vulkan_cmd_draw_set_push_constants(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size);
 HeroResult _hero_vulkan_cmd_draw_set_instances(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count);
+HeroResult _hero_vulkan_cmd_compute_dispatch(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, HeroShaderGlobalsId shader_globals_id, U32 group_count_x, U32 group_count_y, U32 group_count_z);
+
+HeroResult _hero_vulkan_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroRenderGraphId* id_out, HeroRenderGraph** out);
+HeroResult _hero_vulkan_render_graph_deinit(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph* render_pass);
+HeroResult _hero_vulkan_render_graph_get(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph** out);
+
+HeroResult _hero_vulkan_render_graph_deinit_gpu_resources(HeroLogicalDevice* ldev, HeroRenderGraphId id);
+HeroResult _hero_vulkan_render_graph_execute(HeroLogicalDevice* ldev, HeroRenderGraphId id);
 
 typedef struct HeroGfxSysVulkan HeroGfxSysVulkan;
 struct HeroGfxSysVulkan {

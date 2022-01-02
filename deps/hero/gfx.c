@@ -1349,6 +1349,890 @@ HeroResult hero_cmd_compute_dispatch(HeroCommandRecorder* command_recorder, Hero
 // ===========================================
 //
 //
+// Render Graph
+//
+//
+// ===========================================
+
+const char* hero_render_graph_error_type_fmt_strings[HERO_RENDER_GRAPH_ERROR_TYPE_COUNT] = {
+	[HERO_RENDER_GRAPH_ERROR_TYPE_NONE] = "HERO_RENDER_GRAPH_ERROR_TYPE_NONE\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_RECORDED_FN] = "HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_RECORDED_FN PASS.%s\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_CMD_ESTIMATE_FN] = "HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_CMD_ESTIMATE_FN PASS.%s\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_PASS_INVALID_RENDER_PASS_LAYOUT_ID] = "HERO_RENDER_GRAPH_ERROR_TYPE_PASS_INVALID_RENDER_PASS_LAYOUT_ID PASS.%s\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_PASS_UNUSED] = "HERO_RENDER_GRAPH_ERROR_TYPE_PASS_UNUSED PASS.%s\n",
+
+	//
+	// enums[0] = HeroImageEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED IMAGE.%s\n",
+
+	//
+	// enums[0] = HeroBufferEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED BUFFER.%s\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = expected_attachments_count
+	// enums[2] = got_attachments_count
+	[HERO_RENDER_GRAPH_ERROR_TYPE_PASS_ATTACHMENTS_COUNT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_PASS_ATTACHMENTS_COUNT_MISMATCH PASS.%s expected '%u' attachments but got '%u'\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageOutputEnum
+	// enums[2] = HeroPassImageOutputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_DUPLICATED_IMAGE] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_DUPLICATED_IMAGE PASS.%s, IMAGE_OUTPUT.%u, IMAGE_OUTPUT.%u\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageInputEnum
+	// enums[2] = HeroPassImageInputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_DUPLICATED_IMAGE] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_DUPLICATED_IMAGE PASS.%s, IMAGE_INPUT.%u, IMAGE_INPUT.%u\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageInputEnum
+	// enums[2] = HeroPassImageOutputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_USED_AS_INPUT_AND_OUTPUT] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_USED_AS_INPUT_AND_OUTPUT PASS.%s, IMAGE_INPUT.%u, IMAGE_OUTPUT.%u\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferOutputEnum
+	// enums[2] = HeroPassBufferOutputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_DUPLICATED_BUFFER] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_DUPLICATED_BUFFER PASS.%s, BUFFER_OUTPUT.%u, BUFFER_OUTPUT.%u\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferInputEnum
+	// enums[2] = HeroPassBufferInputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_DUPLICATED_BUFFER] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_DUPLICATED_BUFFER PASS.%s, BUFFER_INPUT.%u, BUFFER_INPUT.%u\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferInputEnum
+	// enums[2] = HeroPassBufferOutputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_USED_AS_INPUT_AND_OUTPUT] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_USED_AS_INPUT_AND_OUTPUT PASS.%s, BUFFER_INPUT.%u, BUFFER_OUTPUT.%u\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageOutputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_FORMAT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_FORMAT_MISMATCH PASS.%s IMAGE_OUTPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH PASS.%s IMAGE_OUTPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT PASS.%s IMAGE_OUTPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT PASS.%s IMAGE_OUTPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_IMAGE_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_IMAGE_ENUM_DOES_NOT_EXIST PASS.%s IMAGE_OUTPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_DOES_NOT_EXIST PASS.%s IMAGE_OUTPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH PASS.%s IMAGE_OUTPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH PASS.%s IMAGE_OUTPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH PASS.%s IMAGE_OUTPUT.%u\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassImageInputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_FORMAT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_FORMAT_MISMATCH PASS.%s IMAGE_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH PASS.%s IMAGE_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT PASS.%s IMAGE_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT PASS.%s IMAGE_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_IMAGE_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_IMAGE_ENUM_DOES_NOT_EXIST PASS.%s IMAGE_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_DOES_NOT_EXIST PASS.%s IMAGE_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_CANNOT_BE_SWAPCHAIN] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_CANNOT_BE_SWAPCHAIN PASS.%s IMAGE_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_ENUM_DOES_NOT_EXIST PASS.%s IMAGE_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_IMAGE_OUTPUT_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_IMAGE_OUTPUT_ENUM_DOES_NOT_EXIST PASS.%s IMAGE_INPUT.%u\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferOutputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_BUFFER_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_BUFFER_ENUM_DOES_NOT_EXIST PASS.%s BUFFER_OUTPUT.%u\n",
+
+	//
+	// enums[0] = HeroPassEnum
+	// enums[1] = HeroPassBufferInputEnum
+	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_BUFFER_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_BUFFER_ENUM_DOES_NOT_EXIST PASS.%s BUFFER_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_ENUM_DOES_NOT_EXIST PASS.%s BUFFER_INPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_BUFFER_OUTPUT_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_BUFFER_OUTPUT_ENUM_DOES_NOT_EXIST PASS.%s BUFFER_INPUT.%u\n",
+};
+
+HeroRenderGraphError* _hero_render_graph_error(HeroRenderGraphSetup* setup, HeroRenderGraphErrorType type) {
+	if (setup->errors_count >= setup->errors_cap) {
+		return NULL;
+	}
+	HeroRenderGraphError* error = &setup->errors_out[setup->errors_count];
+	error->type = type;
+	setup->errors_count += 1;
+	return error;
+}
+
+void _hero_render_graph_error_1(HeroRenderGraphSetup* setup, HeroRenderGraphErrorType type, U16 enum_0) {
+	HeroRenderGraphError* error = _hero_render_graph_error(setup, type);
+	if (error) {
+		error->enums[0] = enum_0;
+	}
+}
+
+void _hero_render_graph_error_2(HeroRenderGraphSetup* setup, HeroRenderGraphErrorType type, U16 enum_0, U16 enum_1) {
+	HeroRenderGraphError* error = _hero_render_graph_error(setup, type);
+	if (error) {
+		error->enums[0] = enum_0;
+		error->enums[1] = enum_1;
+	}
+}
+
+void _hero_render_graph_error_3(HeroRenderGraphSetup* setup, HeroRenderGraphErrorType type, U16 enum_0, U16 enum_1, U16 enum_2) {
+	HeroRenderGraphError* error = _hero_render_graph_error(setup, type);
+	if (error) {
+		error->enums[0] = enum_0;
+		error->enums[1] = enum_1;
+		error->enums[2] = enum_2;
+	}
+}
+
+void _hero_render_graph_validate_pass(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroPassEnum pass_enum, bool* has_swapchain_or_readback_output_out) {
+	HeroPassInfo* pass_info = &setup->passes[pass_enum];
+
+	//
+	// validate pass's immediate data
+	HeroRenderPassLayout* render_pass_layout = NULL;
+	{
+		if (pass_info->record_fn == NULL) {
+			_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_RECORDED_FN, pass_enum);
+		}
+		if (pass_info->cmd_estimate_fn == NULL) {
+			_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_CMD_ESTIMATE_FN, pass_enum);
+		}
+
+		if (pass_info->layout_id.raw) {
+			HeroResult result = hero_render_pass_layout_get(ldev, pass_info->layout_id, &render_pass_layout);
+			if (result < 0) {
+				_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_PASS_INVALID_RENDER_PASS_LAYOUT_ID, pass_enum);
+			}
+
+			U32 attachments_count = pass_info->image_outputs_count + pass_info->image_inputs_count;
+			if (pass_info->depth_stencil_image_output_enum != HERO_PASS_IMAGE_OUTPUT_ENUM_INVALID) {
+				attachments_count += 1;
+			}
+
+			if (render_pass_layout->attachments_count != attachments_count) {
+				_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_PASS_ATTACHMENTS_COUNT_MISMATCH, pass_enum, render_pass_layout->attachments_count, attachments_count);
+			}
+		}
+	}
+
+	//
+	// validate image outputs
+	for_range(image_output_enum, 0, pass_info->image_outputs_count) {
+		HeroImageOutput* output = &pass_info->image_outputs[image_output_enum];
+
+		if (output->image_enum >= setup->images_count) {
+			_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_IMAGE_ENUM_DOES_NOT_EXIST, pass_enum, image_output_enum);
+		} else {
+			HeroImageInfo* info = &setup->images[output->image_enum];
+
+			//
+			// if render pass validate extra things
+			if (pass_info->layout_id.raw) {
+				if (output->attachment_idx >= render_pass_layout->attachments_count) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_DOES_NOT_EXIST, pass_enum, image_output_enum);
+				}
+				HeroAttachmentLayout* layout = &render_pass_layout->attachments[output->attachment_idx];
+
+				if (layout->format != info->image_format) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_FORMAT_MISMATCH, pass_enum, image_output_enum);
+				}
+				if (layout->samples_count != (1 << info->samples_count_log2)) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH, pass_enum, image_output_enum);
+				}
+
+				HeroImageInfo* first_output = &setup->images[0];
+				if (first_output->width != info->width) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH, pass_enum, image_output_enum);
+				}
+				if (first_output->height != info->height) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH, pass_enum, image_output_enum);
+				}
+				if (first_output->array_layers_count != info->array_layers_count) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH, pass_enum, image_output_enum);
+				}
+			}
+
+			*has_swapchain_or_readback_output_out |= (!!info->swapchain_id.raw) | (!!(info->flags & HERO_IMAGE_INFO_FLAGS_READBACK));
+
+			bool is_depth = image_output_enum == pass_info->depth_stencil_image_output_enum;
+			if (is_depth) {
+				if (!HERO_IMAGE_FORMAT_IS_DEPTH(info->image_format)) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT, pass_enum, image_output_enum);
+				}
+			} else {
+				if (HERO_IMAGE_FORMAT_IS_DEPTH(info->image_format)) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT, pass_enum, image_output_enum);
+				}
+			}
+		}
+	}
+
+	//
+	// validate image input
+	for_range(image_input_enum, 0, pass_info->image_inputs_count) {
+		HeroImageInput* input = &pass_info->image_inputs[image_input_enum];
+
+		if (input->image_enum >= setup->images_count) {
+			_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_IMAGE_ENUM_DOES_NOT_EXIST, pass_enum, image_input_enum);
+		} else {
+			HeroImageInfo* info = &setup->images[input->image_enum];
+
+			//
+			// if render pass validate extra things
+			if (pass_info->layout_id.raw) {
+				if (input->attachment_idx != HERO_ATTACHMENT_IDX_INVALID && input->attachment_idx >= render_pass_layout->attachments_count) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_DOES_NOT_EXIST, pass_enum, image_input_enum);
+				}
+				HeroAttachmentLayout* layout = &render_pass_layout->attachments[input->attachment_idx];
+
+				if (layout->format != info->image_format) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_FORMAT_MISMATCH, pass_enum, image_input_enum);
+				}
+				if (layout->samples_count != (1 << info->samples_count_log2)) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH, pass_enum, image_input_enum);
+				}
+			}
+
+			if (info->swapchain_id.raw) {
+				_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_CANNOT_BE_SWAPCHAIN, pass_enum, image_input_enum);
+			}
+
+			if (HERO_IMAGE_FORMAT_IS_DEPTH(info->image_format)) {
+				_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT, pass_enum, image_input_enum);
+			}
+		}
+
+		if (input->pass_enum != HERO_PASS_ENUM_INVALID) {
+			if (input->pass_enum >= setup->passes_count) {
+				_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_ENUM_DOES_NOT_EXIST, pass_enum, image_input_enum);
+			} else {
+				HeroPassInfo* input_pass_info = &setup->passes[input->pass_enum];
+				if (input->pass_image_output_enum >= input_pass_info->image_outputs_count) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_IMAGE_OUTPUT_ENUM_DOES_NOT_EXIST, pass_enum, image_input_enum);
+				}
+			}
+		}
+	}
+
+	//
+	// validate buffer output
+	for_range(buffer_output_enum, 0, pass_info->buffer_outputs_count) {
+		HeroBufferOutput* output = &pass_info->buffer_outputs[buffer_output_enum];
+
+		if (output->buffer_enum >= setup->buffers_count) {
+			_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_BUFFER_ENUM_DOES_NOT_EXIST, pass_enum, buffer_output_enum);
+		}
+	}
+
+	//
+	// validate buffer input
+	for_range(buffer_input_enum, 0, pass_info->buffer_inputs_count) {
+		HeroBufferInput* input = &pass_info->buffer_inputs[buffer_input_enum];
+
+		if (input->buffer_enum >= setup->buffers_count) {
+			_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_BUFFER_ENUM_DOES_NOT_EXIST, pass_enum, buffer_input_enum);
+		}
+
+		if (input->pass_enum != HERO_PASS_ENUM_INVALID) {
+			if (input->pass_enum >= setup->passes_count) {
+				_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_ENUM_DOES_NOT_EXIST, pass_enum, buffer_input_enum);
+			} else {
+				HeroPassInfo* input_pass_info = &setup->passes[input->pass_enum];
+				if (input->pass_buffer_output_enum >= input_pass_info->buffer_outputs_count) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_BUFFER_OUTPUT_ENUM_DOES_NOT_EXIST, pass_enum, buffer_input_enum);
+				}
+			}
+		}
+	}
+
+	//
+	// check for image input and output duplicate ids
+	{
+		for_range(output_enum_a, 0, pass_info->image_outputs_count) {
+			for_range(output_enum_b, 0, pass_info->image_outputs_count) {
+				if (output_enum_a != output_enum_b &&
+					pass_info->image_outputs[output_enum_a].image_enum ==
+					pass_info->image_outputs[output_enum_b].image_enum
+				) {
+					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_DUPLICATED_IMAGE, pass_enum, output_enum_a, output_enum_b);
+				}
+			}
+		}
+
+		for_range(input_enum_a, 0, pass_info->image_inputs_count) {
+			for_range(input_enum_b, 0, pass_info->image_inputs_count) {
+				if (input_enum_a != input_enum_b &&
+					pass_info->image_inputs[input_enum_a].image_enum ==
+					pass_info->image_inputs[input_enum_b].image_enum
+				) {
+					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_DUPLICATED_IMAGE, pass_enum, input_enum_a, input_enum_b);
+				}
+			}
+		}
+
+		for_range(output_enum, 0, pass_info->image_outputs_count) {
+			for_range(input_enum, 0, pass_info->image_inputs_count) {
+				if (
+					pass_info->image_outputs[output_enum].image_enum ==
+					pass_info->image_inputs[input_enum].image_enum
+				) {
+					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_USED_AS_INPUT_AND_OUTPUT, pass_enum, input_enum, output_enum);
+				}
+			}
+		}
+	}
+
+	//
+	// check for buffer input and output duplicate ids
+	{
+		for_range(output_enum_a, 0, pass_info->buffer_outputs_count) {
+			for_range(output_enum_b, 0, pass_info->buffer_outputs_count) {
+				if (output_enum_a != output_enum_b &&
+					pass_info->buffer_outputs[output_enum_a].buffer_enum ==
+					pass_info->buffer_outputs[output_enum_b].buffer_enum
+				) {
+					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_DUPLICATED_BUFFER, pass_enum, output_enum_a, output_enum_b);
+				}
+			}
+		}
+
+		for_range(input_enum_a, 0, pass_info->buffer_inputs_count) {
+			for_range(input_enum_b, 0, pass_info->buffer_inputs_count) {
+				if (input_enum_a != input_enum_b &&
+					pass_info->buffer_inputs[input_enum_a].buffer_enum ==
+					pass_info->buffer_inputs[input_enum_b].buffer_enum
+				) {
+					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_DUPLICATED_BUFFER, pass_enum, input_enum_a, input_enum_b);
+				}
+			}
+		}
+
+		for_range(output_enum, 0, pass_info->buffer_outputs_count) {
+			for_range(input_enum, 0, pass_info->buffer_inputs_count) {
+				if (
+					pass_info->buffer_outputs[output_enum].buffer_enum ==
+					pass_info->buffer_inputs[input_enum].buffer_enum
+				) {
+					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_USED_AS_INPUT_AND_OUTPUT, pass_enum, input_enum, output_enum);
+				}
+			}
+		}
+	}
+}
+
+U16 _hero_render_graph_recursively_mark_in_use(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroPassInfo* pass_info) {
+	pass_info->flags |= HERO_PASS_INFO_FLAGS_IS_USED;
+
+	//
+	// mark out images that are outputs and are readback or swapchain that they are being used
+	{
+		for_range(output_idx, 0, pass_info->image_outputs_count) {
+			HeroImageInfo* image_info = &setup->images[pass_info->image_outputs[output_idx].image_enum];
+			if (image_info->swapchain_id.raw || image_info->flags & HERO_IMAGE_INFO_FLAGS_READBACK) {
+				image_info->flags |= HERO_IMAGE_INFO_FLAGS_IS_USED;
+			}
+		}
+		for_range(output_idx, 0, pass_info->buffer_outputs_count) {
+			HeroBufferInfo* buffer_info = &setup->buffers[pass_info->buffer_outputs[output_idx].buffer_enum];
+			if (buffer_info->flags & HERO_BUFFER_INFO_FLAGS_READBACK) {
+				buffer_info->flags |= HERO_BUFFER_INFO_FLAGS_IS_USED;
+			}
+		}
+	}
+
+	//
+	// mark out buffers that are inputs that they are being used
+	{
+		for_range(input_idx, 0, pass_info->image_inputs_count) {
+			HeroImageInfo* image_info = &setup->images[pass_info->image_inputs[input_idx].image_enum];
+			image_info->flags |= HERO_IMAGE_INFO_FLAGS_IS_USED;
+		}
+		for_range(input_idx, 0, pass_info->buffer_inputs_count) {
+			HeroBufferInfo* buffer_info = &setup->buffers[pass_info->buffer_inputs[input_idx].buffer_enum];
+			buffer_info->flags |= HERO_BUFFER_INFO_FLAGS_IS_USED;
+		}
+	}
+
+	U16 max_execution_unit_idx = 0;
+	bool has_parent_pass = false;
+	for_range(input_idx, 0, pass_info->image_inputs_count) {
+		HeroImageInput* image_input = &pass_info->image_inputs[input_idx];
+		HeroImageInfo* image_info = &setup->images[image_input->image_enum];
+
+		if (image_input->pass_enum == HERO_PASS_ENUM_INVALID) {
+			continue;
+		}
+
+		has_parent_pass = true;
+		U16 parent_execution_unit_idx = _hero_render_graph_recursively_mark_in_use(ldev, setup, &setup->passes[image_input->pass_enum]);
+		max_execution_unit_idx = HERO_MAX(max_execution_unit_idx, parent_execution_unit_idx);
+	}
+
+	for_range(input_idx, 0, pass_info->buffer_inputs_count) {
+		HeroBufferInput* buffer_input = &pass_info->buffer_inputs[input_idx];
+		HeroBufferInfo* buffer_info = &setup->buffers[buffer_input->buffer_enum];
+
+		if (buffer_input->pass_enum == HERO_PASS_ENUM_INVALID) {
+			continue;
+		}
+
+		has_parent_pass = true;
+		U16 parent_execution_unit_idx = _hero_render_graph_recursively_mark_in_use(ldev, setup, &setup->passes[buffer_input->pass_enum]);
+		max_execution_unit_idx = HERO_MAX(max_execution_unit_idx, parent_execution_unit_idx);
+	}
+
+	if (has_parent_pass) {
+		max_execution_unit_idx += 1;
+	}
+
+	pass_info->execution_unit_idx = max_execution_unit_idx;
+
+	return max_execution_unit_idx;
+}
+
+HeroResult hero_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroRenderGraphId* id_out) {
+	setup->errors_count = 0;
+
+	if (setup->passes_count == 0 || (setup->images_count == 0 && setup->buffers_count == 0)) {
+		return HERO_ERROR(GFX_GRAPH_CANNOT_BE_EMPTY);
+	}
+
+	bool has_swapchain = false;
+	for_range(image_enum_a, 0, setup->images_count) {
+		HeroImageInfo* info_a = &setup->images[image_enum_a];
+		if (info_a->swapchain_id.raw) {
+			for_range(image_enum_b, 0, setup->images_count) {
+				if (image_enum_a == image_enum_b) {
+					continue;
+				}
+
+				HeroImageInfo* info_b = &setup->images[image_enum_b];
+				if (info_b->swapchain_id.raw) {
+					if (info_a->swapchain_id.raw == info_b->swapchain_id.raw) {
+						return HERO_ERROR(GFX_DUPLICATE_SWAPCHAIN_IN_IMAGE_ATTACHMENTS);
+					}
+				}
+			}
+		}
+	}
+
+	bool has_swapchain_or_readback_output = false;
+	for_range(pass_enum, 0, setup->passes_count) {
+		_hero_render_graph_validate_pass(ldev, setup, pass_enum, &has_swapchain_or_readback_output);
+	}
+
+	if (!has_swapchain_or_readback_output) {
+		return HERO_ERROR(GFX_NO_SWAPCHAIN_OR_READBACK_OUTPUT);
+	}
+
+	U16 max_execution_unit_idx = 0;
+	for_range(pass_enum, 0, setup->passes_count) {
+		HeroPassInfo* pass_info = &setup->passes[pass_enum];
+		bool has_swapchain_or_readback_output = false;
+		for_range(output_idx, 0, pass_info->image_outputs_count) {
+			HeroImageInfo* image_info = &setup->images[pass_info->image_outputs[output_idx].image_enum];
+			if (image_info->swapchain_id.raw || (image_info->flags & HERO_IMAGE_INFO_FLAGS_READBACK)) {
+				has_swapchain_or_readback_output = true;
+				break;
+			}
+		}
+
+		if (has_swapchain_or_readback_output) {
+			U16 execution_unit_idx = _hero_render_graph_recursively_mark_in_use(ldev, setup, pass_info);
+			max_execution_unit_idx = HERO_MAX(max_execution_unit_idx, execution_unit_idx);
+		}
+	}
+
+	U16 execution_units_count = max_execution_unit_idx + 1;
+	HeroPassEnum* execution_units_passes = hero_alloc_array(HeroPassEnum, hero_system_alctor, 0, execution_units_count);
+	HeroRangeU16* execution_units_ranges = hero_alloc_array(HeroRangeU16, hero_system_alctor, 0, execution_units_count);
+	{
+		if (!execution_units_passes || !execution_units_ranges) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		U16 collected_passes_count = 0;
+		for_range(execution_unit_idx, 0, execution_units_count) {
+			HeroRangeU16* range = &execution_units_ranges[execution_unit_idx];
+			range->start_idx = collected_passes_count;
+			range->end_idx = collected_passes_count;
+			for_range(pass_enum, 0, setup->passes_count) {
+				HeroPassInfo* pass_info = &setup->passes[pass_enum];
+				if (pass_info->execution_unit_idx == execution_unit_idx) {
+					execution_units_passes[range->end_idx] = pass_enum;
+					range->end_idx += 1;
+					collected_passes_count += 1;
+				}
+			}
+		}
+	}
+
+	if (setup->report_unused_error) {
+		for_range(pass_enum, 0, setup->passes_count) {
+			if (!(setup->passes[pass_enum].flags & HERO_PASS_INFO_FLAGS_IS_USED)) {
+				_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_PASS_UNUSED, pass_enum);
+			}
+		}
+		for_range(image_enum, 0, setup->images_count) {
+			if (!(setup->images[image_enum].flags & HERO_IMAGE_INFO_FLAGS_IS_USED)) {
+				_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED, image_enum);
+			}
+		}
+		for_range(buffer_enum, 0, setup->buffers_count) {
+			if (!(setup->buffers[buffer_enum].flags & HERO_BUFFER_INFO_FLAGS_IS_USED)) {
+				_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED, buffer_enum);
+			}
+		}
+	}
+
+	if (setup->errors_count) {
+		return HERO_ERROR(GENERAL);
+	}
+
+	HeroRenderGraph* render_graph;
+	HeroResult result = hero_gfx_sys.backend_vtable.render_graph_init(ldev, setup, id_out, &render_graph);
+	if (result < 0) {
+		return result;
+	}
+
+	render_graph->debug_name = setup->debug_name;
+	render_graph->images = setup->images;
+	render_graph->buffers = setup->buffers;
+	render_graph->passes = setup->passes;
+	render_graph->images_count = setup->images_count;
+	render_graph->buffers_count = setup->buffers_count;
+	render_graph->passes_count = setup->passes_count;
+	render_graph->execution_units_count = execution_units_count;
+	render_graph->execution_units_passes = execution_units_passes;
+	render_graph->execution_units_ranges = execution_units_ranges;
+
+	return HERO_SUCCESS;
+}
+
+HeroResult hero_render_graph_deinit(HeroLogicalDevice* ldev, HeroRenderGraphId id) {
+	HeroRenderGraph* render_graph;
+	HeroResult result = hero_render_graph_get(ldev, id, &render_graph);
+	if (result < 0) {
+		return result;
+	}
+
+	return hero_gfx_sys.backend_vtable.render_graph_deinit(ldev, id, render_graph);
+}
+
+HeroResult hero_render_graph_get(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph** out) {
+	return hero_gfx_sys.backend_vtable.render_graph_get(ldev, id, out);
+}
+
+HeroResult hero_render_graph_deinit_gpu_resources(HeroLogicalDevice* ldev, HeroRenderGraphId id) {
+	return hero_gfx_sys.backend_vtable.render_graph_deinit_gpu_resources(ldev, id);
+}
+
+HeroResult hero_render_graph_execute(HeroLogicalDevice* ldev, HeroRenderGraphId id) {
+	return hero_gfx_sys.backend_vtable.render_graph_execute(ldev, id);
+}
+
+void _hero_render_graph_print_execution_unit_identation(U32 indent_count, FILE* f) {
+	for_range(i, 0, indent_count) {
+		fputs("    ", f);
+	}
+}
+
+void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
+	for_range(i, 0, setup->errors_count) {
+		HeroRenderGraphError* e = &setup->errors_out[i];
+		const char* fmt = hero_render_graph_error_type_fmt_strings[e->type];
+		switch (e->type) {
+			case HERO_RENDER_GRAPH_ERROR_TYPE_NONE:
+				printf("%s", fmt);
+				break;
+
+			//
+			// enums[0] = HeroPassEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_RECORDED_FN:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_PASS_EXPECTED_CMD_ESTIMATE_FN:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_PASS_INVALID_RENDER_PASS_LAYOUT_ID:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_PASS_UNUSED: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name);
+				break;
+			};
+
+			//
+			// enums[0] = HeroImageEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED: {
+				HeroImageInfo* image_info = &setup->images[e->enums[0]];
+				printf(fmt, image_info->debug_name);
+				break;
+			};
+
+			//
+			// enums[0] = HeroBufferEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED: {
+				HeroBufferInfo* buffer_info = &setup->buffers[e->enums[0]];
+				printf(fmt, buffer_info->debug_name);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = expected_attachments_count
+			// enums[2] = got_attachments_count
+			case HERO_RENDER_GRAPH_ERROR_TYPE_PASS_ATTACHMENTS_COUNT_MISMATCH: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassImageOutputEnum
+			// enums[2] = HeroPassImageOutputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_DUPLICATED_IMAGE: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassImageInputEnum
+			// enums[2] = HeroPassImageInputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_DUPLICATED_IMAGE: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassImageInputEnum
+			// enums[2] = HeroPassImageOutputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_USED_AS_INPUT_AND_OUTPUT: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassBufferOutputEnum
+			// enums[2] = HeroPassBufferOutputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_DUPLICATED_BUFFER: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassBufferInputEnum
+			// enums[2] = HeroPassBufferInputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_DUPLICATED_BUFFER: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassBufferInputEnum
+			// enums[2] = HeroPassBufferOutputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_USED_AS_INPUT_AND_OUTPUT: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassImageOutputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_FORMAT_MISMATCH:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_IMAGE_ENUM_DOES_NOT_EXIST:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_DOES_NOT_EXIST:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassImageInputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_FORMAT_MISMATCH:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_IMAGE_ENUM_DOES_NOT_EXIST:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_DOES_NOT_EXIST:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_CANNOT_BE_SWAPCHAIN:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_ENUM_DOES_NOT_EXIST:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_IMAGE_OUTPUT_ENUM_DOES_NOT_EXIST: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassBufferOutputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_BUFFER_ENUM_DOES_NOT_EXIST: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1]);
+				break;
+			};
+
+			//
+			// enums[0] = HeroPassEnum
+			// enums[1] = HeroPassBufferInputEnum
+			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_BUFFER_ENUM_DOES_NOT_EXIST:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_ENUM_DOES_NOT_EXIST:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_BUFFER_OUTPUT_ENUM_DOES_NOT_EXIST: {
+				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
+				printf(fmt, pass_info->debug_name, e->enums[1]);
+				break;
+			};
+		}
+	}
+}
+
+void hero_render_graph_print_execution_units(HeroLogicalDevice* ldev, HeroRenderGraphId id, FILE* f, bool color) {
+	HeroRenderGraph* render_graph;
+	HeroResult result = hero_render_graph_get(ldev, id, &render_graph);
+	HERO_RESULT_ASSERT(result);
+
+	for_range(execution_unit_idx, 0, render_graph->execution_units_count) {
+		if (execution_unit_idx) {
+			if (execution_unit_idx > 1) {
+				_hero_render_graph_print_execution_unit_identation(execution_unit_idx - 1, f);
+			}
+			fputs("┗━━━┳", f);
+		}
+		fprintf(f, "EXE UNIT #%zu\n", execution_unit_idx);
+
+		_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
+		fputs("┃\n", f);
+
+		HeroRangeU16 range = render_graph->execution_units_ranges[execution_unit_idx];
+		for_range(pass_idx, range.start_idx, range.end_idx) {
+			HeroPassEnum pass_enum = render_graph->execution_units_passes[pass_idx];
+			HeroPassInfo* pass_info = &render_graph->passes[pass_enum];
+
+			_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
+			fprintf(f, "┣ PASS %s\n", pass_info->debug_name);
+
+			if (pass_info->image_inputs_count || pass_info->buffer_inputs_count) {
+				_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
+				fputs("┃    ┣ INPUTS\n", f);
+				for_range (image_input_enum, 0, pass_info->image_inputs_count) {
+					HeroImageInput* image_input = &pass_info->image_inputs[image_input_enum];
+					HeroImageInfo* image_info = &render_graph->images[image_input->image_enum];
+					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
+					fprintf(f, "┃    ┃   ┣ IMAGE %s\n", image_info->debug_name);
+				}
+				for_range (buffer_input_enum, 0, pass_info->buffer_inputs_count) {
+					HeroBufferInput* buffer_input = &pass_info->buffer_inputs[buffer_input_enum];
+					HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_input->buffer_enum];
+					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
+					fprintf(f, "┃    ┃   ┣ BUFFER %s\n", buffer_info->debug_name);
+				}
+			}
+
+			if (pass_info->image_outputs_count || pass_info->buffer_outputs_count) {
+				_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
+				fputs("┃    ┣ OUTPUTS\n", f);
+				for_range (image_output_enum, 0, pass_info->image_outputs_count) {
+					HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
+					HeroImageInfo* image_info = &render_graph->images[image_output->image_enum];
+					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
+					fprintf(f, "┃    ┃   ┣ IMAGE %s\n", image_info->debug_name);
+				}
+				for_range (buffer_output_enum, 0, pass_info->buffer_outputs_count) {
+					HeroBufferOutput* buffer_output = &pass_info->buffer_outputs[buffer_output_enum];
+					HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_output->buffer_enum];
+					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
+					fprintf(f, "┃    ┃   ┣ BUFFER %s\n", buffer_info->debug_name);
+				}
+			}
+		}
+	}
+}
+
+void hero_render_graph_print_graphviz_dot(HeroLogicalDevice* ldev, HeroRenderGraphId id, FILE* f) {
+	HeroRenderGraph* render_graph;
+	HeroResult result = hero_render_graph_get(ldev, id, &render_graph);
+	HERO_RESULT_ASSERT(result);
+
+	fprintf(f, "digraph RenderGraph_%s {\n", render_graph->debug_name);
+
+	/*
+	for_range(image_enum, 0, render_graph->images_count) {
+		HeroImageInfo* image_info = &render_graph->images[image_enum];
+		fprintf(f, "\tIMAGE_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", image_enum, image_info->debug_name);
+	}
+
+	for_range(buffer_enum, 0, render_graph->buffers_count) {
+		HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_enum];
+		fprintf(f, "\tBUFFER_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", buffer_enum, buffer_info->debug_name);
+	}
+	*/
+
+	for_range(pass_enum, 0, render_graph->passes_count) {
+		HeroPassInfo* pass_info = &render_graph->passes[pass_enum];
+		fprintf(f, "\tPASS_%zu [label=\"PASS.%s\", shape=\"circle\"]\n", pass_enum, pass_info->debug_name);
+
+		for_range(output_enum, 0, pass_info->image_outputs_count) {
+			HeroImageOutput* image_output = &pass_info->image_outputs[output_enum];
+			HeroImageInfo* image_info = &render_graph->images[image_output->image_enum];
+			fprintf(f, "\tPASS_%zu_IMAGE_OUTPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", pass_enum, output_enum, image_info->debug_name);
+			fprintf(f, "\tPASS_%zu -> PASS_%zu_IMAGE_OUTPUT_%zu\n", pass_enum, pass_enum, output_enum);
+		}
+
+		for_range(input_enum, 0, pass_info->image_inputs_count) {
+			HeroImageInput* image_input = &pass_info->image_inputs[input_enum];
+			HeroImageInfo* image_info = &render_graph->images[image_input->image_enum];
+			if (image_input->pass_enum == HERO_PASS_ENUM_INVALID) {
+				fprintf(f, "\tPASS_%zu_IMAGE_INPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", pass_enum, input_enum, image_info->debug_name);
+				fprintf(f, "\tPASS_%zu_IMAGE_INPUT_%zu -> PASS_%zu\n", pass_enum, input_enum, pass_enum);
+			} else {
+				HeroPassInfo* input_pass_info = &render_graph->passes[image_input->pass_enum];
+				fprintf(f, "\tPASS_%u_IMAGE_OUTPUT_%u -> PASS_%zu\n", image_input->pass_enum, image_input->pass_image_output_enum, pass_enum);
+			}
+		}
+
+		for_range(output_enum, 0, pass_info->buffer_outputs_count) {
+			HeroBufferOutput* buffer_output = &pass_info->buffer_outputs[output_enum];
+			HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_output->buffer_enum];
+			fprintf(f, "\tPASS_%zu_BUFFER_OUTPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", pass_enum, output_enum, buffer_info->debug_name);
+			fprintf(f, "\tPASS_%zu -> PASS_%zu_BUFFER_OUTPUT_%zu\n", pass_enum, pass_enum, output_enum);
+		}
+
+		for_range(input_enum, 0, pass_info->buffer_inputs_count) {
+			HeroBufferInput* buffer_input = &pass_info->buffer_inputs[input_enum];
+			HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_input->buffer_enum];
+			if (buffer_input->pass_enum == HERO_PASS_ENUM_INVALID) {
+				fprintf(f, "\tPASS_%zu_BUFFER_INPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", pass_enum, input_enum, buffer_info->debug_name);
+				fprintf(f, "\tPASS_%zu_BUFFER_INPUT_%zu -> PASS_%zu\n", pass_enum, input_enum, pass_enum);
+			} else {
+				HeroPassInfo* input_pass_info = &render_graph->passes[buffer_input->pass_enum];
+				fprintf(f, "\tPASS_%u_BUFFER_OUTPUT_%u -> PASS_%zu\n", buffer_input->pass_enum, buffer_input->pass_buffer_output_enum, pass_enum);
+			}
+		}
+	}
+
+	fprintf(f, "}\n");
+}
+
+// ===========================================
+//
+//
 // Backend: Vulkan
 //
 //
@@ -3428,6 +4312,10 @@ HeroResult _hero_vulkan_logical_device_init(HeroPhysicalDevice* physical_device,
 		return result;
 	}
 	result = hero_object_pool(HeroCommandPoolVulkan, init)(&ldev_vulkan->command_pool_pool, setup->command_pools_cap, hero_system_alctor, HERO_GFX_ALLOC_TAG_COMMAND_POOL_POOL);
+	if (result < 0) {
+		return result;
+	}
+	result = hero_object_pool(HeroRenderGraphVulkan, init)(&ldev_vulkan->render_graph_pool, setup->render_graphs_cap, hero_system_alctor, HERO_GFX_ALLOC_TAG_RENDER_GRAPH_POOL);
 	if (result < 0) {
 		return result;
 	}
@@ -7763,6 +8651,130 @@ HeroResult _hero_vulkan_cmd_compute_dispatch(HeroCommandRecorder* command_record
 	return HERO_SUCCESS;
 }
 
+HeroResult _hero_vulkan_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroRenderGraphId* id_out, HeroRenderGraph** out) {
+	HeroResult result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	HeroRenderGraphVulkan* render_graph_vulkan;
+	result = hero_object_pool(HeroRenderGraphVulkan, alloc)(&ldev_vulkan->render_graph_pool, &render_graph_vulkan, id_out);
+	if (result < 0) {
+		return result;
+	}
+
+	HeroPassInfoVulkan*   passes_vulkan = hero_alloc_array(HeroPassInfoVulkan, hero_system_alctor, 0, setup->passes_count);
+	HeroImageInfoVulkan*  images_vulkan = hero_alloc_array(HeroImageInfoVulkan, hero_system_alctor, 0, setup->images_count);
+	HeroBufferInfoVulkan* buffers_vulkan = hero_alloc_array(HeroBufferInfoVulkan, hero_system_alctor, 0, setup->buffers_count);
+	if ((setup->passes_count && !passes_vulkan) || (setup->images_count && !images_vulkan) || (setup->buffers_count && !buffers_vulkan)) {
+		return HERO_ERROR(ALLOCATION_FAILURE);
+	}
+
+	HERO_ZERO_ELMT_MANY(passes_vulkan, setup->passes_count);
+	HERO_ZERO_ELMT_MANY(images_vulkan, setup->images_count);
+	HERO_ZERO_ELMT_MANY(buffers_vulkan, setup->buffers_count);
+
+	render_graph_vulkan->passes = passes_vulkan;
+	render_graph_vulkan->images = images_vulkan;
+	render_graph_vulkan->buffers = buffers_vulkan;
+
+	*out = &render_graph_vulkan->public_;
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_render_graph_deinit(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph* render_graph) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroRenderGraphVulkan* render_graph_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroRenderGraphVulkan, render_graph);
+
+	result = _hero_vulkan_render_graph_deinit_gpu_resources(ldev, id);
+	if (result < 0) {
+		return result;
+	}
+
+	hero_dealloc_array(HeroPassInfoVulkan, hero_system_alctor, 0, render_graph_vulkan->passes, render_graph->passes_count);
+	hero_dealloc_array(HeroImageInfoVulkan, hero_system_alctor, 0, render_graph_vulkan->images, render_graph->images_count);
+	hero_dealloc_array(HeroBufferInfoVulkan, hero_system_alctor, 0, render_graph_vulkan->buffers, render_graph->buffers_count);
+	return hero_object_pool(HeroRenderGraphVulkan, dealloc)(&ldev_vulkan->render_graph_pool, id);
+}
+
+HeroResult _hero_vulkan_render_graph_get(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph** out) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	HeroRenderGraphVulkan* render_graph_vulkan;
+	result = hero_object_pool(HeroRenderGraphVulkan, get)(&ldev_vulkan->render_graph_pool, id, &render_graph_vulkan);
+	if (result < 0) {
+		return result;
+	}
+
+	*out = &render_graph_vulkan->public_;
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_render_graph_deinit_gpu_resources(HeroLogicalDevice* ldev, HeroRenderGraphId id) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	HeroRenderGraphVulkan* render_graph_vulkan;
+	result = hero_object_pool(HeroRenderGraphVulkan, get)(&ldev_vulkan->render_graph_pool, id, &render_graph_vulkan);
+	if (result < 0) {
+		return result;
+	}
+	HeroRenderGraph* render_graph = &render_graph_vulkan->public_;
+	if (!render_graph_vulkan->initialized_gpu_resources) {
+		return HERO_SUCCESS;
+	}
+
+	HERO_ABORT("UNIMPLEMENTED");
+
+	for_range(image_enum, 0, render_graph->images_count) {
+
+	}
+
+	for_range(buffer_enum, 0, render_graph->buffers_count) {
+
+	}
+
+	for_range(pass_enum, 0, render_graph->passes_count) {
+
+	}
+}
+
+HeroResult _hero_vulkan_render_graph_execute(HeroLogicalDevice* ldev, HeroRenderGraphId id) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	HeroRenderGraphVulkan* render_graph_vulkan;
+	result = hero_object_pool(HeroRenderGraphVulkan, get)(&ldev_vulkan->render_graph_pool, id, &render_graph_vulkan);
+	if (result < 0) {
+		return result;
+	}
+	HeroRenderGraph* render_graph = &render_graph_vulkan->public_;
+
+	//
+	// allocate all the graphics resources if we have not execute at all since the resource where last destroyed
+	//
+	if (!render_graph_vulkan->initialized_gpu_resources) {
+		for_range(image_enum, 0, render_graph->images_count) {
+
+		}
+
+		for_range(buffer_enum, 0, render_graph->buffers_count) {
+
+		}
+
+		for_range(pass_enum, 0, render_graph->passes_count) {
+
+		}
+	}
+
+
+	return HERO_SUCCESS;
+}
+
 HeroGfxSysVulkan hero_gfx_sys_vulkan;
 
 #endif // HERO_VULKAN_ENABLE
@@ -7866,6 +8878,11 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.cmd_draw_set_push_constants = _hero_vulkan_cmd_draw_set_push_constants;
 			hero_gfx_sys.backend_vtable.cmd_draw_set_instances = _hero_vulkan_cmd_draw_set_instances;
 			hero_gfx_sys.backend_vtable.cmd_compute_dispatch = _hero_vulkan_cmd_compute_dispatch;
+			hero_gfx_sys.backend_vtable.render_graph_init = _hero_vulkan_render_graph_init;
+			hero_gfx_sys.backend_vtable.render_graph_deinit = _hero_vulkan_render_graph_deinit;
+			hero_gfx_sys.backend_vtable.render_graph_get = _hero_vulkan_render_graph_get;
+			hero_gfx_sys.backend_vtable.render_graph_deinit_gpu_resources = _hero_vulkan_render_graph_deinit_gpu_resources;
+			hero_gfx_sys.backend_vtable.render_graph_execute = _hero_vulkan_render_graph_execute;
 			result = _hero_vulkan_init(setup);
 			break;
 		};

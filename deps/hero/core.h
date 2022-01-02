@@ -184,7 +184,7 @@ extern char* hero_stacktrace_debug;
 #define HERO_ERROR_DEF(NAME) HERO_ERROR_##NAME
 
 enum {
-	HERO_ERROR_GENERAL,
+	HERO_ERROR_GENERAL = 1,
 	HERO_ERROR_ALLOCATION_FAILURE,
 	HERO_ERROR_OBJECT_ID_IS_NULL,
 	HERO_ERROR_USE_AFTER_FREE,
@@ -958,6 +958,24 @@ HeroResult hero_file_read_all(const char* path, HeroIAlctor alctor, HeroAllocTag
 //
 //
 // ===========================================
+
+typedef struct HeroRangeU8 HeroRangeU8;
+struct HeroRangeU8 {
+	U8 start_idx;
+	U8 end_idx;
+};
+
+typedef struct HeroRangeU16 HeroRangeU16;
+struct HeroRangeU16 {
+	U16 start_idx;
+	U16 end_idx;
+};
+
+typedef struct HeroRangeU32 HeroRangeU32;
+struct HeroRangeU32 {
+	U32 start_idx;
+	U32 end_idx;
+};
 
 typedef struct HeroRange HeroRange;
 struct HeroRange {
