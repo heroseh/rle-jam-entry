@@ -1934,12 +1934,6 @@ HeroResult hero_render_graph_execute(HeroLogicalDevice* ldev, HeroRenderGraphId 
 	return hero_gfx_sys.backend_vtable.render_graph_execute(ldev, id);
 }
 
-void _hero_render_graph_print_execution_unit_identation(U32 indent_count, FILE* f) {
-	for_range(i, 0, indent_count) {
-		fputs("    ", f);
-	}
-}
-
 void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
 	for_range(i, 0, setup->errors_count) {
 		HeroRenderGraphError* e = &setup->errors_out[i];
@@ -2103,6 +2097,12 @@ void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
 	}
 }
 
+void _hero_render_graph_print_execution_unit_identation(U32 indent_count, FILE* f) {
+	for_range(i, 0, indent_count) {
+		fputs("    ", f);
+	}
+}
+
 void hero_render_graph_print_execution_units(HeroLogicalDevice* ldev, HeroRenderGraphId id, FILE* f, bool color) {
 	HeroRenderGraph* render_graph;
 	HeroResult result = hero_render_graph_get(ldev, id, &render_graph);
@@ -2134,31 +2134,51 @@ void hero_render_graph_print_execution_units(HeroLogicalDevice* ldev, HeroRender
 				for_range (image_input_enum, 0, pass_info->image_inputs_count) {
 					HeroImageInput* image_input = &pass_info->image_inputs[image_input_enum];
 					HeroImageInfo* image_info = &render_graph->images[image_input->image_enum];
+
 					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
-					fprintf(f, "┃    ┃   ┣ IMAGE %s\n", image_info->debug_name);
+					if (image_input_enum + 1 == pass_info->image_inputs_count) {
+						fprintf(f, "┃    ┃   ┗ IMAGE %s\n", image_info->debug_name);
+					} else {
+						fprintf(f, "┃    ┃   ┣ IMAGE %s\n", image_info->debug_name);
+					}
 				}
 				for_range (buffer_input_enum, 0, pass_info->buffer_inputs_count) {
 					HeroBufferInput* buffer_input = &pass_info->buffer_inputs[buffer_input_enum];
 					HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_input->buffer_enum];
+
 					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
-					fprintf(f, "┃    ┃   ┣ BUFFER %s\n", buffer_info->debug_name);
+					if (buffer_input_enum + 1 == pass_info->buffer_inputs_count) {
+						fprintf(f, "┃    ┃   ┗ BUFFER %s\n", buffer_info->debug_name);
+					} else {
+						fprintf(f, "┃    ┃   ┣ BUFFER %s\n", buffer_info->debug_name);
+					}
 				}
 			}
 
 			if (pass_info->image_outputs_count || pass_info->buffer_outputs_count) {
 				_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
-				fputs("┃    ┣ OUTPUTS\n", f);
+				fputs("┃    ┗ OUTPUTS\n", f);
 				for_range (image_output_enum, 0, pass_info->image_outputs_count) {
 					HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
 					HeroImageInfo* image_info = &render_graph->images[image_output->image_enum];
+
 					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
-					fprintf(f, "┃    ┃   ┣ IMAGE %s\n", image_info->debug_name);
+					if (image_output_enum + 1 == pass_info->image_outputs_count) {
+						fprintf(f, "┃        ┗ IMAGE %s\n", image_info->debug_name);
+					} else {
+						fprintf(f, "┃        ┣ IMAGE %s\n", image_info->debug_name);
+					}
 				}
 				for_range (buffer_output_enum, 0, pass_info->buffer_outputs_count) {
 					HeroBufferOutput* buffer_output = &pass_info->buffer_outputs[buffer_output_enum];
 					HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_output->buffer_enum];
+
 					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
-					fprintf(f, "┃    ┃   ┣ BUFFER %s\n", buffer_info->debug_name);
+					if (buffer_output_enum + 1 == pass_info->buffer_outputs_count) {
+						fprintf(f, "┃        ┗ BUFFER %s\n", buffer_info->debug_name);
+					} else {
+						fprintf(f, "┃        ┣ BUFFER %s\n", buffer_info->debug_name);
+					}
 				}
 			}
 		}
@@ -2171,60 +2191,99 @@ void hero_render_graph_print_graphviz_dot(HeroLogicalDevice* ldev, HeroRenderGra
 	HERO_RESULT_ASSERT(result);
 
 	fprintf(f, "digraph RenderGraph_%s {\n", render_graph->debug_name);
+	fputs("\tgraph [\n", f);
+	fputs("\t\tfontname=\"Liberation Mono bold\"\n", f);
+	fputs("\t\tfontsize=18\n", f);
+	fputs("\t]\n", f);
+	fputs("\tnode [\n", f);
+	fputs("\t\tfontname=\"Liberation Mono\"\n", f);
+	fputs("\t]\n", f);
+	fputs("\tedge [\n", f);
+	fputs("\t\tfontname=\"Liberation Mono\"\n", f);
+	fputs("\t]\n", f);
+	fprintf(f, "\tlabel=\"RenderGraph: %s\"\n", render_graph->debug_name);
 
-	/*
-	for_range(image_enum, 0, render_graph->images_count) {
-		HeroImageInfo* image_info = &render_graph->images[image_enum];
-		fprintf(f, "\tIMAGE_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", image_enum, image_info->debug_name);
-	}
-
-	for_range(buffer_enum, 0, render_graph->buffers_count) {
-		HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_enum];
-		fprintf(f, "\tBUFFER_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", buffer_enum, buffer_info->debug_name);
-	}
-	*/
-
-	for_range(pass_enum, 0, render_graph->passes_count) {
-		HeroPassInfo* pass_info = &render_graph->passes[pass_enum];
-		fprintf(f, "\tPASS_%zu [label=\"PASS.%s\", shape=\"circle\"]\n", pass_enum, pass_info->debug_name);
-
-		for_range(output_enum, 0, pass_info->image_outputs_count) {
-			HeroImageOutput* image_output = &pass_info->image_outputs[output_enum];
-			HeroImageInfo* image_info = &render_graph->images[image_output->image_enum];
-			fprintf(f, "\tPASS_%zu_IMAGE_OUTPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", pass_enum, output_enum, image_info->debug_name);
-			fprintf(f, "\tPASS_%zu -> PASS_%zu_IMAGE_OUTPUT_%zu\n", pass_enum, pass_enum, output_enum);
+	if (0) {
+		fprintf(f, "\tsubgraph cluster_1 {\n");
+		fprintf(f, "\t\tlabel=\"Resources\"\n");
+		for_range(image_enum, 0, render_graph->images_count) {
+			HeroImageInfo* image_info = &render_graph->images[image_enum];
+			fprintf(f, "\t\tIMAGE_%zu [label=\"{IMAGE.%s|{width|%u}|{height|%u}|{array_layers|%u}|{mip_levels|%u}|{samples_count|%u}|{format|%u}|{persistant|%u}|{readback|%u}}\", shape=\"record\"]\n", image_enum, image_info->debug_name, image_info->width, image_info->height, image_info->array_layers_count, image_info->mip_levels_count, (1 << image_info->samples_count_log2), image_info->image_format, !!(image_info->flags & HERO_IMAGE_INFO_FLAGS_PERSISTENT), !!(image_info->flags & HERO_IMAGE_INFO_FLAGS_READBACK));
 		}
 
-		for_range(input_enum, 0, pass_info->image_inputs_count) {
-			HeroImageInput* image_input = &pass_info->image_inputs[input_enum];
-			HeroImageInfo* image_info = &render_graph->images[image_input->image_enum];
-			if (image_input->pass_enum == HERO_PASS_ENUM_INVALID) {
-				fprintf(f, "\tPASS_%zu_IMAGE_INPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", pass_enum, input_enum, image_info->debug_name);
-				fprintf(f, "\tPASS_%zu_IMAGE_INPUT_%zu -> PASS_%zu\n", pass_enum, input_enum, pass_enum);
-			} else {
-				HeroPassInfo* input_pass_info = &render_graph->passes[image_input->pass_enum];
-				fprintf(f, "\tPASS_%u_IMAGE_OUTPUT_%u -> PASS_%zu\n", image_input->pass_enum, image_input->pass_image_output_enum, pass_enum);
+		for_range(buffer_enum, 0, render_graph->buffers_count) {
+			HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_enum];
+			fprintf(f, "\t\tBUFFER_%zu [label=\"{BUFFER.%s|{size:%lu}|{persistant:%u}|{readback:%u}\", shape=\"record\"]\n", buffer_enum, buffer_info->debug_name, buffer_info->size, !!(buffer_info->flags & HERO_BUFFER_INFO_FLAGS_PERSISTENT), !!(buffer_info->flags & HERO_BUFFER_INFO_FLAGS_READBACK));
+		}
+		fprintf(f, "\t}\n");
+	}
+
+	{
+		fprintf(f, "\tsubgraph cluster_2 {\n");
+		fprintf(f, "\t\tlabel=\"Graph\"\n");
+
+		for_range(pass_enum, 0, render_graph->passes_count) {
+			HeroPassInfo* pass_info = &render_graph->passes[pass_enum];
+			fprintf(f, "\t\tPASS_%zu [label=\"PASS.%s\", shape=\"circle\"]\n", pass_enum, pass_info->debug_name);
+
+			for_range(output_enum, 0, pass_info->image_outputs_count) {
+				HeroImageOutput* image_output = &pass_info->image_outputs[output_enum];
+				HeroImageInfo* image_info = &render_graph->images[image_output->image_enum];
+				fprintf(f, "\t\tPASS_%zu_IMAGE_OUTPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", pass_enum, output_enum, image_info->debug_name);
+				fprintf(f, "\t\tPASS_%zu -> PASS_%zu_IMAGE_OUTPUT_%zu [label=\"%zu\"]\n", pass_enum, pass_enum, output_enum, output_enum);
+			}
+
+			for_range(input_enum, 0, pass_info->image_inputs_count) {
+				HeroImageInput* image_input = &pass_info->image_inputs[input_enum];
+				HeroImageInfo* image_info = &render_graph->images[image_input->image_enum];
+				if (image_input->pass_enum == HERO_PASS_ENUM_INVALID) {
+					fprintf(f, "\t\tPASS_%zu_IMAGE_INPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", pass_enum, input_enum, image_info->debug_name);
+					fprintf(f, "\t\tPASS_%zu_IMAGE_INPUT_%zu -> PASS_%zu [label=\"%zu\"]\n", pass_enum, input_enum, pass_enum, input_enum);
+				} else {
+					HeroPassInfo* input_pass_info = &render_graph->passes[image_input->pass_enum];
+					fprintf(f, "\t\tPASS_%u_IMAGE_OUTPUT_%u -> PASS_%zu [label=\"%zu\"]\n", image_input->pass_enum, image_input->pass_image_output_enum, pass_enum, input_enum);
+				}
+			}
+
+			for_range(output_enum, 0, pass_info->buffer_outputs_count) {
+				HeroBufferOutput* buffer_output = &pass_info->buffer_outputs[output_enum];
+				HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_output->buffer_enum];
+				fprintf(f, "\t\tPASS_%zu_BUFFER_OUTPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", pass_enum, output_enum, buffer_info->debug_name);
+				fprintf(f, "\t\tPASS_%zu -> PASS_%zu_BUFFER_OUTPUT_%zu [label=\"%zu\"]\n", pass_enum, pass_enum, output_enum, output_enum);
+			}
+
+			for_range(input_enum, 0, pass_info->buffer_inputs_count) {
+				HeroBufferInput* buffer_input = &pass_info->buffer_inputs[input_enum];
+				HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_input->buffer_enum];
+				if (buffer_input->pass_enum == HERO_PASS_ENUM_INVALID) {
+					fprintf(f, "\t\tPASS_%zu_BUFFER_INPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", pass_enum, input_enum, buffer_info->debug_name);
+					fprintf(f, "\t\tPASS_%zu_BUFFER_INPUT_%zu -> PASS_%zu [label=\"%zu\"]\n", pass_enum, input_enum, pass_enum, input_enum);
+				} else {
+					HeroPassInfo* input_pass_info = &render_graph->passes[buffer_input->pass_enum];
+					fprintf(f, "\t\tPASS_%u_BUFFER_OUTPUT_%u -> PASS_%zu [label=\"%zu\"]\n", buffer_input->pass_enum, buffer_input->pass_buffer_output_enum, pass_enum, input_enum);
+				}
+			}
+		}
+		fprintf(f, "\t}\n");
+	}
+
+	{
+		fprintf(f, "\tsubgraph cluster_3 {\n");
+		fprintf(f, "\t\tlabel=\"Execution Units\"\n");
+
+		for_range(execution_unit_idx, 0, render_graph->execution_units_count) {
+			fprintf(f, "\t\tEXE_UNIT_%zu [label=\"EXE_UNIT.%zu\", shape=\"house\"]\n", execution_unit_idx, execution_unit_idx);
+			if (execution_unit_idx) {
+				fprintf(f, "\t\tEXE_UNIT_%zu -> EXE_UNIT_%zu\n", execution_unit_idx - 1, execution_unit_idx);
 			}
 		}
 
-		for_range(output_enum, 0, pass_info->buffer_outputs_count) {
-			HeroBufferOutput* buffer_output = &pass_info->buffer_outputs[output_enum];
-			HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_output->buffer_enum];
-			fprintf(f, "\tPASS_%zu_BUFFER_OUTPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", pass_enum, output_enum, buffer_info->debug_name);
-			fprintf(f, "\tPASS_%zu -> PASS_%zu_BUFFER_OUTPUT_%zu\n", pass_enum, pass_enum, output_enum);
+		for_range(pass_enum, 0, render_graph->passes_count) {
+			HeroPassInfo* pass_info = &render_graph->passes[pass_enum];
+			fprintf(f, "\t\tEXE_UNIT_PASS_%zu [label=\"PASS.%s\", shape=\"circle\"]\n", pass_enum, pass_info->debug_name);
+			fprintf(f, "\t\tEXE_UNIT_%u -> EXE_UNIT_PASS_%zu\n", pass_info->execution_unit_idx, pass_enum);
 		}
-
-		for_range(input_enum, 0, pass_info->buffer_inputs_count) {
-			HeroBufferInput* buffer_input = &pass_info->buffer_inputs[input_enum];
-			HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_input->buffer_enum];
-			if (buffer_input->pass_enum == HERO_PASS_ENUM_INVALID) {
-				fprintf(f, "\tPASS_%zu_BUFFER_INPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", pass_enum, input_enum, buffer_info->debug_name);
-				fprintf(f, "\tPASS_%zu_BUFFER_INPUT_%zu -> PASS_%zu\n", pass_enum, input_enum, pass_enum);
-			} else {
-				HeroPassInfo* input_pass_info = &render_graph->passes[buffer_input->pass_enum];
-				fprintf(f, "\tPASS_%u_BUFFER_OUTPUT_%u -> PASS_%zu\n", buffer_input->pass_enum, buffer_input->pass_buffer_output_enum, pass_enum);
-			}
-		}
+		fprintf(f, "\t}\n");
 	}
 
 	fprintf(f, "}\n");

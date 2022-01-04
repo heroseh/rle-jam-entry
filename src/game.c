@@ -3699,7 +3699,11 @@ void _game_gfx_init_render_graph(void) {
 	HERO_RESULT_ASSERT(result);
 
 	hero_render_graph_print_execution_units(game.gfx.ldev, render_graph_id, stdout, true);
-	hero_render_graph_print_graphviz_dot(game.gfx.ldev, render_graph_id, stdout);
+
+	FILE* graph_file = fopen("render_graph_play.dot", "w");
+	HERO_ASSERT(graph_file, "failed to open render_graph_play.dot");
+	hero_render_graph_print_graphviz_dot(game.gfx.ldev, render_graph_id, graph_file);
+	fclose(graph_file);
 }
 
 void game_gfx_init(void) {
