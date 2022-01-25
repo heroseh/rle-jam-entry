@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <math.h>
 #include <time.h>
+#include <stdatomic.h>
 
 #ifdef __linux__
 #include <sys/mman.h>
@@ -112,6 +113,11 @@ HERO_STATIC_ASSERT(sizeof(S64) == 8, "S64 must be 8 bytes");
 HERO_STATIC_ASSERT(sizeof(Uptr) == sizeof(void*), "Uptr must be the same size as a pointer");
 HERO_STATIC_ASSERT(sizeof(Sptr) == sizeof(void*), "Sptr must be the same size as a pointer");
 
+#define HeroAtomic(T) _Atomic T
+#ifndef thread_local
+#define thread_local _Thread_local
+#endif
+
 #ifdef __GNUC__
 #define HERO_LIKELY(expr) __builtin_expect((expr), 1)
 #define HERO_UNLIKELY(expr) __builtin_expect((expr), 0)
@@ -120,6 +126,11 @@ HERO_STATIC_ASSERT(sizeof(Sptr) == sizeof(void*), "Sptr must be the same size as
 #define HERO_UNLIKELY(expr) expr
 #endif
 
+#if HERO_DEBUG_ASSERTIONS
+#define HERO_UNREACHABLE() HERO_ABORT("unreachable code");
+#else
+#define HERO_UNREACHABLE() __builtin_unreachable()
+#endif
 
 #ifdef __GNUC__
 #define HERO_NORETURN __attribute__((noreturn))
@@ -196,6 +207,7 @@ enum {
 	HERO_ERROR_NOT_STARTED,
 	HERO_ERROR_ALREADY_STARTED,
 	HERO_ERROR_FULL,
+	HERO_ERROR_ALREADY_IN_USE,
 
 	HERO_ERROR_WINDOW_START = 1000,
 	HERO_ERROR_GFX_START = 2000,
@@ -233,6 +245,8 @@ HERO_NORETURN void _hero_abort(const char* file, int line, const char* message, 
 #define HERO_CLAMP(v, min, max) (((v) > (max)) ? (max) : ((v) < (min)) ? (min) : (v))
 #define HERO_EPSILON 0.0001
 
+#define DIV_ROUND_UP(a, b) (((a) / (b)) + ((a) % (b) != 0))
+
 static inline F32 hero_lerp(F32 from, F32 to, F32 t) { return (to - from) * t + from; }
 static inline F32 hero_lerp_inv(F32 from, F32 to, F32 value) { return (value - from) / (to - from); }
 static inline F32 hero_bilerp(F32 tl, F32 tr, F32 bl, F32 br, F32 tx, F32 ty){
@@ -251,8 +265,64 @@ static inline F32 hero_sign(F32 v) { return copysignf(1.f, v); }
 #define HERO_BITSET_COUNT_U64(bitset) __builtin_popcountl(bitset)
 #define HERO_LEAST_SET_BIT_IDX_U32(bitset) __builtin_clz(bitset)
 #define HERO_LEAST_SET_BIT_IDX_U64(bitset) __builtin_clzl(bitset)
+#define HERO_LEAST_UNSET_BIT_IDX_U32(bitset) __builtin_clz(~(bitset))
+#define HERO_LEAST_UNSET_BIT_IDX_U64(bitset) __builtin_clzl(~(bitset))
 #define HERO_LEAST_SET_BIT_REMOVE(bitset) ((bitset) & ((bitset) - 1))
 #endif // HERO_ARCH_X86_64
+
+static inline bool hero_bitset_array_is_set64(U64* bitset_array, Uptr bit_idx) {
+	U64 bit = ((U64)1 << (bit_idx % 64));
+	return (bitset_array[bit_idx / 64] & bit) == bit;
+}
+
+static inline void hero_bitset_array_set64(U64* bitset_array, Uptr bit_idx) {
+	U64 bit = (U64)1 << (bit_idx % 64);
+	bitset_array[bit_idx / 64] |= bit;
+}
+
+static inline void hero_bitset_array_unset64(U64* bitset_array, Uptr bit_idx) {
+	bitset_array[bit_idx / 64] &= ~((U64)1 << (bit_idx % 64));
+}
+
+static inline bool hero_bitset_array_iter_next_one64(U64* bitset_array, Uptr bits_count, Uptr* bit_idx_mut) {
+	Uptr bit_idx = *bit_idx_mut;
+	bit_idx += 1;
+	while (1) {
+		if (bit_idx >= bits_count) {
+			return false;
+		}
+
+		U64 word = bitset_array[bit_idx / 64];
+		Uptr rem_word_bits = bit_idx % 64;
+		word &= ((Uptr)-1) << rem_word_bits; // clear the first N bits that have already been iterated over.
+		if (word) {
+			*bit_idx_mut = bit_idx + HERO_LEAST_SET_BIT_IDX_U64(word);
+			return true;
+		}
+
+		bit_idx += 64 - rem_word_bits;
+	}
+}
+
+static inline bool hero_bitset_array_iter_next_zero64(U64* bitset_array, Uptr bits_count, Uptr* bit_idx_mut) {
+	Uptr bit_idx = *bit_idx_mut;
+	bit_idx += 1;
+	while (1) {
+		if (bit_idx >= bits_count) {
+			return false;
+		}
+
+		U64 word = bitset_array[bit_idx / 64];
+		Uptr rem_word_bits = bit_idx % 64;
+		word &= ((Uptr)-1) << rem_word_bits; // clear the first N bits that have already been iterated over.
+		if (word) {
+			*bit_idx_mut = bit_idx + HERO_LEAST_UNSET_BIT_IDX_U64(word);
+			return true;
+		}
+
+		bit_idx += 64 - rem_word_bits;
+	}
+}
 
 // ===========================================
 //
@@ -272,8 +342,11 @@ static inline F32 hero_sign(F32 v) { return copysignf(1.f, v); }
 // align must be a power of 2
 #define HERO_PTR_ROUND_DOWN_ALIGN(ptr, align) ((void*)HERO_INT_ROUND_DOWN_ALIGN((Uptr)ptr, align))
 #define HERO_ZERO_ELMT(ptr) memset(ptr, 0, sizeof(*(ptr)))
+#define HERO_ONE_ELMT(ptr) memset(ptr, 0xff, sizeof(*(ptr)))
 #define HERO_ZERO_ELMT_MANY(ptr, elmts_count) memset(ptr, 0, sizeof(*(ptr)) * (elmts_count))
+#define HERO_ONE_ELMT_MANY(ptr, elmts_count) memset(ptr, 0xff, sizeof(*(ptr)) * (elmts_count))
 #define HERO_ZERO_ARRAY(array) memset(array, 0, sizeof(array))
+#define HERO_ONE_ARRAY(array) memset(array, 0xff, sizeof(array))
 #define HERO_COPY_ARRAY(dst, src) memcpy(dst, src, sizeof(dst))
 #define HERO_COPY_ELMT_MANY(dst, src, elmts_count) memcpy(dst, src, elmts_count * sizeof(*(dst)))
 #define HERO_COPY_OVERLAP_ELMT_MANY(dst, src, elmts_count) memmove(dst, src, elmts_count * sizeof(*(dst)))
@@ -565,6 +638,7 @@ struct HeroObjectPool {
 };
 
 #define HeroObjectPool(Type) HeroObjectPool_##Type
+#define hero_object_id(Type, NAME) hero_object_id_##NAME##_##Type
 #define hero_object_pool(Type, NAME) hero_object_pool_##NAME##_##Type
 
 #define HERO_TYPEDEF_OBJECT_ID(Name) \
@@ -583,14 +657,19 @@ struct HeroObjectHeader {
 
 #define HERO_OBJECT_ID_IDX_MASK(IDX_BITS_COUNT) ((1 << IDX_BITS_COUNT) - 1)
 #define HERO_OBJECT_ID_IDX_SHIFT 0
-#define HERO_OBJECT_ID_COUNTER_MASK(IDX_BITS_COUNT) ((1 << ((32 - IDX_BITS_COUNT) - 1)) - 1)
+
+#define HERO_OBJECT_ID_COUNTER_MASK(COUNTER_BITS_COUNT) ((1 << COUNTER_BITS_COUNT) - 1)
 #define HERO_OBJECT_ID_COUNTER_SHIFT(IDX_BITS_COUNT) IDX_BITS_COUNT
 
-static inline bool _hero_object_id_raw_init(U32 idx, U32 counter, U32 idx_bits_count) {
+#define HERO_OBJECT_ID_USER_MASK(USER_BITS_COUNT) ((1 << USER_BITS_COUNT) - 1)
+#define HERO_OBJECT_ID_USER_SHIFT(IDX_BITS_COUNT, COUNTER_BITS_COUNT) (IDX_BITS_COUNT + COUNTER_BITS_COUNT)
+
+static inline bool _hero_object_id_raw_init(U32 idx, U32 counter, U32 user_bits, U32 idx_bits_count, U32 counter_bits_count, U32 user_bits_count) {
 	return
 		((idx & HERO_OBJECT_ID_IDX_MASK(idx_bits_count)) << HERO_OBJECT_ID_IDX_SHIFT) |
-		((counter & HERO_OBJECT_ID_COUNTER_MASK(idx_bits_count)) << HERO_OBJECT_ID_COUNTER_SHIFT(idx_bits_count))
-		;
+		((counter & HERO_OBJECT_ID_COUNTER_MASK(counter_bits_count)) << HERO_OBJECT_ID_COUNTER_SHIFT(idx_bits_count)) |
+		((user_bits & HERO_OBJECT_ID_USER_MASK(user_bits_count)) << HERO_OBJECT_ID_USER_SHIFT(idx_bits_count, counter_bits_count))
+	;
 }
 
 static inline U32 _hero_object_id_raw_idx(HeroObjectIdRaw raw_id, U32 idx_bits_count) {
@@ -602,15 +681,19 @@ static inline void _hero_object_id_raw_set_idx(HeroObjectIdRaw* raw_id, U32 idx,
 	*raw_id |= (idx & HERO_OBJECT_ID_IDX_MASK(idx_bits_count)) << HERO_OBJECT_ID_IDX_SHIFT; // set the new index
 }
 
-static inline U32 _hero_object_id_raw_counter(HeroObjectIdRaw raw_id, U32 idx_bits_count) {
-	return (raw_id >> HERO_OBJECT_ID_COUNTER_SHIFT(idx_bits_count)) & HERO_OBJECT_ID_COUNTER_MASK(idx_bits_count);
+static inline U32 _hero_object_id_raw_counter(HeroObjectIdRaw raw_id, U32 idx_bits_count, U32 counter_bits_count) {
+	return (raw_id >> HERO_OBJECT_ID_COUNTER_SHIFT(idx_bits_count)) & HERO_OBJECT_ID_COUNTER_MASK(counter_bits_count);
+}
+
+static inline U32 _hero_object_id_raw_user(HeroObjectIdRaw raw_id, U32 idx_bits_count, U32 counter_bits_count, U32 user_bits_count) {
+	return (raw_id >> HERO_OBJECT_ID_USER_SHIFT(idx_bits_count, counter_bits_count)) & HERO_OBJECT_ID_USER_MASK(user_bits_count);
 }
 
 HeroResult _hero_object_pool_init(HeroObjectPool* object_pool, U32 cap, HeroIAlctor alctor, HeroAllocTag tag, Uptr elmt_size, Uptr elmt_align);
 void _hero_object_pool_deinit(HeroObjectPool* object_pool, HeroIAlctor alctor, HeroAllocTag tag, Uptr elmt_size, Uptr elmt_align);
-HeroResult _hero_object_pool_alloc(HeroObjectPool* object_pool, Uptr elmt_size, U32 idx_bits_count, void** ptr_out, HeroObjectIdRaw* raw_id_out);
-HeroResult _hero_object_pool_dealloc(HeroObjectPool* object_pool, HeroObjectIdRaw raw_id, Uptr elmt_size, U32 idx_bits_count);
-HeroResult _hero_object_pool_get(HeroObjectPool* object_pool, HeroObjectIdRaw raw_id, Uptr elmt_size, U32 idx_bits_count, void** ptr_out);
+HeroResult _hero_object_pool_alloc(HeroObjectPool* object_pool, U32 user_bits, Uptr elmt_size, U32 idx_bits_count, U32 counter_bits_count, U32 user_bits_count, void** ptr_out, HeroObjectIdRaw* raw_id_out);
+HeroResult _hero_object_pool_dealloc(HeroObjectPool* object_pool, HeroObjectIdRaw raw_id, Uptr elmt_size, U32 idx_bits_count, U32 counter_bits_count);
+HeroResult _hero_object_pool_get(HeroObjectPool* object_pool, HeroObjectIdRaw raw_id, Uptr elmt_size, U32 idx_bits_count, U32 counter_bits_count, void** ptr_out);
 HeroResult _hero_object_pool_get_id(HeroObjectPool* object_pool, void* object, Uptr elmt_size, U32 idx_bits_count, HeroObjectIdRaw* raw_id_out);
 void _hero_object_pool_clear(HeroObjectPool* object_pool);
 HeroResult _hero_object_pool_iter_next(HeroObjectPool* object_pool, HeroObjectIdRaw* raw_id_mut, Uptr elmt_size, U32 idx_bits_count, void** ptr_out);
@@ -992,10 +1075,14 @@ struct HeroFreeRanges {
 	HeroStack(HeroRange) ranges;
 };
 
-HeroResult hero_free_ranges_init(HeroFreeRanges* r, Uptr init_cap, HeroIAlctor alctor, HeroAllocTag tag);
+HeroResult hero_free_ranges_init(HeroFreeRanges* r, Uptr cap, HeroIAlctor alctor, HeroAllocTag tag);
 void hero_free_ranges_deinit(HeroFreeRanges* r, HeroIAlctor alctor, HeroAllocTag tag);
 HeroResult hero_free_ranges_give(HeroFreeRanges* r, Uptr idx, HeroIAlctor alctor, HeroAllocTag tag);
+HeroResult hero_free_ranges_give_range(HeroFreeRanges* r, HeroRange free_range, HeroIAlctor alctor, HeroAllocTag tag);
 HeroResult hero_free_ranges_take(HeroFreeRanges* r, Uptr* idx_out);
+HeroResult hero_free_ranges_take_requested(HeroFreeRanges* r, Uptr idx, HeroIAlctor alctor, HeroAllocTag tag);
+HeroResult hero_free_ranges_take_range(HeroFreeRanges* r, Uptr size, Uptr align, HeroIAlctor alctor, HeroAllocTag tag, Uptr* start_idx_out);
+HeroResult hero_free_ranges_take_range_requested(HeroFreeRanges* r, HeroRange requested_range, HeroIAlctor alctor, HeroAllocTag tag);
 
 // ===========================================
 //
@@ -1089,6 +1176,8 @@ U32 hero_text_reader_remaining_size(HeroTextReader* reader);
 bool hero_text_reader_has_content(HeroTextReader* reader);
 bool hero_text_reader_is_empty(HeroTextReader* reader);
 
+U8* hero_text_reader_cursor(HeroTextReader* reader);
+
 // returns the number of whitespace bytes consumed
 U32 hero_text_reader_consume_whitespace(HeroTextReader* reader);
 
@@ -1100,6 +1189,8 @@ U32 hero_text_reader_consume_until_any_byte(HeroTextReader* reader, HeroString b
 
 // returns true if the byte is has been consumed
 bool hero_text_reader_consume_byte(HeroTextReader* reader, U8 byte);
+
+U32 hero_text_reader_consume_enum(HeroTextReader* reader, char** enum_strings, U32 enums_count, HeroString terminator);
 
 // ===========================================
 //

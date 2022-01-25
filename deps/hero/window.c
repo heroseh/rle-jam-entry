@@ -1056,7 +1056,7 @@ HeroResult hero_window_open(const char* title, U32 x, U32 y, U32 width, U32 heig
 
 	HeroWindow* window;
 	HeroWindowId window_id;
-	HeroResult result = hero_object_pool(HeroWindow, alloc)(&hero_window_sys.windows_pool, &window, &window_id);
+	HeroResult result = hero_object_pool(HeroWindow, alloc)(&hero_window_sys.windows_pool, 0, &window, &window_id);
 	if (result < 0) {
 		return result;
 	}

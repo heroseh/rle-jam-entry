@@ -29,9 +29,12 @@ typedef struct HeroPipelineCacheVulkan HeroPipelineCacheVulkan;
 typedef struct HeroPipelineVulkan HeroPipelineVulkan;
 typedef struct HeroMaterialVulkan HeroMaterialVulkan;
 typedef struct HeroSwapchainVulkan HeroSwapchainVulkan;
+/*
 typedef struct HeroCommandPoolVulkan HeroCommandPoolVulkan;
 typedef struct HeroCommandPoolBufferVulkan HeroCommandPoolBufferVulkan;
+*/
 typedef struct HeroRenderGraphVulkan HeroRenderGraphVulkan;
+typedef struct HeroFrameGraphVulkan HeroFrameGraphVulkan;
 
 #define HERO_OBJECT_TYPE HeroVertexLayoutVulkan
 #include "object_pool_gen_def.inl"
@@ -78,13 +81,20 @@ typedef struct HeroRenderGraphVulkan HeroRenderGraphVulkan;
 #define HERO_OBJECT_TYPE HeroSwapchainVulkan
 #include "object_pool_gen_def.inl"
 
+/*
+
 #define HERO_OBJECT_TYPE HeroCommandPoolVulkan
 #include "object_pool_gen_def.inl"
 
 #define HERO_OBJECT_TYPE HeroCommandPoolBufferVulkan
 #include "object_pool_gen_def.inl"
 
+*/
+
 #define HERO_OBJECT_TYPE HeroRenderGraphVulkan
+#include "object_pool_gen_def.inl"
+
+#define HERO_OBJECT_TYPE HeroFrameGraphVulkan
 #include "object_pool_gen_def.inl"
 
 #if HERO_X11_ENABLE
@@ -178,9 +188,12 @@ typedef struct HeroRenderGraphVulkan HeroRenderGraphVulkan;
 	HERO_VULKAN_DEVICE_FN(vkCmdCopyBufferToImage) \
 	HERO_VULKAN_DEVICE_FN(vkCmdClearAttachments) \
 	HERO_VULKAN_DEVICE_FN(vkCmdPushConstants) \
+	HERO_VULKAN_DEVICE_FN(vkCmdClearColorImage) \
+	HERO_VULKAN_DEVICE_FN(vkCmdClearDepthStencilImage) \
 	HERO_VULKAN_DEVICE_FN(vkQueueSubmit) \
 	HERO_VULKAN_DEVICE_FN(vkQueuePresentKHR) \
 	HERO_VULKAN_DEVICE_FN(vkDeviceWaitIdle) \
+	HERO_VULKAN_DEVICE_FN(vkUpdateDescriptorSets) \
 	HERO_VULKAN_X11_FN_LIST \
 	/* end */
 
@@ -211,12 +224,6 @@ struct HeroPhysicalDeviceVulkan {
 	U32 queue_family_idx_async_compute;  // if HERO_QUEUE_SUPPORT_FLAGS_ASYNC_COMPUTE
 	U32 queue_family_idx_async_transfer; // if HERO_QUEUE_SUPPORT_FLAGS_ASYNC_TRANSFER
 };
-
-#define HERO_STACK_ELMT_TYPE VkDescriptorPool
-#include "stack_gen.inl"
-
-#define HERO_STACK_ELMT_TYPE VkCommandPool
-#include "stack_gen.inl"
 
 #define HERO_STACK_ELMT_TYPE VkCommandBuffer
 #include "stack_gen.inl"
@@ -293,6 +300,34 @@ union HeroDescriptorUpdateDataVulkan {
 	VkDescriptorBufferInfo buffer;
 };
 
+#define HERO_VULKAN_OBJECT_DEALLOC_IS_HEADER 0x8000000000000000 // we use the high bit to say it's a header since pointers never use the high bit.
+#define HERO_VULKAN_OBJECT_DEALLOC_HEADER(object_type, objects_count) \
+	HERO_VULKAN_OBJECT_DEALLOC_IS_HEADER | \
+	((U64)((objects_count) & 0xffff) << 32) | \
+	((U64)((object_type) & 0xffffffff) << 0) \
+	/* end */
+
+#define HERO_VULKAN_OBJECT_DEALLOC_HEADER_OBJECT_TYPE(dealloc) \
+	(((dealloc).header >> 0) & 0xffffffff)
+
+#define HERO_VULKAN_OBJECT_DEALLOC_HEADER_ENTRIES_COUNT(dealloc) \
+	(((dealloc).header >> 32) & 0xffff)
+
+typedef union HeroVulkanObjectDealloc HeroVulkanObjectDealloc;
+union HeroVulkanObjectDealloc {
+	U64 header;
+	VkImage image;
+	VkImageView image_view;
+	VkBuffer buffer;
+	VkDescriptorPool descriptor_pool;
+	VkCommandPool command_pool;
+	VkRenderPass render_pass;
+	VkFramebuffer frame_buffer;
+};
+
+#define HERO_STACK_ELMT_TYPE HeroVulkanObjectDealloc
+#include "stack_gen.inl"
+
 struct HeroLogicalDeviceVulkan {
 	HeroLogicalDevice public_;
 	HeroObjectPool(HeroBufferVulkan)              buffer_pool;
@@ -309,8 +344,11 @@ struct HeroLogicalDeviceVulkan {
 	HeroObjectPool(HeroPipelineVulkan)            pipeline_pool;
 	HeroObjectPool(HeroMaterialVulkan)            material_pool;
 	HeroObjectPool(HeroSwapchainVulkan)           swapchain_pool;
+	/*
 	HeroObjectPool(HeroCommandPoolVulkan)         command_pool_pool;
+	*/
 	HeroObjectPool(HeroRenderGraphVulkan)         render_graph_pool;
+	HeroObjectPool(HeroFrameGraphVulkan)          frame_graph_pool;
 
 	VkDevice                handle;
 	U32                     queue_family_idx_uber;
@@ -323,20 +361,28 @@ struct HeroLogicalDeviceVulkan {
 	VkQueue                 queue_async_transfer;
 	VkSemaphore             semaphore_present;
 
-	VkSampler null_sampler;
-	VkImage null_image_2d;
+	VkSampler   null_sampler;
+	VkImage     null_image_1d;
+	VkImage     null_image_2d;
+	VkImage     null_image_3d;
+	VkImageView null_image_view_1d;
 	VkImageView null_image_view_2d;
-	VkBuffer null_buffer;
+	VkImageView null_image_view_3d;
+	VkBuffer    null_buffer;
 	VkDescriptorSetLayout null_descriptor_set_layout; // a descriptor set layout with no descriptors
 
-	HeroStack(VkDescriptorPool)        descriptor_pools_to_deallocate; // a VK_NULL_HANDLE is used to seperate submits
-	HeroStack(VkCommandPool)           command_pools_to_deallocate; // a VK_NULL_HANDLE is used to seperate submits
+
+	U32                                objects_to_deallocate_prev_idx;
+	VkObjectType                       objects_to_deallocate_prev_object_type;
+	HeroStack(HeroVulkanObjectDealloc) objects_to_deallocate; // a VK_NULL_HANDLE is used to seperate submits
 	HeroStack(VkCommandBuffer)         submit_command_buffers;
 	HeroStack(VkSemaphore)             submit_render_semaphores;
 	HeroStack(VkSwapchainKHR)          submit_swapchains;
 	HeroStack(U32)                     submit_swapchain_image_indices;
 	HeroStack(VkFence)                 submit_free_fences;
 	HeroStack(_HeroGfxSubmitVulkan)    submits;
+
+	U32 descriptor_caps[HERO_VULKAN_DESCRIPTOR_BINDING_COUNT];
 
 	_HeroGfxStagingBufferSysVulkan staging_buffer_sys;
 
@@ -509,27 +555,35 @@ struct HeroSwapchainVulkan {
 	VkImageView* image_views;
 };
 
+#define HERO_VULKAN_PUSH_CONSTANTS_WORDS_CAP 32
+
+typedef struct HeroCommandRecorderVulkan HeroCommandRecorderVulkan;
+struct HeroCommandRecorderVulkan {
+	VkCommandBuffer command_buffer;
+	HeroPipelineId bound_pipeline_graphics;
+	HeroShaderId bound_pipeline_compute;
+	VkDescriptorSet bound_graphics_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_COUNT];
+	VkDescriptorSet bound_compute_descriptor_set;
+	VkBuffer bound_vertex_buffers[HERO_BUFFER_BINDINGS_CAP];
+	U32 push_constants[HERO_VULKAN_PUSH_CONSTANTS_WORDS_CAP];
+	U64 bound_vertex_buffer_offsets[HERO_BUFFER_BINDINGS_CAP];
+	U32 vertex_buffer_binding_start;
+	U32 vertex_buffer_binding_end;
+	U32 vertices_start_idx;
+	U32 indices_start_idx;
+	U32 instances_start_idx;
+	U32 instances_count;
+	U32 group_count_x;
+	U32 group_count_y;
+	U32 group_count_z;
+};
+
+/*
+
 struct HeroCommandPoolBufferVulkan {
 	HeroObjectHeader  header;
 	VkCommandBuffer   command_buffer;
 	bool              is_static;
-};
-
-typedef struct HeroCommandRecorderVulkan HeroCommandRecorderVulkan;
-struct HeroCommandRecorderVulkan {
-	HeroCommandRecorder public_;
-	VkCommandBuffer command_buffer;
-	VkPipeline bound_pipeline_graphics;
-	VkPipeline bound_pipeline_compute;
-	VkPipelineLayout pipeline_layout;
-	VkDescriptorSet bound_graphics_descriptor_sets[HERO_GFX_DESCRIPTOR_SET_COUNT];
-	VkDescriptorSet bound_compute_descriptor_set;
-	VkBuffer bound_vertex_buffers[HERO_BUFFER_BINDINGS_CAP];
-	U64 bound_vertex_buffer_offsets[HERO_BUFFER_BINDINGS_CAP];
-	U32 vertex_buffer_binding_start;
-	U32 vertex_buffer_binding_end;
-	U32 instances_start_idx;
-	U32 instances_count;
 };
 
 struct HeroCommandPoolVulkan {
@@ -542,41 +596,68 @@ struct HeroCommandPoolVulkan {
 	HeroStack(VkCommandBuffer)                  free_buffers_in_use;
 	HeroObjectPool(HeroCommandPoolBufferVulkan) command_buffer_pool;
 };
-
-typedef struct HeroPassInfoVulkan HeroPassInfoVulkan;
-struct HeroPassInfoVulkan {
-	VkRenderPass render_pass; // VK_NULL_HANDLE when it's a compute pass
-
-	HeroPassInfo public_;
-};
-
-typedef struct HeroImageInfoVulkan HeroImageInfoVulkan;
-struct HeroImageInfoVulkan {
-	VkImage        image;
-	VkImageView    image_view;
-	VkDeviceMemory device_memory;
-	U64            device_memory_offset;
-
-	HeroImageInfo public_;
-};
-
-typedef struct HeroBufferInfoVulkan HeroBufferInfoVulkan;
-struct HeroBufferInfoVulkan {
-	VkBuffer        image;
-	VkDeviceMemory  device_memory;
-	U64             device_memory_offset;
-	U64             device_memory_size;
-
-	HeroBufferInfo public_;
-};
+*/
 
 struct HeroRenderGraphVulkan {
-	HeroObjectHeader      header;
-	HeroPassInfoVulkan*   passes;
-	HeroImageInfoVulkan*  images;
-	HeroBufferInfoVulkan* buffers;
-	bool                  initialized_gpu_resources;
-	HeroRenderGraph       public_;
+	HeroObjectHeader header;
+	HeroRenderGraph  public_;
+};
+
+typedef struct HeroExecutionUnitVulkan HeroExecutionUnitVulkan;
+struct HeroExecutionUnitVulkan {
+	VkSemaphore          cross_frame_semaphore;
+	VkPipelineStageFlags src_stage_flags;
+	VkPipelineStageFlags dst_stage_flags;
+	U16                  resource_barriers_start_idx; // for HeroFrameGraphVulkan.{execution_units_image_barriers, execution_units_buffer_barriers}
+	U16                  image_barriers_count;
+	U16                  buffer_barriers_count;
+};
+
+typedef struct HeroPassVulkan HeroPassVulkan;
+struct HeroPassVulkan {
+	VkRenderPass    render_pass; // VK_NULL_HANDLE when it's a compute pass
+	HeroSwapchainId swapchain_id;
+	U16             clear_count;
+	U32             frame_buffer_image_width;
+	U32             frame_buffer_image_height;
+};
+
+typedef struct HeroFrameGraphVulkanActiveFrame HeroFrameGraphVulkanActiveFrame;
+struct HeroFrameGraphVulkanActiveFrame {
+	VkDeviceMemory  images_device_memory;
+	VkDeviceMemory  buffers_device_memory;
+	VkDescriptorSet descriptor_set;
+};
+
+typedef union HeroVulkanResource HeroVulkanResource;
+union HeroVulkanResource {
+	struct {
+		VkImage      image;
+		VkImageView  image_view;
+	};
+	VkBuffer buffer;
+};
+
+struct HeroFrameGraphVulkan {
+	HeroObjectHeader                   header;
+	HeroFrameGraph                     public_;
+	HeroPassVulkan*                    passes;
+	VkDeviceMemory                     persistent_images_device_memory;
+	VkDeviceMemory                     persistent_buffers_device_memory;
+	HeroVulkanResource*                persistent_vulkan_resources;
+	HeroVulkanResource*                active_frames_vulkan_resources; // array[active_frame_idx][physical_resource_idx]
+	VkFramebuffer*                     active_frames_frame_buffers;    // array[active_frame_idx][pass_enum]
+	VkCommandBuffer*                   active_frames_command_buffers;  // array[active_frame_idx][pass_enum]
+	HeroFrameGraphVulkanActiveFrame*   active_frames;
+	U16*                               execution_units_image_barrier_physical_resource_indices;  // cap = public_.resources_cap
+	VkImageMemoryBarrier*              execution_units_image_barriers;                           // cap = public_.resources_cap
+	U16*                               execution_units_buffer_barrier_physical_resource_indices; // cap = public_.resources_cap
+	VkBufferMemoryBarrier*             execution_units_buffer_barriers;                          // cap = public_.resources_cap
+	HeroExecutionUnitVulkan*           execution_units;                                          // cap = public_.execution_units_count
+	VkCommandPool                      command_pool_transient_reset;
+	VkDescriptorSetLayout              descriptor_set_layout;
+	VkDescriptorPool                   descriptor_pool;
+	U16                                num_frames_to_descriptor_sets;
 };
 
 #define HERO_OBJECT_ID_TYPE HeroVertexLayoutId
@@ -639,6 +720,8 @@ struct HeroRenderGraphVulkan {
 #define HERO_OBJECT_TYPE HeroSwapchainVulkan
 #include "object_pool_gen_impl.inl"
 
+/*
+
 #define HERO_OBJECT_ID_TYPE HeroCommandPoolId
 #define HERO_OBJECT_TYPE HeroCommandPoolVulkan
 #include "object_pool_gen_impl.inl"
@@ -647,8 +730,14 @@ struct HeroRenderGraphVulkan {
 #define HERO_OBJECT_TYPE HeroCommandPoolBufferVulkan
 #include "object_pool_gen_impl.inl"
 
+*/
+
 #define HERO_OBJECT_ID_TYPE HeroRenderGraphId
 #define HERO_OBJECT_TYPE HeroRenderGraphVulkan
+#include "object_pool_gen_impl.inl"
+
+#define HERO_OBJECT_ID_TYPE HeroFrameGraphId
+#define HERO_OBJECT_TYPE HeroFrameGraphVulkan
 #include "object_pool_gen_impl.inl"
 
 // ===========================================
@@ -669,7 +758,9 @@ HeroResult _hero_vulkan_logical_device_deinit(HeroLogicalDevice* ldev);
 HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev);
 
 HeroResult _hero_vulkan_logical_device_queue_transfer(HeroLogicalDevice* ldev);
+/*
 HeroResult _hero_vulkan_logical_device_queue_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count);
+*/
 HeroResult _hero_vulkan_logical_device_submit(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count);
 
 HeroResult _hero_vulkan_stage_buffer_update(HeroLogicalDeviceVulkan* ldev_vulkan, bool is_image, _HeroGfxStagedUpdateData* data, void** destination_out);
@@ -745,6 +836,8 @@ HeroResult _hero_vulkan_swapchain_deinit(HeroLogicalDevice* ldev, HeroSwapchainI
 HeroResult _hero_vulkan_swapchain_get(HeroLogicalDevice* ldev, HeroSwapchainId id, HeroSwapchain** out);
 HeroResult _hero_vulkan_swapchain_next_image(HeroLogicalDevice* ldev, HeroSwapchain* swapchain, U32* next_image_idx_out);
 
+/*
+
 HeroResult _hero_vulkan_command_pool_init(HeroLogicalDevice* ldev, HeroCommandPoolSetup* setup, HeroCommandPoolId* id_out);
 HeroResult _hero_vulkan_command_pool_deinit(HeroLogicalDevice* ldev, HeroCommandPoolId id);
 HeroResult _hero_vulkan_command_pool_reset(HeroLogicalDevice* ldev, HeroCommandPoolId id);
@@ -764,13 +857,34 @@ HeroResult _hero_vulkan_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_
 HeroResult _hero_vulkan_cmd_draw_set_push_constants(HeroCommandRecorder* command_recorder, void* data, U32 offset, U32 size);
 HeroResult _hero_vulkan_cmd_draw_set_instances(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count);
 HeroResult _hero_vulkan_cmd_compute_dispatch(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, HeroShaderGlobalsId shader_globals_id, U32 group_count_x, U32 group_count_y, U32 group_count_z);
+*/
 
 HeroResult _hero_vulkan_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroRenderGraphId* id_out, HeroRenderGraph** out);
 HeroResult _hero_vulkan_render_graph_deinit(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph* render_pass);
 HeroResult _hero_vulkan_render_graph_get(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph** out);
 
-HeroResult _hero_vulkan_render_graph_deinit_gpu_resources(HeroLogicalDevice* ldev, HeroRenderGraphId id);
-HeroResult _hero_vulkan_render_graph_execute(HeroLogicalDevice* ldev, HeroRenderGraphId id);
+HeroResult _hero_vulkan_frame_graph_init(HeroLogicalDevice* ldev, HeroFrameGraphSetup* setup, HeroFrameGraphId* id_out, HeroFrameGraph** out);
+HeroResult _hero_vulkan_frame_graph_deinit(HeroLogicalDevice* ldev, HeroFrameGraphId id, HeroFrameGraph* frame_graph);
+HeroResult _hero_vulkan_frame_graph_get(HeroLogicalDevice* ldev, HeroFrameGraphId id, HeroFrameGraph** out);
+HeroResult _hero_vulkan_frame_graph_update(HeroLogicalDevice* ldev, HeroFrameGraph* frame_graph);
+HeroResult _hero_vulkan_frame_graph_record_pass_start(HeroLogicalDevice* ldev, HeroFrameGraph* frame_graph, HeroPass* pass, _HeroCommandRecorder* command_recorder);
+HeroResult _hero_vulkan_frame_graph_record_pass_end(_HeroCommandRecorder* command_recorder);
+HeroResult _hero_vulkan_frame_graph_submit(HeroLogicalDevice* ldev, HeroFrameGraph* frame_graph);
+
+void _hero_vulkan_cmd_draw_start(HeroCommandRecorder* command_recorder, HeroPipelineId pipeline_id);
+void _hero_vulkan_cmd_draw_end_vertexed(HeroCommandRecorder* command_recorder, U32 vertices_count);
+void _hero_vulkan_cmd_draw_end_indexed(HeroCommandRecorder* command_recorder, HeroPassResource* index_buffer_resource, HeroIndexType index_type, U32 indices_count);
+
+void _hero_vulkan_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroPassResource* vertex_buffer_resource, U32 binding, U64 offset);
+void _hero_vulkan_cmd_draw_set_vertices_start_idx(HeroCommandRecorder* command_recorder, U32 vertices_start_idx);
+void _hero_vulkan_cmd_draw_set_instances(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count);
+
+void _hero_vulkan_cmd_compute_dispatch_start(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, U32 group_count_x, U32 group_count_y, U32 group_count_z);
+void _hero_vulkan_cmd_compute_dispatch_end(HeroCommandRecorder* command_recorder);
+
+void _hero_vulkan_cmd_add_sampler(HeroCommandRecorder* command_recorder, U32 binding, HeroSamplerId sampler_id);
+void _hero_vulkan_cmd_add_image(HeroCommandRecorder* command_recorder, U32 binding, HeroPassResource* resource);
+void _hero_vulkan_cmd_add_buffer(HeroCommandRecorder* command_recorder, U32 binding, HeroPassResource* resource);
 
 typedef struct HeroGfxSysVulkan HeroGfxSysVulkan;
 struct HeroGfxSysVulkan {

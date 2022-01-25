@@ -606,7 +606,7 @@ void _hero_object_pool_deinit(HeroObjectPool* object_pool, HeroIAlctor alctor, H
 	HERO_ZERO_ELMT(object_pool);
 }
 
-HeroResult _hero_object_pool_alloc(HeroObjectPool* object_pool, Uptr elmt_size, U32 idx_bits_count, void** ptr_out, HeroObjectIdRaw* raw_id_out) {
+HeroResult _hero_object_pool_alloc(HeroObjectPool* object_pool, U32 user_bits, Uptr elmt_size, U32 idx_bits_count, U32 counter_bits_count, U32 user_bits_count, void** ptr_out, HeroObjectIdRaw* raw_id_out) {
 	HeroObjectHeader* object;
 	U32 object_idx;
 	U32 object_counter;
@@ -627,7 +627,7 @@ HeroResult _hero_object_pool_alloc(HeroObjectPool* object_pool, Uptr elmt_size, 
 		// grab the newly allocated object from the free list head.
 		object_idx = object_pool->free_list_head_idx;
 		object = (HeroObjectHeader*)HERO_PTR_ADD(object_pool->data, (Uptr)object_pool->free_list_head_idx * elmt_size);
-		object_counter = _hero_object_id_raw_counter(object->next_id, idx_bits_count);
+		object_counter = _hero_object_id_raw_counter(object->next_id, idx_bits_count, counter_bits_count);
 
 		// set the free list head to where our newly allocated object was pointing to next.
 		object_pool->free_list_head_idx = _hero_object_id_raw_idx(object->next_id, idx_bits_count);
@@ -635,7 +635,7 @@ HeroResult _hero_object_pool_alloc(HeroObjectPool* object_pool, Uptr elmt_size, 
 
 	// zero the object and setup the header to be at the end of the allocated list
 	memset(object, 0, elmt_size);
-	object->next_id = _hero_object_id_raw_init(object_pool->cap, object_counter, idx_bits_count);
+	object->next_id = _hero_object_id_raw_init(object_pool->cap, object_counter, user_bits, idx_bits_count, counter_bits_count, user_bits_count);
 	object->prev_idx = object_pool->allocated_list_tail_idx;
 
 	if (object_pool->allocated_list_tail_idx != object_pool->cap) {
@@ -654,13 +654,13 @@ HeroResult _hero_object_pool_alloc(HeroObjectPool* object_pool, Uptr elmt_size, 
 	object_pool->count += 1;
 
 	*ptr_out = object;
-	*raw_id_out = _hero_object_id_raw_init(object_idx, object_counter, idx_bits_count);
+	*raw_id_out = _hero_object_id_raw_init(object_idx, object_counter, user_bits, idx_bits_count, counter_bits_count, user_bits_count);
 	return HERO_SUCCESS;
 }
 
-HeroResult _hero_object_pool_dealloc(HeroObjectPool* object_pool, HeroObjectIdRaw raw_id, Uptr elmt_size, U32 idx_bits_count) {
+HeroResult _hero_object_pool_dealloc(HeroObjectPool* object_pool, HeroObjectIdRaw raw_id, Uptr elmt_size, U32 idx_bits_count, U32 counter_bits_count) {
 	HeroObjectHeader* object;
-	HeroResult result = _hero_object_pool_get(object_pool, raw_id, elmt_size, idx_bits_count, (void**)&object);
+	HeroResult result = _hero_object_pool_get(object_pool, raw_id, elmt_size, idx_bits_count, counter_bits_count, (void**)&object);
 	if (result < 0) return result;
 
 	//
@@ -695,22 +695,25 @@ HeroResult _hero_object_pool_dealloc(HeroObjectPool* object_pool, HeroObjectIdRa
 	//
 	// increment the counter of the deallocated object
 	U32 idx = _hero_object_id_raw_idx(raw_id, idx_bits_count);
-	U32 counter = _hero_object_id_raw_counter(raw_id, idx_bits_count);
+	U32 counter = _hero_object_id_raw_counter(raw_id, idx_bits_count, counter_bits_count);
 	counter += 1;
 	if (HERO_UNLIKELY(counter > HERO_OBJECT_ID_COUNTER_MASK(idx_bits_count))) {
 		counter = idx ? 0 : 1; // the first object's counter starts on 1 so we can have a null id
 	}
 
 	//
-	// add the deallocated object to the free list
-	object->next_id = _hero_object_id_raw_init(object_pool->free_list_head_idx, counter, idx_bits_count);
+	// add the deallocated object to the free list.
+	// user bits is being cleared so no worry on using it properly here.
+	U32 user_bits = 0;
+	U32 user_bits_count = 0;
+	object->next_id = _hero_object_id_raw_init(object_pool->free_list_head_idx, counter, user_bits, idx_bits_count, counter_bits_count, user_bits_count);
 	object_pool->free_list_head_idx = idx;
 
 	object_pool->count -= 1;
 	return HERO_SUCCESS;
 }
 
-HeroResult _hero_object_pool_get(HeroObjectPool* object_pool, HeroObjectIdRaw raw_id, Uptr elmt_size, U32 idx_bits_count, void** ptr_out) {
+HeroResult _hero_object_pool_get(HeroObjectPool* object_pool, HeroObjectIdRaw raw_id, Uptr elmt_size, U32 idx_bits_count, U32 counter_bits_count, void** ptr_out) {
 	if (raw_id == 0) {
 		return HERO_ERROR(OBJECT_ID_IS_NULL);
 	}
@@ -721,7 +724,7 @@ HeroResult _hero_object_pool_get(HeroObjectPool* object_pool, HeroObjectIdRaw ra
 	}
 
 	HeroObjectHeader* object = (HeroObjectHeader*)HERO_PTR_ADD(object_pool->data, (Uptr)(idx * elmt_size));
-	if (_hero_object_id_raw_counter(object->next_id, idx_bits_count) != _hero_object_id_raw_counter(raw_id, idx_bits_count)) {
+	if (_hero_object_id_raw_counter(object->next_id, idx_bits_count, counter_bits_count) != _hero_object_id_raw_counter(raw_id, idx_bits_count, counter_bits_count)) {
 		return HERO_ERROR(USE_AFTER_FREE);
 	}
 
@@ -735,7 +738,8 @@ HeroResult _hero_object_pool_get_id(HeroObjectPool* object_pool, void* object, U
 	}
 
 	HeroObjectHeader* obj = (HeroObjectHeader*)object;
-	*raw_id_out = _hero_object_id_raw_init(HERO_PTR_DIFF(object, object_pool->data) / elmt_size, _hero_object_id_raw_counter(obj->next_id, idx_bits_count), idx_bits_count);
+	*raw_id_out = obj->next_id;
+	_hero_object_id_raw_set_idx(raw_id_out, HERO_PTR_DIFF(object, object_pool->data) / elmt_size, idx_bits_count);
 	return HERO_SUCCESS;
 }
 
@@ -758,7 +762,8 @@ HeroResult _hero_object_pool_iter_next(HeroObjectPool* object_pool, HeroObjectId
 		//
 		// return the head of the allocated object list
 		object = HERO_PTR_ADD(object_pool->data, (Uptr)object_pool->allocated_list_head_idx * elmt_size);
-		*raw_id_mut = _hero_object_id_raw_init(object_pool->allocated_list_head_idx, _hero_object_id_raw_counter(object->next_id, idx_bits_count), idx_bits_count);
+		*raw_id_mut = object->next_id;
+		_hero_object_id_raw_set_idx(raw_id_mut, object_pool->allocated_list_head_idx, idx_bits_count);
 		*ptr_out = object;
 		return HERO_SUCCESS;
 	}
@@ -779,7 +784,8 @@ HeroResult _hero_object_pool_iter_next(HeroObjectPool* object_pool, HeroObjectId
 	//
 	// get the identifier of the next object and pass back out the object's pointer
 	HeroObjectHeader* next = (HeroObjectHeader*)HERO_PTR_ADD(object_pool->data, next_idx * elmt_size);
-	*raw_id_mut = _hero_object_id_raw_init(next_idx, _hero_object_id_raw_counter(next->next_id, idx_bits_count), idx_bits_count);
+	*raw_id_mut = next->next_id;
+	_hero_object_id_raw_set_idx(raw_id_mut, next_idx, idx_bits_count);
 	*ptr_out = next;
 	return HERO_SUCCESS;
 }
@@ -797,7 +803,8 @@ HeroResult _hero_object_pool_iter_prev(HeroObjectPool* object_pool, HeroObjectId
 		//
 		// return the tail of the allocated object list
 		object = HERO_PTR_ADD(object_pool->data, (Uptr)object_pool->allocated_list_tail_idx * elmt_size);
-		*raw_id_mut = _hero_object_id_raw_init(object_pool->allocated_list_tail_idx, _hero_object_id_raw_counter(object->next_id, idx_bits_count), idx_bits_count);
+		*raw_id_mut = object->next_id;
+		_hero_object_id_raw_set_idx(raw_id_mut, object_pool->allocated_list_tail_idx, idx_bits_count);
 		*ptr_out = object;
 		return HERO_SUCCESS;
 	}
@@ -817,7 +824,8 @@ HeroResult _hero_object_pool_iter_prev(HeroObjectPool* object_pool, HeroObjectId
 	//
 	// get the identifier of the previous object and pass back out the object's pointer
 	HeroObjectHeader* prev = (HeroObjectHeader*)HERO_PTR_ADD(object_pool->data, object->prev_idx * elmt_size);
-	*raw_id_mut = _hero_object_id_raw_init(object->prev_idx, _hero_object_id_raw_counter(prev->next_id, idx_bits_count), idx_bits_count);
+	*raw_id_mut = prev->next_id;
+	_hero_object_id_raw_set_idx(raw_id_mut, object->prev_idx, idx_bits_count);
 	*ptr_out = prev;
 	return HERO_SUCCESS;
 }
@@ -1347,8 +1355,8 @@ ERR: {}
 //
 // ===========================================
 
-HeroResult hero_free_ranges_init(HeroFreeRanges* r, Uptr init_cap, HeroIAlctor alctor, HeroAllocTag tag) {
-	hero_stack(HeroRange, resize_cap)(&r->ranges, init_cap, alctor, tag);
+HeroResult hero_free_ranges_init(HeroFreeRanges* r, Uptr cap, HeroIAlctor alctor, HeroAllocTag tag) {
+	hero_stack(HeroRange, resize_cap)(&r->ranges, cap, alctor, tag);
 	return HERO_SUCCESS;
 }
 
@@ -1357,7 +1365,12 @@ void hero_free_ranges_deinit(HeroFreeRanges* r, HeroIAlctor alctor, HeroAllocTag
 }
 
 HeroResult hero_free_ranges_give(HeroFreeRanges* r, Uptr idx, HeroIAlctor alctor, HeroAllocTag tag) {
-	bool have_inserted = false;
+	HeroRange free_range = { .start_idx = idx, .end_idx = idx + 1 };
+	return hero_free_ranges_give_range(r, free_range, alctor, tag);
+}
+
+HeroResult hero_free_ranges_give_range(HeroFreeRanges* r, HeroRange free_range, HeroIAlctor alctor, HeroAllocTag tag) {
+	HERO_DEBUG_ASSERT(free_range.start_idx < free_range.end_idx, "free_range.idx '%zu' must be less than free_range.end_idx '%zu'", free_range.start_idx, free_range.end_idx);
 	Uptr range_idx = 0;
 
 	if (r->ranges.count == 0) {
@@ -1368,44 +1381,41 @@ HeroResult hero_free_ranges_give(HeroFreeRanges* r, Uptr idx, HeroIAlctor alctor
 	for (range_idx = 0; range_idx < r->ranges.count; range_idx += 1) {
 		range = &r->ranges.data[range_idx];
 
-		if (range->start_idx == idx + 1) {
-			range->start_idx -= 1;
-			goto INSERT_INTO_EXISTING;
+		if (range->start_idx == free_range.end_idx) {
+			range->start_idx = free_range.start_idx;
+			return HERO_SUCCESS;
 		}
 
-		if (range->end_idx == idx) {
-			range->end_idx += 1;
-			goto INSERT_INTO_EXISTING;
+		if (range->end_idx == free_range.start_idx) {
+			range->end_idx = free_range.end_idx;
+
+			//
+			// try and merge with the next range since we have just extended the range
+			// we only have to merge with next on inserts since the
+			// ranges are ordered and the end index of a range is checked before the next range's start index.
+			Uptr next_range_idx = range_idx + 1;
+			if (next_range_idx < r->ranges.count) {
+				HeroRange* next_range = &r->ranges.data[next_range_idx];
+				if (next_range->start_idx == range->end_idx) {
+					next_range->start_idx = range->start_idx;
+					hero_stack(HeroRange, remove_shift)(&r->ranges, range_idx);
+					return HERO_SUCCESS;
+				}
+			}
+			return HERO_SUCCESS;
 		}
 
-		if (idx < range->start_idx) {
+		if (free_range.end_idx < range->start_idx) {
 			goto INSERT;
 		}
 
-		HERO_ASSERT(range->end_idx < idx, "index '%zu' has already been freed", idx);
-	}
-
-	return HERO_SUCCESS;
-
-INSERT_INTO_EXISTING: {}
-	//
-	// we only have to merge with next on inserts since the
-	// ranges are ordered and the end index of a range is checked before the next range's start index.
-	Uptr next_range_idx = range_idx + 1;
-	if (next_range_idx < r->ranges.count) {
-		HeroRange* next_range = &r->ranges.data[next_range_idx];
-		if (next_range->start_idx == range->end_idx) {
-			next_range->start_idx = range->start_idx;
-			hero_stack(HeroRange, remove_shift)(&r->ranges, range_idx);
-			return HERO_SUCCESS;
-		}
+		HERO_ASSERT(range->end_idx < free_range.start_idx, "range '%zu' - '%zu' has already been freed", free_range.start_idx, free_range.end_idx);
 	}
 
 	return HERO_SUCCESS;
 
 INSERT: {}
-	HeroRange insert_range = { .start_idx = idx, .end_idx = idx + 1 };
-	return hero_stack(HeroRange, insert_value)(&r->ranges, range_idx, alctor, tag, insert_range);
+	return hero_stack(HeroRange, insert_value)(&r->ranges, range_idx, alctor, tag, free_range);
 }
 
 HeroResult hero_free_ranges_take(HeroFreeRanges* r, Uptr* idx_out) {
@@ -1422,6 +1432,87 @@ HeroResult hero_free_ranges_take(HeroFreeRanges* r, Uptr* idx_out) {
 	}
 
 	return HERO_SUCCESS;
+}
+
+HeroResult hero_free_ranges_take_requested(HeroFreeRanges* r, Uptr idx, HeroIAlctor alctor, HeroAllocTag tag) {
+	HeroRange range = { .start_idx = idx, .end_idx = idx + 1 };
+	return hero_free_ranges_take_range_requested(r, range, alctor, tag);
+}
+
+HeroResult _hero_free_ranges_perform_take(HeroFreeRanges* r, Uptr range_idx, HeroRange* range, HeroRange take_range, HeroIAlctor alctor, HeroAllocTag tag) {
+	bool keep_start = take_range.start_idx > range->start_idx;
+	bool keep_end = take_range.end_idx < range->end_idx;
+
+	switch (keep_start + (keep_end * 2)) {
+		case 0: // !keep_start && !keep_end
+			hero_stack(HeroRange, remove_shift)(&r->ranges, range_idx);
+			break;
+		case 1: // keep_start && !keep_end
+			range->end_idx = take_range.end_idx;
+			break;
+		case 2: // !keep_start && keep_end
+			range->start_idx = take_range.end_idx;
+			break;
+		case 3: { // keep_start && keep_end
+			HeroRange insert_range = { .start_idx = take_range.end_idx, .end_idx = range->end_idx };
+
+			range->end_idx = take_range.start_idx;
+
+			//
+			// insert a new range for the end
+			HeroResult result = hero_stack(HeroRange, insert_value)(&r->ranges, range_idx + 1, alctor, tag, insert_range);
+			if (result < 0) {
+				return result;
+			}
+			break;
+		};
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult hero_free_ranges_take_range(HeroFreeRanges* r, Uptr size, Uptr align, HeroIAlctor alctor, HeroAllocTag tag, Uptr* start_idx_out) {
+	for_range(range_idx, 0, r->ranges.count) {
+		HeroRange* range = &r->ranges.data[range_idx];
+
+		Uptr start_idx = range->start_idx;
+		HeroRange take_range;
+		take_range.start_idx = HERO_INT_ROUND_UP_ALIGN(start_idx, align);
+		take_range.end_idx = take_range.start_idx + size;
+
+		if (take_range.end_idx <= range->end_idx) {
+			HeroResult result = _hero_free_ranges_perform_take(r, range_idx, range, take_range, alctor, tag);
+			if (result < 0) {
+				return result;
+			}
+
+			*start_idx_out = start_idx;
+			return HERO_SUCCESS;
+		}
+	}
+
+	return HERO_ERROR(ALLOCATION_FAILURE);
+}
+
+HeroResult hero_free_ranges_take_range_requested(HeroFreeRanges* r, HeroRange requested_range, HeroIAlctor alctor, HeroAllocTag tag) {
+	for_range(range_idx, 0, r->ranges.count) {
+		HeroRange* range = &r->ranges.data[range_idx];
+
+		if (range->start_idx <= requested_range.start_idx && range->end_idx >= requested_range.end_idx) {
+			HeroResult result = _hero_free_ranges_perform_take(r, range_idx, range, requested_range, alctor, tag);
+			if (result < 0) {
+				return result;
+			}
+
+			return HERO_SUCCESS;
+		}
+
+		if (requested_range.start_idx >= range->end_idx) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+	}
+
+	return HERO_ERROR(ALLOCATION_FAILURE);
 }
 
 // ===========================================
@@ -1613,6 +1704,10 @@ bool hero_text_reader_is_empty(HeroTextReader* reader) {
 	return reader->position >= reader->size;
 }
 
+U8* hero_text_reader_cursor(HeroTextReader* reader) {
+	return &reader->string[reader->position];
+}
+
 U32 hero_text_reader_consume_whitespace(HeroTextReader* reader) {
 	U32 i;
 	for (i = 0; reader->position < reader->size; i += 1) {
@@ -1694,6 +1789,32 @@ bool hero_text_reader_consume_byte(HeroTextReader* reader, U8 byte) {
 	}
 
 	return true;
+}
+
+U32 hero_text_reader_consume_enum(HeroTextReader* reader, char** enum_strings, U32 enums_count, HeroString terminator) {
+	U32 found_enum = UINT32_MAX;
+	U8* cursor = hero_text_reader_cursor(reader);
+
+	U32 position = reader->position;
+	U32 row = reader->row;
+	U32 column = reader->column;
+
+	U32 found_enum_size = hero_text_reader_consume_until_any_byte(reader, terminator);
+	for_range(enum_, 0, enums_count) {
+		char* enum_string = enum_strings[enum_];
+		U32 enum_string_size = strlen(enum_string);
+		if (enum_string_size == found_enum_size && strncmp(enum_string, (char*)cursor, enum_string_size) == 0) {
+			found_enum = enum_;
+		}
+	}
+
+	if (found_enum == UINT32_MAX) {
+		reader->position = position;
+		reader->row = row;
+		reader->column = column;
+	}
+
+	return found_enum;
 }
 
 // ===========================================

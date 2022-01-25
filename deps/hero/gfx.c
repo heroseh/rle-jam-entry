@@ -103,9 +103,11 @@ HeroResult hero_logical_device_queue_transfer(HeroLogicalDevice* ldev) {
 	return hero_gfx_sys.backend_vtable.logical_device_queue_transfer(ldev);
 }
 
+/*
 HeroResult hero_logical_device_queue_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count) {
 	return hero_gfx_sys.backend_vtable.logical_device_queue_command_buffers(ldev, command_pool_id, command_pool_buffer_ids, command_pool_buffers_count);
 }
+*/
 
 HeroResult hero_logical_device_submit(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count) {
 	return hero_gfx_sys.backend_vtable.logical_device_submit(ldev, swapchain_ids, swapchains_count);
@@ -384,62 +386,6 @@ HeroResult hero_buffer_write(HeroLogicalDevice* ldev, HeroBufferId id, U64 start
 	}
 
 	return hero_gfx_sys.backend_vtable.buffer_write(ldev, buffer, start_idx, elmts_count, destination_out);
-}
-
-// ===========================================
-//
-//
-// Vertex Array
-//
-//
-// ===========================================
-
-HeroResult hero_vertex_array_init(HeroLogicalDevice* ldev, HeroVertexArraySetup* setup, HeroVertexArrayId* id_out) {
-	if (setup->vertex_buffers_count == 0) {
-		return HERO_ERROR(GFX_VERTEX_ARRAY_VERTEX_BUFFER_IDS_CANNOT_BE_ZERO);
-	}
-
-	if (setup->layout_id.raw == 0) {
-		return HERO_ERROR(GFX_VERTEX_ARRAY_VERTEX_LAYOUT_ID_CANNOT_BE_NULL);
-	}
-
-	HeroResult result;
-	HeroVertexArray* vertex_array;
-	result = hero_object_pool(HeroVertexArray, alloc)(&ldev->vertex_array_pool, &vertex_array, id_out);
-	if (result < 0) {
-		return result;
-	}
-
-	HeroBufferId* vertex_buffer_ids = hero_alloc_array(HeroBufferId, hero_system_alctor, HERO_GFX_ALLOC_TAG_VERTEX_ARRAY_VERTEX_BUFFERS, setup->vertex_buffers_count);
-	if (vertex_buffer_ids == NULL) {
-		return HERO_ERROR(ALLOCATION_FAILURE);
-	}
-
-	HERO_COPY_ELMT_MANY(vertex_buffer_ids, setup->vertex_buffer_ids, setup->vertex_buffers_count);
-
-	vertex_array->vertex_buffer_ids = vertex_buffer_ids;
-	vertex_array->layout_id = setup->layout_id;
-	vertex_array->index_buffer_id = setup->index_buffer_id;
-	vertex_array->vertex_buffers_count = setup->vertex_buffers_count;
-
-	return HERO_SUCCESS;
-}
-
-HeroResult hero_vertex_array_deinit(HeroLogicalDevice* ldev, HeroVertexArrayId id) {
-	HeroResult result;
-	HeroVertexArray* vertex_array;
-	result = hero_vertex_array_get(ldev, id, &vertex_array);
-	if (result < 0) {
-		return result;
-	}
-
-	hero_dealloc_array(HeroBufferId, hero_system_alctor, HERO_GFX_ALLOC_TAG_VERTEX_ARRAY_VERTEX_BUFFERS, vertex_array->vertex_buffer_ids, vertex_array->vertex_buffers_count);
-
-	return hero_object_pool(HeroVertexArray, dealloc)(&ldev->vertex_array_pool, id);
-}
-
-HeroResult hero_vertex_array_get(HeroLogicalDevice* ldev, HeroVertexArrayId id, HeroVertexArray** out) {
-	return hero_object_pool(HeroVertexArray, get)(&ldev->vertex_array_pool, id, out);
 }
 
 // ===========================================
@@ -1204,6 +1150,7 @@ HeroResult hero_swapchain_next_image(HeroLogicalDevice* ldev, HeroSwapchainId id
 //
 //
 // ===========================================
+/*
 
 HeroResult hero_command_pool_init(HeroLogicalDevice* ldev, HeroCommandPoolSetup* setup, HeroCommandPoolId* id_out) {
 	return hero_gfx_sys.backend_vtable.command_pool_init(ldev, setup, id_out);
@@ -1346,6 +1293,74 @@ HeroResult hero_cmd_compute_dispatch(HeroCommandRecorder* command_recorder, Hero
 	return hero_gfx_sys.backend_vtable.cmd_compute_dispatch(command_recorder, compute_shader_id, shader_globals_id, group_count_x, group_count_y, group_count_z);
 }
 
+*/
+// ===========================================
+//
+//
+// Image Info
+//
+//
+// ===========================================
+
+HeroResult hero_image_info_register(HeroLogicalDevice* ldev, HeroImageInfoFlags flags, HeroImageInfo* info, HeroImageInfoId* id_out) {
+	HeroResult result;
+	HeroImageInfo* dst;
+	result = hero_object_pool(HeroImageInfo, alloc)(&ldev->image_info_pool, flags, &dst, id_out);
+	if (result < 0) {
+		return result;
+	}
+
+	*dst = *info;
+	return HERO_SUCCESS;
+}
+
+HeroResult hero_image_info_deregister(HeroLogicalDevice* ldev, HeroImageInfoId id) {
+	return hero_object_pool(HeroImageInfo, dealloc)(&ldev->image_info_pool, id);
+}
+
+HeroResult _hero_image_info_get(HeroLogicalDevice* ldev, HeroImageInfoId id, HeroImageInfo** out) {
+	return hero_object_pool(HeroImageInfo, get)(&ldev->image_info_pool, id, out);
+}
+
+void hero_image_info_update_swapchain_sizes(HeroLogicalDevice* ldev) {
+	HeroImageInfoId image_info_id = {0};
+	HeroImageInfo* image_info;
+	while (hero_object_pool(HeroImageInfo, iter_next)(&ldev->image_info_pool, &image_info_id, &image_info) != HERO_SUCCESS_FINISHED) {
+CONTINUE: {}
+		if (image_info->swapchain_id.raw) {
+			HeroSwapchain* swapchain;
+			HeroResult result = hero_swapchain_get(ldev, image_info->swapchain_id, &swapchain);
+			if (result < 0) {
+				//
+				// swapchain no longer exists, so delete the image info and continue on.
+				//
+
+				HeroImageInfoId next_image_info_id = {0};
+				HeroImageInfo* next_image_info;
+				bool is_finished = hero_object_pool(HeroImageInfo, iter_next)(&ldev->image_info_pool, &next_image_info_id, &next_image_info) != HERO_SUCCESS_FINISHED;
+
+				result = hero_object_pool(HeroImageInfo, dealloc)(&ldev->image_info_pool, image_info_id);
+				HERO_RESULT_ASSERT(result);
+
+				if (is_finished) {
+					break;
+				}
+
+				image_info_id = next_image_info_id;
+				image_info = next_image_info;
+				goto CONTINUE;
+			}
+
+			//
+			// we have a swapchain image so lets set the actual size
+			//
+
+			image_info->width = (U32)((F32)swapchain->width * image_info->swapchain_based_width_scale_ratio);
+			image_info->height = (U32)((F32)swapchain->height * image_info->swapchain_based_height_scale_ratio);
+		}
+	}
+}
+
 // ===========================================
 //
 //
@@ -1354,6 +1369,1210 @@ HeroResult hero_cmd_compute_dispatch(HeroCommandRecorder* command_recorder, Hero
 //
 // ===========================================
 
+bool hero_pass_resource_type_is_compatible(HeroPassResourceType a, HeroPassResourceType b) {
+	// TODO we might want so buffer types to be compatible with some image types
+	return HERO_PASS_RESOURCE_TYPE_IS_BUFFER(a) == HERO_PASS_RESOURCE_TYPE_IS_BUFFER(b);
+}
+
+const char* hero_pass_resource_type_strings[HERO_PASS_RESOURCE_TYPE_COUNT] = {
+	[HERO_PASS_RESOURCE_TYPE_INPUT_ATTACHMENT] = "INPUT_ATTACHMENT",
+	[HERO_PASS_RESOURCE_TYPE_COLOR_OUTPUT_ATTACHMENT] = "COLOR_OUTPUT_ATTACHMENT",
+	[HERO_PASS_RESOURCE_TYPE_DEPTH_STENCIL_ATTACHMENT] = "DEPTH_STENCIL_ATTACHMENT",
+	[HERO_PASS_RESOURCE_TYPE_RO_IMAGE] = "RO_IMAGE",
+	[HERO_PASS_RESOURCE_TYPE_RW_IMAGE] = "RW_IMAGE",
+	[HERO_PASS_RESOURCE_TYPE_RO_BUFFER] = "RO_BUFFER",
+	[HERO_PASS_RESOURCE_TYPE_RW_BUFFER] = "RW_BUFFER",
+	[HERO_PASS_RESOURCE_TYPE_VERTEX_BUFFER] = "VERTEX_BUFFER",
+	[HERO_PASS_RESOURCE_TYPE_INDEX_BUFFER] = "INDEX_BUFFER",
+};
+
+void hero_image_info_init_swapchain_sized(HeroImageInfo* info, HeroImageFormat format, HeroSwapchainId swapchain_id);
+void hero_image_info_init_swapchain_relative(HeroImageInfo* info, HeroImageFormat format, HeroSwapchainId swapchain_id, F32 width_multiple, F32 height_multiple);
+void hero_image_info_init_2d(HeroImageInfo* info, HeroImageFormat format, U32 width, U32 height);
+void hero_image_info_init_2d_array(HeroImageInfo* info, HeroImageFormat format, U32 width, U32 height, U16 array_layers_count);
+void hero_image_info_init_3d(HeroImageInfo* info, HeroImageFormat format, U32 width, U32 height, U32 depth, U8 mip_levels_count);
+
+HeroResult hero_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroRenderGraphId* id_out) {
+	HeroRenderGraph* render_graph;
+	HeroResult result = hero_gfx_sys.backend_vtable.render_graph_init(ldev, setup, id_out, &render_graph);
+	if (result < 0) {
+		return result;
+	}
+
+	//
+	// allocate the resource pool
+	U16 resources_cap = 0;
+	for_range(resource_type, 0, HERO_PASS_RESOURCE_TYPE_COUNT) {
+		HeroPassResourcePool* pool = &render_graph->resource_pools[resource_type];
+		Uptr cap = setup->resource_pool_caps[resource_type];
+		if (cap) {
+			pool->data = hero_alloc(hero_system_alctor, 0, sizeof(HeroPassResource) * cap, alignof(HeroPassResource));
+			if (!pool->data) {
+				return HERO_ERROR(ALLOCATION_FAILURE);
+			}
+		}
+		pool->count = 0;
+		pool->cap = cap;
+		resources_cap += cap;
+	}
+
+	//
+	// allocate the passes
+	{
+		if (setup->passes_cap == 0) {
+			return HERO_ERROR(GFX_GRAPH_CANNOT_HAVE_ZERO_PASSES);
+		}
+
+		render_graph->passes = hero_alloc_array(HeroPass, hero_system_alctor, 0, setup->passes_cap);
+		if (!render_graph->passes) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		render_graph->passes_count = 0;
+		render_graph->passes_cap = setup->passes_cap;
+	}
+
+	//
+	// allocate the viewports
+	{
+		setup->viewports_cap = HERO_MAX(setup->viewports_cap, setup->passes_cap);
+		render_graph->viewports = hero_alloc_array(HeroPassViewport, hero_system_alctor, 0, setup->viewports_cap);
+		if (!render_graph->viewports) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+		HERO_ZERO_ELMT_MANY(render_graph->viewports, setup->viewports_cap);
+
+		render_graph->viewports_count = 0;
+		render_graph->viewports_cap = setup->viewports_cap;
+	}
+
+	render_graph->name = setup->name;
+
+	return HERO_SUCCESS;
+}
+
+HeroResult hero_render_graph_deinit(HeroLogicalDevice* ldev, HeroRenderGraphId id) {
+	HeroRenderGraph* render_graph;
+	HeroResult result = hero_render_graph_get(ldev, id, &render_graph);
+	if (result < 0) {
+		return result;
+	}
+
+	return hero_gfx_sys.backend_vtable.render_graph_deinit(ldev, id, render_graph);
+}
+
+HeroResult hero_render_graph_get(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph** out) {
+	return hero_gfx_sys.backend_vtable.render_graph_get(ldev, id, out);
+}
+
+void hero_render_graph_clear(HeroRenderGraph* render_graph) {
+	render_graph->passes_count = 0;
+	render_graph->hash = 0;
+
+	for_range(resource_type, 0, HERO_PASS_RESOURCE_TYPE_COUNT) {
+		HeroPassResourcePool* pool = &render_graph->resource_pools[resource_type];
+		pool->count = 0;
+	}
+
+	HERO_ZERO_ELMT_MANY(render_graph->viewports, render_graph->viewports_cap);
+}
+
+void hero_render_graph_pass_start(HeroRenderGraph* render_graph, HeroPassSetup* setup) {
+	HERO_DEBUG_ASSERT(render_graph->building_pass_id == 0, "hero_render_graph_pass_end must be called before hero_render_graph_pass_start is called again");
+	HERO_DEBUG_ASSERT(render_graph->passes_count >= render_graph->passes_cap, "we have exceed the maximum number of passes '%u' that render graph '%s' was allocated with", render_graph->passes_cap, render_graph->name);
+
+#if HERO_DEBUG_ASSERTIONS
+	for_range(idx, 0, render_graph->passes_count) {
+		HeroPass* other_pass = &render_graph->passes[idx];
+		HERO_ASSERT(other_pass->pass_enum != setup->pass_enum, "render graph '%s' pass '%s' has the same pass enum '%u' as pass '%s'", render_graph->name, setup->name, setup->pass_enum, other_pass->name);
+	}
+#endif
+
+	HeroPass* pass = &render_graph->passes[render_graph->passes_count];
+	HERO_DEBUG_ASSERT(pass->render_pass_layout_id.raw && setup->viewports_count > 0, "viewports_count must be a non zero value in render graph '%s' was allocated with", render_graph->name);
+
+	//
+	// create the ranges the resources in the resource pools
+	for_range(resource_type, 0, HERO_PASS_RESOURCE_TYPE_COUNT) {
+		HeroPassResourcePool* pool = &render_graph->resource_pools[resource_type];
+		HeroRangeU16* range = &pass->resource_ranges_by_type[resource_type];
+		range->start_idx = pool->count;
+		range->end_idx = pool->count;
+	}
+
+	pass->name = setup->name;
+	pass->pass_enum = setup->pass_enum;
+	pass->render_pass_layout_id = setup->render_pass_layout_id;
+	pass->userdata = setup->userdata;
+	pass->execution_unit_idx = HERO_EXECUTION_UNIT_IDX_INVALID;
+	pass->flags = 0;
+	pass->viewports_range.start_idx = render_graph->viewports_count;
+	pass->viewports_range.end_idx = render_graph->viewports_count + setup->viewports_count;
+	render_graph->viewports_count += setup->viewports_count;
+
+	render_graph->passes_count += 1;
+	render_graph->building_pass_id = render_graph->passes_count;
+}
+
+void hero_render_graph_pass_end(HeroRenderGraph* render_graph) {
+	HERO_DEBUG_ASSERT(render_graph->building_pass_id != 0, "hero_render_graph_pass_start must be called before hero_render_graph_pass_end");
+	render_graph->building_pass_id = 0;
+	render_graph->build_prev_pool_resource_id = 0;
+}
+
+HeroPassViewport* _hero_pass_get_viewport(HeroRenderGraph* render_graph, U16 viewport_idx) {
+	HERO_DEBUG_ASSERT(render_graph->building_pass_id != 0, "hero_render_graph_pass_start must be called before adding a resource");
+
+	HeroPass* pass = &render_graph->passes[render_graph->building_pass_id - 1];
+	U16 viewports_count = pass->viewports_range.end_idx - pass->viewports_range.start_idx;
+	HERO_ASSERT_ARRAY_BOUNDS(viewport_idx, viewports_count);
+
+	return &render_graph->viewports[pass->viewports_range.start_idx + viewport_idx];
+}
+
+HeroViewport* hero_pass_set_viewport(HeroRenderGraph* render_graph, U16 viewport_idx) {
+	HeroPassViewport* viewport = _hero_pass_get_viewport(render_graph, viewport_idx);
+	viewport->has_set_viewport = true;
+	return &viewport->viewport;
+}
+
+HeroUAabb* hero_pass_set_scissor(HeroRenderGraph* render_graph, U16 viewport_idx) {
+	HeroPassViewport* viewport = _hero_pass_get_viewport(render_graph, viewport_idx);
+	viewport->has_set_scissor = true;
+	return &viewport->scissor;
+}
+
+void hero_pass_add_resource(HeroRenderGraph* render_graph, HeroPassResourceId id, void* data, HeroPassResourceType resource_type) {
+	hero_pass_add_resource_linked(render_graph, id, HERO_PASS_ENUM_INVALID, 0, data, resource_type);
+}
+
+void hero_pass_add_input_attachment(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroImageInfoId image_info_id) {
+	hero_pass_add_resource(render_graph, id, &image_info_id, HERO_PASS_RESOURCE_TYPE_INPUT_ATTACHMENT);
+}
+
+void hero_pass_add_color_output_attachment(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroImageInfoId image_info_id) {
+	hero_pass_add_resource(render_graph, id, &image_info_id, HERO_PASS_RESOURCE_TYPE_COLOR_OUTPUT_ATTACHMENT);
+}
+
+void hero_pass_add_depth_stencil_attachment(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroImageInfoId image_info_id) {
+	hero_pass_add_resource(render_graph, id, &image_info_id, HERO_PASS_RESOURCE_TYPE_DEPTH_STENCIL_ATTACHMENT);
+}
+
+void hero_pass_add_ro_image(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroImageInfoId image_info_id) {
+	hero_pass_add_resource(render_graph, id, &image_info_id, HERO_PASS_RESOURCE_TYPE_RO_IMAGE);
+}
+
+void hero_pass_add_rw_image(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroImageInfoId image_info_id) {
+	hero_pass_add_resource(render_graph, id, &image_info_id, HERO_PASS_RESOURCE_TYPE_RW_IMAGE);
+}
+
+void hero_pass_add_ro_buffer(HeroRenderGraph* render_graph, HeroPassResourceId id, U64 size) {
+	hero_pass_add_resource(render_graph, id, &size, HERO_PASS_RESOURCE_TYPE_RO_BUFFER);
+}
+
+void hero_pass_add_rw_buffer(HeroRenderGraph* render_graph, HeroPassResourceId id, U64 size) {
+	hero_pass_add_resource(render_graph, id, &size, HERO_PASS_RESOURCE_TYPE_RW_BUFFER);
+}
+
+void hero_pass_add_vertex_buffer(HeroRenderGraph* render_graph, HeroPassResourceId id, U64 size) {
+	hero_pass_add_resource(render_graph, id, &size, HERO_PASS_RESOURCE_TYPE_VERTEX_BUFFER);
+}
+
+void hero_pass_add_index_buffer(HeroRenderGraph* render_graph, HeroPassResourceId id, U64 size) {
+	hero_pass_add_resource(render_graph, id, &size, HERO_PASS_RESOURCE_TYPE_INDEX_BUFFER);
+}
+
+void hero_pass_add_resource_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id, void* data, HeroPassResourceType resource_type) {
+	HERO_DEBUG_ASSERT(render_graph->building_pass_id != 0, "hero_render_graph_pass_start must be called before adding a resource");
+
+	HeroPassResourcePool* pool = &render_graph->resource_pools[resource_type];
+	HERO_DEBUG_ASSERT(pool->count >= pool->cap, "we have exceed the maximum number of %s resources '%u' that render graph '%s' was allocated with", hero_pass_resource_type_strings[resource_type], pool->cap, render_graph->name);
+
+	HeroPass* pass = &render_graph->passes[render_graph->building_pass_id - 1];
+	HeroPassResource* resource = &pool->data[pool->count];
+	resource->id = id;
+	resource->type = resource_type;
+	resource->flags = 0;
+	resource->link_pass_enum = link_pass_enum;
+	resource->link_id = link_id;
+	resource->physical_resource_idx = HERO_PHYSICAL_RESOURCE_IDX_INVALID;
+	resource->link_to_by_min_execution_unit_idx = HERO_EXECUTION_UNIT_IDX_INVALID;
+	resource->link_chain_length = 0;
+	resource->nearest_link_chain_mutation = HERO_NEAREST_LINK_CHAIN_MUTATION_INVALID;
+	if (HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource_type)) {
+		resource->data.buffer_size = *(U64*)data;
+	} else {
+		resource->data.image_info_id = *(HeroImageInfoId*)data;
+		if (hero_object_id(HeroImageInfoId, user_bits)(resource->data.image_info_id) & HERO_IMAGE_INFO_FLAGS_IS_SWAPCHAIN) {
+			pass->flags |= HERO_PASS_FLAGS_HAS_SWAPCHAIN;
+		}
+	}
+
+	{
+#if HERO_DEBUG_ASSERTIONS
+		for_range(other_resource_type, 0, HERO_PASS_RESOURCE_TYPE_COUNT) {
+			HeroPassResourcePool* other_resource_pool = &render_graph->resource_pools[other_resource_type];
+			HeroRangeU16 range = pass->resource_ranges_by_type[other_resource_type];
+			for_range(i, range.start_idx, range.end_idx) {
+				HeroPassResourceId other_resource_id = other_resource_pool->data[i].id;
+				HERO_ASSERT(other_resource_id != id, "render graph '%s' pass '%s' has a duplicate id", render_graph->name, pass->name, id);
+			}
+		}
+#endif
+	}
+
+	pass->resource_ranges_by_type[resource_type].end_idx += 1;
+
+	pool->count += 1;
+	render_graph->build_prev_pool_resource_id = pool->count;
+	render_graph->build_prev_resource_type = resource_type;
+}
+
+void hero_pass_add_input_attachment_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id) {
+	hero_pass_add_resource_linked(render_graph, id, link_pass_enum, link_id, NULL, HERO_PASS_RESOURCE_TYPE_INPUT_ATTACHMENT);
+}
+
+void hero_pass_add_color_output_attachment_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id) {
+	hero_pass_add_resource_linked(render_graph, id, link_pass_enum, link_id, NULL, HERO_PASS_RESOURCE_TYPE_COLOR_OUTPUT_ATTACHMENT);
+}
+
+void hero_pass_add_depth_stencil_attachment_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id) {
+	hero_pass_add_resource_linked(render_graph, id, link_pass_enum, link_id, NULL, HERO_PASS_RESOURCE_TYPE_DEPTH_STENCIL_ATTACHMENT);
+}
+
+void hero_pass_add_ro_image_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id) {
+	hero_pass_add_resource_linked(render_graph, id, link_pass_enum, link_id, NULL, HERO_PASS_RESOURCE_TYPE_RO_IMAGE);
+}
+
+void hero_pass_add_rw_image_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id) {
+	hero_pass_add_resource_linked(render_graph, id, link_pass_enum, link_id, NULL, HERO_PASS_RESOURCE_TYPE_RW_IMAGE);
+}
+
+void hero_pass_add_ro_buffer_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id) {
+	hero_pass_add_resource_linked(render_graph, id, link_pass_enum, link_id, NULL, HERO_PASS_RESOURCE_TYPE_RO_BUFFER);
+}
+
+void hero_pass_add_rw_buffer_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id) {
+	hero_pass_add_resource_linked(render_graph, id, link_pass_enum, link_id, NULL, HERO_PASS_RESOURCE_TYPE_RW_BUFFER);
+}
+
+void hero_pass_add_vertex_buffer_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id) {
+	hero_pass_add_resource_linked(render_graph, id, link_pass_enum, link_id, NULL, HERO_PASS_RESOURCE_TYPE_VERTEX_BUFFER);
+}
+
+void hero_pass_add_index_buffer_linked(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroPassEnum link_pass_enum, HeroPassResourceId link_id) {
+	hero_pass_add_resource_linked(render_graph, id, link_pass_enum, link_id, NULL, HERO_PASS_RESOURCE_TYPE_INDEX_BUFFER);
+}
+
+void hero_pass_and_make_flags(HeroRenderGraph* render_graph, HeroPassResourceFlags flags) {
+	HERO_DEBUG_ASSERT(render_graph->building_pass_id != 0, "hero_render_graph_pass_start must be called before adding a resource");
+	HERO_DEBUG_ASSERT(render_graph->build_prev_pool_resource_id != 0, "hero_pass_and_make_* functions can only be used directly after adding a resource with a hero_pass_add_* function");
+
+	HeroPassResourcePool* pool = &render_graph->resource_pools[render_graph->build_prev_resource_type];
+	HeroPassResource* resource = &pool->data[render_graph->build_prev_pool_resource_id - 1];
+	resource->flags |= flags;
+
+	if (flags & HERO_PASS_RESOURCE_FLAGS_IS_CPU_READABLE) {
+		HeroPass* pass = &render_graph->passes[render_graph->building_pass_id - 1];
+			pass->flags |= HERO_PASS_FLAGS_HAS_CPU_READABLE;
+	}
+}
+
+void hero_pass_and_make_persistent(HeroRenderGraph* render_graph) {
+	hero_pass_and_make_flags(render_graph, HERO_PASS_RESOURCE_FLAGS_IS_PERSISTENT);
+}
+
+void hero_pass_and_make_cpu_readable(HeroRenderGraph* render_graph) {
+	hero_pass_and_make_flags(render_graph, HERO_PASS_RESOURCE_FLAGS_IS_CPU_READABLE);
+}
+
+void hero_pass_and_make_cpu_writeable(HeroRenderGraph* render_graph) {
+	hero_pass_and_make_flags(render_graph, HERO_PASS_RESOURCE_FLAGS_IS_CPU_WRITEABLE);
+}
+
+void hero_pass_and_make_clear(HeroRenderGraph* render_graph, HeroClearValue clear_value) {
+	hero_pass_and_make_flags(render_graph, HERO_PASS_RESOURCE_FLAGS_IS_CLEARED);
+
+	HeroPassResourcePool* pool = &render_graph->resource_pools[render_graph->build_prev_resource_type];
+	HeroPassResource* resource = &pool->data[render_graph->build_prev_pool_resource_id - 1];
+	resource->clear_value = clear_value;
+	HERO_DEBUG_ASSERT(!HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type) && HERO_PASS_RESOURCE_TYPE_IS_MUTABLE(resource->type), "we can only clear a mutable image resource and %s is not a mutable image", hero_pass_resource_type_strings[resource->type]);
+}
+
+void hero_pass_read_buffer(HeroRenderGraph* render_graph, HeroPassResourceId id, U64 start_idx, U64 end_idx, void* dst);
+void hero_pass_write_buffer(HeroRenderGraph* render_graph, HeroPassResourceId id, U64 start_idx, U64 end_idx, void** dst_out);
+
+void hero_pass_read_image(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroImageArea* area, void* dst);
+void hero_pass_write_image(HeroRenderGraph* render_graph, HeroPassResourceId id, HeroImageArea* area, void** dst_out);
+
+// ===========================================
+//
+//
+// Frame Graph
+//
+//
+// ===========================================
+
+typedef struct _HeroCommandRecorder _HeroCommandRecorder;
+struct _HeroCommandRecorder {
+	HeroCommandRecorder public_;
+	HeroAtomic(bool)    is_in_use;
+	union {
+		HeroCommandRecorderVulkan vulkan;
+	};
+};
+
+thread_local static _HeroCommandRecorder _hero_command_recorder_thread_local;
+
+HeroResult hero_frame_graph_init(HeroLogicalDevice* ldev, HeroFrameGraphSetup* setup, HeroFrameGraphId* id_out) {
+	HeroFrameGraph* frame_graph;
+	HeroResult result = hero_gfx_sys.backend_vtable.frame_graph_init(ldev, setup, id_out, &frame_graph);
+	if (result < 0) {
+		return result;
+	}
+
+	//
+	// allocate the pass resource metadta
+	{
+		if (setup->resources_cap == 0) {
+			return HERO_ERROR(GFX_GRAPH_CANNOT_HAVE_ZERO_RESOURCES);
+		}
+
+		result = hero_free_ranges_init(&frame_graph->persistent_images_memory_free_ranges, 0, hero_system_alctor, 0);
+		if (result < 0) {
+			return result;
+		}
+
+		result = hero_free_ranges_init(&frame_graph->persistent_buffers_memory_free_ranges, 0, hero_system_alctor, 0);
+		if (result < 0) {
+			return result;
+		}
+
+		result = hero_free_ranges_init(&frame_graph->images_memory_free_ranges, 0, hero_system_alctor, 0);
+		if (result < 0) {
+			return result;
+		}
+
+		result = hero_free_ranges_init(&frame_graph->buffers_memory_free_ranges, 0, hero_system_alctor, 0);
+		if (result < 0) {
+			return result;
+		}
+
+		Uptr bitset_words_count = DIV_ROUND_UP(setup->physical_resources_cap, 64);
+		frame_graph->physical_resources_that_are_unused_bitset = hero_alloc_array(U64, hero_system_alctor, 0, bitset_words_count);
+		if (!frame_graph->physical_resources_that_are_unused_bitset) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+		HERO_ZERO_ELMT_MANY(frame_graph->physical_resources_that_are_unused_bitset, bitset_words_count);
+
+		frame_graph->physical_resources_allocated_bitset = hero_alloc_array(U64, hero_system_alctor, 0, bitset_words_count);
+		if (!frame_graph->physical_resources_allocated_bitset) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+		HERO_ZERO_ELMT_MANY(frame_graph->physical_resources_allocated_bitset, bitset_words_count);
+
+		frame_graph->physical_resources_newly_allocated_bitset = hero_alloc_array(U64, hero_system_alctor, 0, bitset_words_count);
+		if (!frame_graph->physical_resources_newly_allocated_bitset) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+		HERO_ZERO_ELMT_MANY(frame_graph->physical_resources_newly_allocated_bitset, bitset_words_count);
+
+		frame_graph->physical_resource_ids = hero_alloc_array(HeroResourceId, hero_system_alctor, 0, setup->physical_resources_cap);
+		if (!frame_graph->physical_resource_ids) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph->physical_resources = hero_alloc_array(HeroPassPhysicalResource, hero_system_alctor, 0, setup->physical_resources_cap);
+		if (!frame_graph->physical_resources) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph->pass_resource_ids = hero_alloc_array(HeroPassResourceId, hero_system_alctor, 0, setup->resources_cap);
+		if (!frame_graph->pass_resource_ids) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph->pass_resources = hero_alloc_array(HeroPassResource, hero_system_alctor, 0, setup->resources_cap);
+		if (!frame_graph->pass_resources) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph->pass_resources_cap = setup->resources_cap;
+		frame_graph->physical_resources_cap = setup->physical_resources_cap;
+	}
+
+	//
+	// allocate the passes
+	{
+		if (setup->passes_cap == 0) {
+			return HERO_ERROR(GFX_GRAPH_CANNOT_HAVE_ZERO_PASSES);
+		}
+
+		Uptr bitset_words_count = DIV_ROUND_UP(setup->passes_cap, 64);
+		frame_graph->passes_that_are_unused_bitset = hero_alloc_array(U64, hero_system_alctor, 0, bitset_words_count);
+		if (!frame_graph->passes_that_are_unused_bitset) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+		HERO_ZERO_ELMT_MANY(frame_graph->passes_that_are_unused_bitset, bitset_words_count);
+
+		frame_graph->passes_allocated_bitset = hero_alloc_array(U64, hero_system_alctor, 0, bitset_words_count);
+		if (!frame_graph->passes_allocated_bitset) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+		HERO_ZERO_ELMT_MANY(frame_graph->passes_allocated_bitset, bitset_words_count);
+
+		frame_graph->passes_newly_allocated_bitset = hero_alloc_array(U64, hero_system_alctor, 0, bitset_words_count);
+		if (!frame_graph->passes_newly_allocated_bitset) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+		HERO_ZERO_ELMT_MANY(frame_graph->passes_newly_allocated_bitset, bitset_words_count);
+
+		frame_graph->passes = hero_alloc_array(HeroPass, hero_system_alctor, 0, setup->passes_cap);
+		if (!frame_graph->passes) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph->passes_cap = setup->passes_cap;
+	}
+
+	//
+	// allocate the execution units
+	{
+		frame_graph->execution_units_pass_enums = hero_alloc_array(HeroPassEnum, hero_system_alctor, 0, setup->passes_cap);
+		if (!frame_graph->execution_units_pass_enums) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph->execution_units_pass_ranges = hero_alloc_array(HeroRangeU16, hero_system_alctor, 0, setup->passes_cap);
+		if (!frame_graph->execution_units_pass_ranges) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+	}
+
+	//
+	// allocate the viewports
+	{
+		setup->viewports_cap = HERO_MAX(setup->viewports_cap, setup->passes_cap);
+		frame_graph->viewports = hero_alloc_array(HeroPassViewport, hero_system_alctor, 0, setup->viewports_cap);
+		if (!frame_graph->viewports) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+		HERO_ZERO_ELMT_MANY(frame_graph->viewports, setup->viewports_cap);
+
+		frame_graph->viewports_count = 0;
+		frame_graph->viewports_cap = setup->viewports_cap;
+	}
+
+	frame_graph->name = setup->name;
+	frame_graph->persistent_images_memory_pool_size = setup->persistent_images_memory_pool_size;
+	frame_graph->persistent_buffers_memory_pool_size = setup->persistent_buffers_memory_pool_size;
+	frame_graph->images_memory_pool_size = setup->images_memory_pool_size;
+	frame_graph->buffers_memory_pool_size = setup->buffers_memory_pool_size;
+
+	return HERO_SUCCESS;
+}
+
+HeroResult hero_frame_graph_deinit(HeroLogicalDevice* ldev, HeroFrameGraphId id) {
+	HeroFrameGraph* frame_graph;
+	HeroResult result = hero_frame_graph_get(ldev, id, &frame_graph);
+	if (result < 0) {
+		return result;
+	}
+
+	return hero_gfx_sys.backend_vtable.frame_graph_deinit(ldev, id, frame_graph);
+}
+
+HeroResult hero_frame_graph_get(HeroLogicalDevice* ldev, HeroFrameGraphId id, HeroFrameGraph** out) {
+	return hero_gfx_sys.backend_vtable.frame_graph_get(ldev, id, out);
+}
+
+HeroPassPhysicalResource* _hero_frame_graph_physical_resource_find_or_insert(HeroFrameGraph* frame_graph, HeroResourceId resource_id) {
+	HeroPassPhysicalResource* physical_resource;
+	for_range(physical_resource_idx, 0, frame_graph->physical_resources_count) {
+		if (frame_graph->physical_resource_ids[physical_resource_idx] == resource_id) {
+			physical_resource = &frame_graph->physical_resources[physical_resource_idx];
+			goto END;
+		}
+	}
+
+	//
+	// find the next resource index by look through the allocated bitset
+	Uptr physical_resource_idx = (Uptr)-1;
+	HERO_DEBUG_ASSERT(
+		hero_bitset_array_iter_next_zero64(frame_graph->physical_resources_allocated_bitset, frame_graph->physical_resources_cap, &physical_resource_idx),
+		"frame graph '%s' physical resources capacity of '%u' has been exceeded", frame_graph->name, frame_graph->physical_resources_cap
+	);
+	frame_graph->physical_resources_count += 1;
+
+	frame_graph->physical_resource_ids[physical_resource_idx] = resource_id;
+
+	physical_resource = &frame_graph->physical_resources[physical_resource_idx];
+
+	physical_resource->id = resource_id;
+	physical_resource->parent_physical_resource_idx = HERO_PHYSICAL_RESOURCE_IDX_INVALID;
+	physical_resource->mem_range = (HeroRange){0};
+
+	//
+	// set a bit to say it is allocated and what not
+	hero_bitset_array_set64(frame_graph->physical_resources_allocated_bitset, physical_resource_idx);
+	hero_bitset_array_set64(frame_graph->physical_resources_newly_allocated_bitset, physical_resource_idx);
+	hero_bitset_array_unset64(frame_graph->physical_resources_that_are_unused_bitset, physical_resource_idx);
+
+END:
+	physical_resource->lifetime_execution_units_range = (HeroRangeU16){0};
+	return physical_resource;
+}
+
+HeroPassResource* _hero_frame_graph_pass_resource_find(HeroFrameGraph* frame_graph, HeroPass* pass, HeroPassResourceId resource_id) {
+	U32 pass_resource_idx = HERO_PASS_RESOURCE_IDX_INVALID;
+	Uptr pass_resource_start_idx = pass->resource_ranges_by_type[0].start_idx;
+	Uptr pass_resource_end_idx = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_COUNT - 1].end_idx;
+	for_range(i, pass_resource_start_idx, pass_resource_end_idx) {
+		if (frame_graph->pass_resource_ids[i] == resource_id) {
+			pass_resource_idx = i;
+			break;
+		}
+	}
+
+	//
+	// ensure the resource exists
+	HERO_DEBUG_ASSERT(pass_resource_idx != HERO_PASS_RESOURCE_IDX_INVALID, "frame graph '%s' pass '%s' does not have the resource id '%u'", frame_graph->name, pass->name, resource_id);
+
+	return &frame_graph->pass_resources[pass_resource_idx];
+}
+
+U16 _hero_frame_graph_prepare_recursive(HeroFrameGraph* frame_graph, HeroPass* pass, HeroPassEnum pass_enum) {
+	if (pass->execution_unit_idx != HERO_EXECUTION_UNIT_IDX_INVALID) {
+		// pass has already been through this function
+		return pass->execution_unit_idx;
+	}
+
+	//
+	// now recursively ascend up the parents by look and what the pass's resources link to.
+	// also find the max_execution_unit_idx of the parent passes so we can make ours + 1 that one, unless we have no parent passes.
+	//
+
+	U16 max_execution_unit_idx = 0;
+	bool has_parent_pass = false;
+	pass->execution_unit_idx = HERO_EXECUTION_UNIT_IDX_BEING_SET;
+	{
+		//
+		// for every pass resource
+		Uptr start_idx = pass->resource_ranges_by_type[0].start_idx;
+		Uptr end_idx = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_COUNT - 1].end_idx;
+		for_range(idx, start_idx, end_idx) {
+			//
+			// extract the link from the buffer or image
+			HeroPassResource* resource = &frame_graph->pass_resources[idx];
+			HeroPassEnum link_pass_enum = resource->link_pass_enum;
+			HeroPassResourceId link_id = resource->link_id;
+
+			if (link_pass_enum == HERO_PASS_ENUM_INVALID) {
+				//
+				// this resource doesn't link to anything, you have discovered the birth of a physical resource.
+				// mark the physical resource so that it still exists
+				// or create an new allocation but don't give it an address range yet.
+				//
+				HeroPassPhysicalResource* physical_resource = _hero_frame_graph_physical_resource_find_or_insert(frame_graph, HERO_RESOURCE_ID(pass->pass_enum, resource->id));
+
+				resource->physical_resource_idx = physical_resource - frame_graph->physical_resources;
+				physical_resource->flags = resource->flags;
+				physical_resource->is_buffer = HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type);
+				continue;
+			}
+
+			//
+			// ensure the linked pass exists
+			HeroPass* parent_pass = &frame_graph->passes[link_pass_enum];
+			HERO_DEBUG_ASSERT(parent_pass->pass_enum == link_pass_enum, "frame graph '%s' pass '%s' %s resource at index '%u' is linked to a pass enum '%u' that is not in the frame graph", frame_graph->name, pass->name, hero_pass_resource_type_strings[resource->type], idx - start_idx, link_pass_enum);
+
+
+			//
+			// find the linked resource exists in the linked pass
+			HeroPassResource* link_resource = _hero_frame_graph_pass_resource_find(frame_graph, parent_pass, link_id);
+
+			//
+			// ensure the linked resource is a compatible type
+			HERO_DEBUG_ASSERT(hero_pass_resource_type_is_compatible(resource->type, link_resource->type), "frame graph '%s' pass '%s' %s resource id '%u' is linked to a pass '%s' %s resource id '%u' are of incompatible types", frame_graph->name, pass->name, hero_pass_resource_type_strings[resource->type], resource->id, parent_pass->name, hero_pass_resource_type_strings[link_resource->type], link_id);
+
+			if (parent_pass->execution_unit_idx == HERO_EXECUTION_UNIT_IDX_BEING_SET) {
+
+				//
+				// when a resource links to resource a head in the graph, it means it comes from the previous frame.
+				// here we make a new physical resource so that when the previous frame is finished, it can copy it's resource to this frame's copy.
+				HeroPassPhysicalResource* physical_resource = _hero_frame_graph_physical_resource_find_or_insert(frame_graph, HERO_RESOURCE_ID(pass->pass_enum, resource->id));
+				resource->physical_resource_idx = physical_resource - frame_graph->physical_resources;
+
+				HERO_DEBUG_ASSERT(link_resource->physical_resource_idx != HERO_PHYSICAL_RESOURCE_IDX_INVALID, "internal error: expected linked resource to have physical resource idx");
+				physical_resource->parent_physical_resource_idx = link_resource->physical_resource_idx;
+				physical_resource->flags = link_resource->flags;
+				physical_resource->is_buffer = HERO_PASS_RESOURCE_TYPE_IS_BUFFER(link_resource->type);
+
+				continue; // avoid a circular reference when a parent references a child that is already being processed
+			}
+
+			if (link_resource->physical_resource_idx != HERO_PHYSICAL_RESOURCE_IDX_INVALID) {
+				if (HERO_PASS_RESOURCE_TYPE_IS_MUTABLE(resource->type) || resource->link_chain_length >= link_resource->nearest_link_chain_mutation) {
+					//
+					// when a resource links to another resource that has a physical resource already
+					//     (this happens when recursively ascend up from another output image).
+					// and when this resource mutates or there is a mutation that happens at the same execution_unit_idx or lower
+					// then we have two versions of the resource existing at the same time. we canno have this without creating
+					// a new physical resource. so we do that here, a copy will be made from the linked resource.
+					HeroPassPhysicalResource* physical_resource = _hero_frame_graph_physical_resource_find_or_insert(frame_graph, HERO_RESOURCE_ID(pass->pass_enum, resource->id));
+					resource->physical_resource_idx = physical_resource - frame_graph->physical_resources;
+
+					physical_resource->parent_physical_resource_idx = link_resource->physical_resource_idx;
+					physical_resource->flags = link_resource->flags;
+					physical_resource->is_buffer = HERO_PASS_RESOURCE_TYPE_IS_BUFFER(link_resource->type);
+				}
+			}
+
+			//
+			// keep track of how many execution units the since the last mutation of this resource link chain
+			if (HERO_PASS_RESOURCE_TYPE_IS_MUTABLE(resource->type)) {
+				link_resource->nearest_link_chain_mutation = 0;
+			} else if (resource->nearest_link_chain_mutation != HERO_NEAREST_LINK_CHAIN_MUTATION_INVALID) {
+				link_resource->nearest_link_chain_mutation = resource->nearest_link_chain_mutation + 1;
+			}
+
+			link_resource->link_chain_length = HERO_MAX(link_resource->link_chain_length, resource->link_chain_length + 1);
+
+			has_parent_pass = true;
+			U16 parent_execution_unit_idx = _hero_frame_graph_prepare_recursive(frame_graph, parent_pass, link_pass_enum);
+			max_execution_unit_idx = HERO_MAX(max_execution_unit_idx, parent_execution_unit_idx);
+
+			//
+			// bring the physical resource index, buffer size and image info id down the tree to the children
+			resource->physical_resource_idx = link_resource->physical_resource_idx;
+			if (HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type)) {
+				resource->data.buffer_size = link_resource->data.buffer_size;
+			} else {
+				resource->data.image_info_id = link_resource->data.image_info_id;
+			}
+		}
+	}
+
+	if (has_parent_pass) {
+		max_execution_unit_idx += 1;
+	}
+
+	pass->execution_unit_idx = max_execution_unit_idx;
+	return max_execution_unit_idx;
+}
+
+HeroFreeRanges* _hero_frame_graph_resource_free_ranges(HeroFrameGraph* frame_graph, HeroPassResource* resource) {
+	bool is_buffer = HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type);
+	bool is_persistent = resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_PERSISTENT;
+	HeroFreeRanges* free_ranges;
+	switch (is_buffer + (is_persistent * 2)) {
+
+		// is_buffer && !is_persistent
+		case 0: return &frame_graph->buffers_memory_free_ranges;
+
+		// !is_buffer && !is_persistent
+		case 1: return &frame_graph->images_memory_free_ranges;
+
+		// is_buffer && is_persistent
+		case 2: return &frame_graph->persistent_buffers_memory_free_ranges;
+
+		// !is_buffer && is_persistent
+		case 3: return &frame_graph->persistent_images_memory_free_ranges;
+	}
+
+	HERO_UNREACHABLE();
+}
+
+HeroResult hero_frame_graph_update(HeroLogicalDevice* ldev, HeroFrameGraphId id, HeroRenderGraphId* render_graph_ids, U32 render_graphs_count) {
+	HeroFrameGraph* frame_graph;
+	HeroResult result = hero_frame_graph_get(ldev, id, &frame_graph);
+
+	//
+	// clear the frame graph
+	HERO_ONE_ELMT_MANY(frame_graph->passes, frame_graph->passes_count); // we one bits so that HeroPass.pass_enum is HERO_PASS_ENUM_INVALID
+	frame_graph->passes_count = 0;
+	frame_graph->viewports_count = 0;
+	frame_graph->pass_resources_count = 0;
+
+	//
+	// reset some physical resource & passes bitsets so we can keep track of newly unused and newly allocated resources
+	Uptr bitset_words_count = DIV_ROUND_UP(frame_graph->physical_resources_cap, 64);
+	HERO_ONE_ELMT_MANY(frame_graph->physical_resources_that_are_unused_bitset, bitset_words_count);
+	HERO_ZERO_ELMT_MANY(frame_graph->physical_resources_newly_allocated_bitset, bitset_words_count);
+	HERO_ONE_ELMT_MANY(frame_graph->passes_that_are_unused_bitset, bitset_words_count);
+	HERO_ZERO_ELMT_MANY(frame_graph->passes_newly_allocated_bitset, bitset_words_count);
+
+	//
+	// merge all the render graphs into the frame graph
+	for_range(idx, 0, render_graphs_count) {
+		HeroRenderGraph* render_graph;
+		HeroResult result = hero_render_graph_get(ldev, render_graph_ids[idx], &render_graph);
+		if (result < 0) {
+			return result;
+		}
+
+		//
+		// copy the passes into the frame graph from the render graph
+		for_range(src_pass_idx, 0, render_graph->passes_count) {
+			HeroPass* src_pass = &frame_graph->passes[src_pass_idx];
+			HeroPassEnum pass_enum = src_pass->pass_enum;
+			HERO_DEBUG_ASSERT(pass_enum < frame_graph->passes_cap, "frame graph '%s' has a capacity of '%u' passes and pass enum '%u' is out of bounds", frame_graph->name, frame_graph->passes_cap, pass_enum);
+
+			HeroPass* dst_pass = &frame_graph->passes[pass_enum];
+
+			HERO_DEBUG_ASSERT(dst_pass->pass_enum == 0, "frame graph '%s' pass '%s' has the same pass enum '%u' as pass '%s'", frame_graph->name, src_pass->name, dst_pass->pass_enum, dst_pass->name);
+
+			*dst_pass = *src_pass;
+
+			//
+			// set a bit to say it is allocated and what not
+			hero_bitset_array_set64(frame_graph->passes_allocated_bitset, pass_enum);
+			hero_bitset_array_set64(frame_graph->passes_newly_allocated_bitset, pass_enum);
+			hero_bitset_array_unset64(frame_graph->passes_that_are_unused_bitset, pass_enum);
+
+			//
+			// copy the resources from the pools in the render graph into a flat array in the frame graph.
+			// this keeps the resources sorted by type but they are now in a flat array.
+			for_range(resource_type, 0, HERO_PASS_RESOURCE_TYPE_COUNT) {
+				HeroPassResourcePool* src_pool = &render_graph->resource_pools[resource_type];
+				HeroRangeU16* range = &dst_pass->resource_ranges_by_type[resource_type];
+				U16 src_elmts_count = range->end_idx - range->start_idx;
+
+				U16 new_count = frame_graph->pass_resources_count + src_elmts_count;
+				HERO_DEBUG_ASSERT(new_count > frame_graph->pass_resources_cap, "the frame graph '%s' resources capacity of '%u' has been exceed", frame_graph->name, frame_graph->pass_resources_cap);
+
+				for_range(src_idx, 0, src_elmts_count) {
+					HeroPassResource* src_resource = &src_pool->data[range->start_idx + src_idx];
+					HeroPassResource* dst_resource = &frame_graph->pass_resources[frame_graph->pass_resources_count + src_idx];
+
+					*dst_resource = *src_resource;
+					frame_graph->pass_resource_ids[frame_graph->pass_resources_count + src_idx] = src_resource->id;
+				}
+
+				//
+				// update the resource type range to reference the flat array
+				range->start_idx = frame_graph->pass_resources_count;
+				range->end_idx = new_count;
+
+				frame_graph->pass_resources_count = new_count;
+			}
+
+			U16 viewports_count = dst_pass->viewports_range.end_idx - dst_pass->viewports_range.start_idx;
+			HERO_COPY_ELMT_MANY(&frame_graph->viewports[frame_graph->viewports_count], &render_graph->viewports[dst_pass->viewports_range.start_idx], viewports_count);
+			dst_pass->viewports_range.start_idx = frame_graph->viewports_count;
+			dst_pass->viewports_range.end_idx = frame_graph->viewports_count + viewports_count;
+			frame_graph->viewports_count += viewports_count;
+		}
+		frame_graph->passes_count += render_graph->passes_count;
+	}
+
+	//
+	// validate and prepare the frame graph
+	U16 max_execution_unit_idx = 0;
+	{
+
+		for_range(pass_enum, 0, frame_graph->passes_count) {
+			HeroPass* pass = &frame_graph->passes[pass_enum];
+
+			if (pass->flags & HERO_PASS_FLAGS_HAS_SWAPCHAIN_OR_CPU_READABLE) {
+				U16 pass_max_execution_unit_idx = _hero_frame_graph_prepare_recursive(frame_graph, pass, pass_enum);
+				max_execution_unit_idx = HERO_MAX(pass_max_execution_unit_idx, max_execution_unit_idx);
+			}
+		}
+
+	}
+
+	//
+	// make the pass execution units
+	U16 execution_units_count = max_execution_unit_idx + 1;
+	frame_graph->execution_units_count = execution_units_count;
+	{
+		U16 collected_passes_count = 0;
+		for_range(execution_unit_idx, 0, execution_units_count) {
+			HeroRangeU16* range = &frame_graph->execution_units_pass_ranges[execution_unit_idx];
+			range->start_idx = collected_passes_count;
+			range->end_idx = collected_passes_count;
+			for_range(pass_enum, 0, frame_graph->passes_count) {
+				HeroPass* pass = &frame_graph->passes[pass_enum];
+				if (pass->execution_unit_idx == execution_unit_idx) {
+					frame_graph->execution_units_pass_enums[range->end_idx] = pass_enum;
+					range->end_idx += 1;
+					collected_passes_count += 1;
+				}
+			}
+		}
+	}
+
+	{
+		//
+		// mask the passes allocated bitset onto the unused bitset.
+		// this is so the backend can tell what passes need to be thrown away.
+		for_range(word_idx, 0, bitset_words_count) {
+			frame_graph->passes_that_are_unused_bitset[word_idx] &= frame_graph->passes_allocated_bitset[word_idx];
+		}
+
+		//
+		// now remove the unused passes from the allocated bitset
+		for_range(word_idx, 0, bitset_words_count) {
+			frame_graph->passes_allocated_bitset[word_idx] &= ~frame_graph->passes_that_are_unused_bitset[word_idx];
+		}
+	}
+
+	{
+		//
+		// mask the physical resources allocated bitset onto the unused bitset.
+		// this is so the backend can tell what physical resources need to be thrown away.
+		for_range(word_idx, 0, bitset_words_count) {
+			frame_graph->physical_resources_that_are_unused_bitset[word_idx] &= frame_graph->physical_resources_allocated_bitset[word_idx];
+		}
+
+		//
+		// now remove the unused physical resources from the allocated bitset
+		for_range(word_idx, 0, bitset_words_count) {
+			frame_graph->physical_resources_allocated_bitset[word_idx] &= ~frame_graph->physical_resources_that_are_unused_bitset[word_idx];
+		}
+	}
+
+	/* GOES IN THE BACKEND
+	Uptr physical_resource_idx = (Uptr)-1;
+	while (hero_bitset_array_iter_next_one64(frame_graph->physical_resources_that_are_unused_bitset, frame_graph->physical_resources_cap, &physical_resource_idx)) {
+
+	}
+	*/
+
+	//
+	// go over the passes in execution unit order and work out the physical resource lifetime ranges
+	{
+		//
+		// for every execution unit
+		for_range(execution_unit_idx, 0, execution_units_count) {
+			HeroRangeU16 range = frame_graph->execution_units_pass_ranges[execution_unit_idx];
+
+			//
+			// for every execution unit pass
+			for_range(execution_units_pass_idx, range.start_idx, range.end_idx) {
+				HeroPass* pass = &frame_graph->passes[frame_graph->execution_units_pass_enums[execution_units_pass_idx]];
+
+				//
+				// for every pass resource
+				Uptr start_idx = pass->resource_ranges_by_type[0].start_idx;
+				Uptr end_idx = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_COUNT - 1].end_idx;
+				for_range(resource_idx, start_idx, end_idx) {
+					HeroPassResource* resource = &frame_graph->pass_resources[resource_idx];
+					HeroPassPhysicalResource* physical_resource = &frame_graph->physical_resources[resource->physical_resource_idx];
+
+					if (resource->link_pass_enum != HERO_PASS_ENUM_INVALID) {
+						HeroPass* link_pass = &frame_graph->passes[resource->link_pass_enum];
+						HeroPassResource* link_resource = _hero_frame_graph_pass_resource_find(frame_graph, link_pass, resource->link_id);
+						link_resource->link_to_by_min_execution_unit_idx = HERO_MIN(link_resource->link_to_by_min_execution_unit_idx, execution_unit_idx);
+					}
+
+					if (resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_PERSISTENT) {
+						physical_resource->lifetime_execution_units_range.start_idx = 0;
+						physical_resource->lifetime_execution_units_range.end_idx = execution_units_count;
+					} else {
+						if (physical_resource->lifetime_execution_units_range.start_idx == physical_resource->lifetime_execution_units_range.end_idx) {
+							//
+							// physical resource has not been started yet, so lets kick off the lifetime
+							physical_resource->lifetime_execution_units_range.start_idx = execution_unit_idx;
+						}
+
+						physical_resource->lifetime_execution_units_range.end_idx = execution_unit_idx + 1;
+					}
+				}
+			}
+		}
+	}
+
+	//
+	// go over the passes in execution unit order and assign the memory to the physical resources
+	{
+
+		//
+		// setup the free ranges will to have all the memory available
+		{
+			frame_graph->images_memory_free_ranges.ranges.count = 0;
+			frame_graph->buffers_memory_free_ranges.ranges.count = 0;
+
+			HeroRange range = { .start_idx = 0, .end_idx = frame_graph->images_memory_pool_size };
+			result = hero_free_ranges_give_range(&frame_graph->images_memory_free_ranges, range, hero_system_alctor, 0);
+			if (result < 0) {
+				return result;
+			}
+
+			range.end_idx = frame_graph->buffers_memory_pool_size;
+			result = hero_free_ranges_give_range(&frame_graph->buffers_memory_free_ranges, range, hero_system_alctor, 0);
+			if (result < 0) {
+				return result;
+			}
+		}
+
+		//
+		// for every execution unit
+		for_range(execution_unit_idx, 0, execution_units_count) {
+			HeroRangeU16 range = frame_graph->execution_units_pass_ranges[execution_unit_idx];
+
+			//
+			// for every execution unit pass
+			for_range(execution_units_pass_idx, range.start_idx, range.end_idx) {
+				HeroPass* pass = &frame_graph->passes[frame_graph->execution_units_pass_enums[execution_units_pass_idx]];
+
+				//
+				// for every pass resource
+				Uptr start_idx = pass->resource_ranges_by_type[0].start_idx;
+				Uptr end_idx = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_COUNT - 1].end_idx;
+
+				//
+				// loop over the physical resources with existing memory ranges and allocated/deallocate those.
+				// this includes the deallocations for new resources that where added this frame as in
+				// a previous loop of the execution unit they will be allocated and mem_range will be set.
+				for_range(resource_idx, start_idx, end_idx) {
+					HeroPassResource* resource = &frame_graph->pass_resources[resource_idx];
+					HeroPassPhysicalResource* physical_resource = &frame_graph->physical_resources[resource->physical_resource_idx];
+
+					if (physical_resource->mem_range.start_idx != physical_resource->mem_range.end_idx) {
+
+						if (physical_resource->lifetime_execution_units_range.start_idx == execution_unit_idx) {
+							HeroFreeRanges* free_ranges = _hero_frame_graph_resource_free_ranges(frame_graph, resource);
+
+							result = hero_free_ranges_take_range_requested(free_ranges, physical_resource->mem_range, hero_system_alctor, 0);
+							HERO_RESULT_ASSERT(result);
+						} else if (physical_resource->lifetime_execution_units_range.end_idx == execution_unit_idx) {
+							HeroFreeRanges* free_ranges = _hero_frame_graph_resource_free_ranges(frame_graph, resource);
+							result = hero_free_ranges_give_range(free_ranges, physical_resource->mem_range, hero_system_alctor, 0);
+							HERO_RESULT_ASSERT(result);
+						}
+					}
+				}
+
+				//
+				// loop over the physical resources that are new and allocated them a memory range
+				for_range(resource_idx, start_idx, end_idx) {
+					HeroPassResource* resource = &frame_graph->pass_resources[resource_idx];
+					HeroPassPhysicalResource* physical_resource = &frame_graph->physical_resources[resource->physical_resource_idx];
+
+					if (physical_resource->mem_range.start_idx == physical_resource->mem_range.end_idx) {
+						Uptr size;
+						Uptr align;
+						if (HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type)) {
+							size = resource->data.buffer_size;
+							align = 1; // TODO: get align from backend or something
+						} else {
+							HeroImageInfo* info;
+							result = _hero_image_info_get(ldev, resource->data.image_info_id, &info);
+							if (result < 0) {
+								return result;
+							}
+
+							size = (Uptr)info->width * (Uptr)info->height * (Uptr)info->depth * (Uptr)info->array_layers_count * hero_image_format_bytes_per_pixel[info->format];
+							if (info->mip_levels_count > 1) {
+								HERO_ABORT("TODO: check if this is correct");
+								size += info->width / 2;
+							}
+							align = hero_image_format_bytes_per_pixel[info->format]; // TODO: get align from backend or something
+						}
+
+						HeroFreeRanges* free_ranges = _hero_frame_graph_resource_free_ranges(frame_graph, resource);
+
+						Uptr mem_start_idx;
+						result = hero_free_ranges_take_range(free_ranges, size, align, hero_system_alctor, 0, &mem_start_idx);
+						if (result < 0) {
+							return result;
+						}
+						physical_resource->mem_range.start_idx = mem_start_idx;
+						physical_resource->mem_range.end_idx = mem_start_idx + size;
+					}
+				}
+			}
+		}
+	}
+
+	return hero_gfx_sys.backend_vtable.frame_graph_update(ldev, frame_graph);
+}
+
+HeroResult hero_frame_graph_record_pass_start(HeroLogicalDevice* ldev, HeroFrameGraphId id, HeroPassEnum pass_enum, HeroCommandRecorder** command_recorder_out) {
+	HeroFrameGraph* frame_graph;
+	HeroResult result = hero_frame_graph_get(ldev, id, &frame_graph);
+
+	_HeroCommandRecorder* command_recorder = &_hero_command_recorder_thread_local;
+	bool expected_is_in_use = false;
+	if (!atomic_compare_exchange_strong(&command_recorder->is_in_use, &expected_is_in_use, true)) {
+		return HERO_ERROR(ALREADY_IN_USE);
+	}
+
+	HeroPass* pass = &frame_graph->passes[pass_enum];
+
+	HeroPassRecordState expected_record_state = HERO_PASS_RECORD_STATE_NOT_STARTED;
+	if (!atomic_compare_exchange_strong(&pass->record_state, &expected_record_state, HERO_PASS_RECORD_STATE_STARTED)) {
+		if (expected_record_state == HERO_PASS_RECORD_STATE_FINISHED) {
+			return HERO_ERROR(ALREADY_EXISTS);
+		} else {
+			return HERO_ERROR(ALREADY_STARTED);
+		}
+	}
+
+	command_recorder->public_.ldev = ldev;
+	command_recorder->public_.frame_graph = frame_graph;
+	command_recorder->public_.pass = pass;
+	*command_recorder_out = &command_recorder->public_;
+	return hero_gfx_sys.backend_vtable.frame_graph_record_pass_start(ldev, frame_graph, pass, command_recorder);
+}
+
+HeroResult hero_frame_graph_record_pass_end(HeroCommandRecorder* command_recorder) {
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+	HERO_DEBUG_ASSERT(command_recorder_ == &_hero_command_recorder_thread_local, "the command recorder is not from this thread");
+
+	HeroResult result = hero_gfx_sys.backend_vtable.frame_graph_record_pass_end(command_recorder_);
+	if (result < 0) {
+		return result;
+	}
+
+	atomic_store(&command_recorder->pass->record_state, HERO_PASS_RECORD_STATE_FINISHED);
+	atomic_store(&command_recorder_->is_in_use, false);
+	return HERO_SUCCESS;
+}
+
+HeroResult hero_frame_graph_submit(HeroLogicalDevice* ldev, HeroFrameGraphId id) {
+	HeroFrameGraph* frame_graph;
+	HeroResult result = hero_frame_graph_get(ldev, id, &frame_graph);
+
+	return hero_gfx_sys.backend_vtable.frame_graph_submit(ldev, frame_graph);
+}
+
+void hero_cmd_draw_start(HeroCommandRecorder* command_recorder, HeroPipelineId pipeline_id) {
+	HERO_DEBUG_ASSERT(!(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_OR_COMPUTE_DISPATCH_STARTED), "hero_cmd_draw_start cannot be called when a draw or compute dispatch has not finished");
+	command_recorder->flags |= HERO_COMMAND_RECORDER_FLAGS_DRAW_STARTED;
+
+	hero_gfx_sys.backend_vtable.cmd_draw_start(command_recorder, pipeline_id);
+}
+
+void hero_cmd_draw_end_vertexed(HeroCommandRecorder* command_recorder, U32 vertices_count) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_STARTED, "hero_cmd_draw_end_* cannot be called when a draw has not been started");
+
+	HERO_DEBUG_ASSERT(vertices_count, "vertices_count must be a non zero value");
+
+	hero_gfx_sys.backend_vtable.cmd_draw_end_vertexed(command_recorder, vertices_count);
+}
+
+void hero_cmd_draw_end_indexed(HeroCommandRecorder* command_recorder, HeroPassResourceId index_buffer_resource_id, HeroIndexType index_type, U32 indices_count) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_STARTED, "hero_cmd_draw_end_* cannot be called when a draw has not been started");
+
+	HERO_DEBUG_ASSERT(indices_count, "indices_count must be a non zero value");
+
+	HeroPassResource* resource = _hero_frame_graph_pass_resource_find(command_recorder->frame_graph, command_recorder->pass, index_buffer_resource_id);
+	HERO_DEBUG_ASSERT(resource->type == HERO_PASS_RESOURCE_TYPE_INDEX_BUFFER, "expected index_buffer_resource_id to be of type HERO_PASS_RESOURCE_TYPE_INDEX_BUFFER but got %s", hero_pass_resource_type_strings[resource->type]);
+
+	hero_gfx_sys.backend_vtable.cmd_draw_end_indexed(command_recorder, resource, index_type, indices_count);
+}
+
+
+void hero_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroPassResourceId vertex_buffer_resource_id, U32 binding, U64 offset) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_STARTED, "hero_cmd_draw_set_vertex_buffer cannot be called when a draw has not been started");
+
+	HeroPassResource* resource = _hero_frame_graph_pass_resource_find(command_recorder->frame_graph, command_recorder->pass, vertex_buffer_resource_id);
+	HERO_DEBUG_ASSERT(resource->type == HERO_PASS_RESOURCE_TYPE_VERTEX_BUFFER, "expected vertex_buffer_resource_id to be of type HERO_PASS_RESOURCE_TYPE_VERTEX_BUFFER but got %s", hero_pass_resource_type_strings[resource->type]);
+
+	hero_gfx_sys.backend_vtable.cmd_draw_set_vertex_buffer(command_recorder, resource, binding, offset);
+}
+
+void hero_cmd_draw_set_vertices_start_idx(HeroCommandRecorder* command_recorder, U32 vertices_start_idx) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_STARTED, "hero_cmd_draw_set_vertices_start_idx cannot be called when a draw has not been started");
+
+	hero_gfx_sys.backend_vtable.cmd_draw_set_vertices_start_idx(command_recorder, vertices_start_idx);
+}
+
+void hero_cmd_draw_set_indices_start_idx(HeroCommandRecorder* command_recorder, U32 indices_start_idx) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_STARTED, "hero_cmd_draw_set_indices_start_idx cannot be called when a draw has not been started");
+
+	hero_gfx_sys.backend_vtable.cmd_draw_set_indices_start_idx(command_recorder, indices_start_idx);
+}
+
+void hero_cmd_draw_set_instances(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_STARTED, "hero_cmd_draw_set_instances cannot be called when a draw has not been started");
+
+	HERO_DEBUG_ASSERT(instances_count, "instances_count must be a non zero value");
+
+	hero_gfx_sys.backend_vtable.cmd_draw_set_instances(command_recorder, instances_start_idx, instances_count);
+}
+
+
+void hero_cmd_compute_dispatch_start(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, U32 group_count_x, U32 group_count_y, U32 group_count_z) {
+	HERO_DEBUG_ASSERT(!(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_OR_COMPUTE_DISPATCH_STARTED), "hero_cmd_compute_dispatch_start cannot be called when a draw or compute dispatch has not finished");
+	command_recorder->flags |= HERO_COMMAND_RECORDER_FLAGS_COMPUTE_DISPATCH_STARTED;
+
+	HERO_DEBUG_ASSERT(group_count_x, "group_count_x must be a non zero value");
+	HERO_DEBUG_ASSERT(group_count_y, "group_count_y must be a non zero value");
+	HERO_DEBUG_ASSERT(group_count_z, "group_count_z must be a non zero value");
+
+#if HERO_DEBUG_ASSERTIONS
+	HeroShader* shader;
+	HeroResult result = hero_shader_get(command_recorder->ldev, compute_shader_id, &shader);
+	HERO_RESULT_ASSERT(result);
+
+	HERO_ASSERT(shader->stages.type == HERO_SHADER_TYPE_COMPUTE, "shader must be a compute shader");
+#endif
+
+	hero_gfx_sys.backend_vtable.cmd_compute_dispatch_start(command_recorder, compute_shader_id, group_count_x, group_count_y, group_count_z);
+}
+
+void hero_cmd_compute_dispatch_end(HeroCommandRecorder* command_recorder) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_COMPUTE_DISPATCH_STARTED, "hero_cmd_compute_dispatch_end cannot be called when a draw has not been started");
+
+	hero_gfx_sys.backend_vtable.cmd_compute_dispatch_end(command_recorder);
+}
+
+
+void hero_cmd_add_sampler(HeroCommandRecorder* command_recorder, U32 binding, HeroSamplerId sampler_id) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_OR_COMPUTE_DISPATCH_STARTED, "hero_cmd_add_sampler cannot be called when a draw or compute dispatch has not been started");
+
+	hero_gfx_sys.backend_vtable.cmd_add_sampler(command_recorder, binding, sampler_id);
+}
+
+void hero_cmd_add_image(HeroCommandRecorder* command_recorder, U32 binding, HeroPassResourceId resource_id) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_OR_COMPUTE_DISPATCH_STARTED, "hero_cmd_add_resource cannot be called when a draw or compute dispatch has not been started");
+
+	HeroPassResource* resource = _hero_frame_graph_pass_resource_find(command_recorder->frame_graph, command_recorder->pass, resource_id);
+#if HERO_DEBUG_ASSERTIONS
+	switch (resource->type) {
+		case HERO_PASS_RESOURCE_TYPE_INPUT_ATTACHMENT:
+			HERO_ABORT("TODO image attachment resource!");
+		case HERO_PASS_RESOURCE_TYPE_COLOR_OUTPUT_ATTACHMENT:
+		case HERO_PASS_RESOURCE_TYPE_DEPTH_STENCIL_ATTACHMENT:
+ERR: {}
+			HERO_ABORT("%s resource is not allowed to be used as the command resource passed into the shader", hero_pass_resource_type_strings[resource->type]);
+		default:
+			if (HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type)) {
+				goto ERR;
+			}
+			break;
+	}
+#endif
+
+	hero_gfx_sys.backend_vtable.cmd_add_image(command_recorder, binding, resource);
+}
+
+void hero_cmd_add_buffer(HeroCommandRecorder* command_recorder, U32 binding, HeroPassResourceId resource_id) {
+	HERO_DEBUG_ASSERT(command_recorder->flags & HERO_COMMAND_RECORDER_FLAGS_DRAW_OR_COMPUTE_DISPATCH_STARTED, "hero_cmd_add_resource cannot be called when a draw or compute dispatch has not been started");
+
+	HeroPassResource* resource = _hero_frame_graph_pass_resource_find(command_recorder->frame_graph, command_recorder->pass, resource_id);
+#if HERO_DEBUG_ASSERTIONS
+	switch (resource->type) {
+		case HERO_PASS_RESOURCE_TYPE_VERTEX_BUFFER:
+		case HERO_PASS_RESOURCE_TYPE_INDEX_BUFFER:
+ERR: {}
+			HERO_ABORT("%s resource is not allowed to be used as the command resource passed into the shader", hero_pass_resource_type_strings[resource->type]);
+		default:
+			if (!HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type)) {
+				goto ERR;
+			}
+			break;
+	}
+#endif
+
+	hero_gfx_sys.backend_vtable.cmd_add_buffer(command_recorder, binding, resource);
+}
+
+#if 0
 const char* hero_render_graph_error_type_fmt_strings[HERO_RENDER_GRAPH_ERROR_TYPE_COUNT] = {
 	[HERO_RENDER_GRAPH_ERROR_TYPE_NONE] = "HERO_RENDER_GRAPH_ERROR_TYPE_NONE\n",
 
@@ -1365,11 +2584,11 @@ const char* hero_render_graph_error_type_fmt_strings[HERO_RENDER_GRAPH_ERROR_TYP
 	[HERO_RENDER_GRAPH_ERROR_TYPE_PASS_UNUSED] = "HERO_RENDER_GRAPH_ERROR_TYPE_PASS_UNUSED PASS.%s\n",
 
 	//
-	// enums[0] = HeroImageEnum
+	// enums[0] = HeroImageInfoEnum
 	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED IMAGE.%s\n",
 
 	//
-	// enums[0] = HeroBufferEnum
+	// enums[0] = HeroBufferInfoEnum
 	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED BUFFER.%s\n",
 
 	//
@@ -1377,42 +2596,6 @@ const char* hero_render_graph_error_type_fmt_strings[HERO_RENDER_GRAPH_ERROR_TYP
 	// enums[1] = expected_attachments_count
 	// enums[2] = got_attachments_count
 	[HERO_RENDER_GRAPH_ERROR_TYPE_PASS_ATTACHMENTS_COUNT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_PASS_ATTACHMENTS_COUNT_MISMATCH PASS.%s expected '%u' attachments but got '%u'\n",
-
-	//
-	// enums[0] = HeroPassEnum
-	// enums[1] = HeroPassImageOutputEnum
-	// enums[2] = HeroPassImageOutputEnum
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_DUPLICATED_IMAGE] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_DUPLICATED_IMAGE PASS.%s, IMAGE_OUTPUT.%u, IMAGE_OUTPUT.%u\n",
-
-	//
-	// enums[0] = HeroPassEnum
-	// enums[1] = HeroPassImageInputEnum
-	// enums[2] = HeroPassImageInputEnum
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_DUPLICATED_IMAGE] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_DUPLICATED_IMAGE PASS.%s, IMAGE_INPUT.%u, IMAGE_INPUT.%u\n",
-
-	//
-	// enums[0] = HeroPassEnum
-	// enums[1] = HeroPassImageInputEnum
-	// enums[2] = HeroPassImageOutputEnum
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_USED_AS_INPUT_AND_OUTPUT] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_USED_AS_INPUT_AND_OUTPUT PASS.%s, IMAGE_INPUT.%u, IMAGE_OUTPUT.%u\n",
-
-	//
-	// enums[0] = HeroPassEnum
-	// enums[1] = HeroPassBufferOutputEnum
-	// enums[2] = HeroPassBufferOutputEnum
-	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_DUPLICATED_BUFFER] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_DUPLICATED_BUFFER PASS.%s, BUFFER_OUTPUT.%u, BUFFER_OUTPUT.%u\n",
-
-	//
-	// enums[0] = HeroPassEnum
-	// enums[1] = HeroPassBufferInputEnum
-	// enums[2] = HeroPassBufferInputEnum
-	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_DUPLICATED_BUFFER] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_DUPLICATED_BUFFER PASS.%s, BUFFER_INPUT.%u, BUFFER_INPUT.%u\n",
-
-	//
-	// enums[0] = HeroPassEnum
-	// enums[1] = HeroPassBufferInputEnum
-	// enums[2] = HeroPassBufferOutputEnum
-	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_USED_AS_INPUT_AND_OUTPUT] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_USED_AS_INPUT_AND_OUTPUT PASS.%s, BUFFER_INPUT.%u, BUFFER_OUTPUT.%u\n",
 
 	//
 	// enums[0] = HeroPassEnum
@@ -1426,17 +2609,11 @@ const char* hero_render_graph_error_type_fmt_strings[HERO_RENDER_GRAPH_ERROR_TYP
 	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH PASS.%s IMAGE_OUTPUT.%u\n",
 	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH PASS.%s IMAGE_OUTPUT.%u\n",
 	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH PASS.%s IMAGE_OUTPUT.%u\n",
+	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_SWAPCHAIN_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_SWAPCHAIN_MISMATCH PASS.%s IMAGE_OUTPUT.%u\n",
 
 	//
 	// enums[0] = HeroPassEnum
 	// enums[1] = HeroPassImageInputEnum
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_FORMAT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_FORMAT_MISMATCH PASS.%s IMAGE_INPUT.%u\n",
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH PASS.%s IMAGE_INPUT.%u\n",
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT PASS.%s IMAGE_INPUT.%u\n",
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT PASS.%s IMAGE_INPUT.%u\n",
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_IMAGE_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_IMAGE_ENUM_DOES_NOT_EXIST PASS.%s IMAGE_INPUT.%u\n",
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_DOES_NOT_EXIST PASS.%s IMAGE_INPUT.%u\n",
-	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_CANNOT_BE_SWAPCHAIN] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_CANNOT_BE_SWAPCHAIN PASS.%s IMAGE_INPUT.%u\n",
 	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_ENUM_DOES_NOT_EXIST PASS.%s IMAGE_INPUT.%u\n",
 	[HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_IMAGE_OUTPUT_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_IMAGE_OUTPUT_ENUM_DOES_NOT_EXIST PASS.%s IMAGE_INPUT.%u\n",
 
@@ -1448,7 +2625,6 @@ const char* hero_render_graph_error_type_fmt_strings[HERO_RENDER_GRAPH_ERROR_TYP
 	//
 	// enums[0] = HeroPassEnum
 	// enums[1] = HeroPassBufferInputEnum
-	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_BUFFER_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_BUFFER_ENUM_DOES_NOT_EXIST PASS.%s BUFFER_INPUT.%u\n",
 	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_ENUM_DOES_NOT_EXIST PASS.%s BUFFER_INPUT.%u\n",
 	[HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_BUFFER_OUTPUT_ENUM_DOES_NOT_EXIST] = "HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_BUFFER_OUTPUT_ENUM_DOES_NOT_EXIST PASS.%s BUFFER_INPUT.%u\n",
 };
@@ -1523,20 +2699,20 @@ void _hero_render_graph_validate_pass(HeroLogicalDevice* ldev, HeroRenderGraphSe
 	for_range(image_output_enum, 0, pass_info->image_outputs_count) {
 		HeroImageOutput* output = &pass_info->image_outputs[image_output_enum];
 
-		if (output->image_enum >= setup->images_count) {
+		if (output->image_info_enum >= setup->images_count) {
 			_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_IMAGE_ENUM_DOES_NOT_EXIST, pass_enum, image_output_enum);
 		} else {
-			HeroImageInfo* info = &setup->images[output->image_enum];
+			HeroImageInfo* info = &setup->images[output->image_info_enum];
 
 			//
 			// if render pass validate extra things
-			if (pass_info->layout_id.raw) {
+			if (pass_info->layout_id.raw && output->attachment_idx != HERO_ATTACHMENT_IDX_INVALID) {
 				if (output->attachment_idx >= render_pass_layout->attachments_count) {
 					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_DOES_NOT_EXIST, pass_enum, image_output_enum);
 				}
 				HeroAttachmentLayout* layout = &render_pass_layout->attachments[output->attachment_idx];
 
-				if (layout->format != info->image_format) {
+				if (layout->format != info->format) {
 					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_FORMAT_MISMATCH, pass_enum, image_output_enum);
 				}
 				if (layout->samples_count != (1 << info->samples_count_log2)) {
@@ -1544,26 +2720,30 @@ void _hero_render_graph_validate_pass(HeroLogicalDevice* ldev, HeroRenderGraphSe
 				}
 
 				HeroImageInfo* first_output = &setup->images[0];
-				if (first_output->width != info->width) {
-					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH, pass_enum, image_output_enum);
-				}
-				if (first_output->height != info->height) {
-					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH, pass_enum, image_output_enum);
-				}
-				if (first_output->array_layers_count != info->array_layers_count) {
-					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH, pass_enum, image_output_enum);
+				if (first_output->swapchain_id.raw != info->swapchain_id.raw) {
+					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_SWAPCHAIN_MISMATCH, pass_enum, image_output_enum);
+				} else if (first_output->swapchain_id.raw || info->swapchain_id.raw) {
+					if (first_output->width != info->width) {
+						_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH, pass_enum, image_output_enum);
+					}
+					if (first_output->height != info->height) {
+						_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH, pass_enum, image_output_enum);
+					}
+					if (first_output->array_layers_count != info->array_layers_count) {
+						_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH, pass_enum, image_output_enum);
+					}
 				}
 			}
 
-			*has_swapchain_or_readback_output_out |= (!!info->swapchain_id.raw) | (!!(info->flags & HERO_IMAGE_INFO_FLAGS_READBACK));
+			*has_swapchain_or_readback_output_out |= (!!info->swapchain_id.raw) | (!!(output->flags & HERO_IMAGE_OUTPUT_FLAGS_READBACK));
 
 			bool is_depth = image_output_enum == pass_info->depth_stencil_image_output_enum;
 			if (is_depth) {
-				if (!HERO_IMAGE_FORMAT_IS_DEPTH(info->image_format)) {
+				if (!HERO_IMAGE_FORMAT_IS_DEPTH(info->format)) {
 					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT, pass_enum, image_output_enum);
 				}
 			} else {
-				if (HERO_IMAGE_FORMAT_IS_DEPTH(info->image_format)) {
+				if (HERO_IMAGE_FORMAT_IS_DEPTH(info->format)) {
 					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT, pass_enum, image_output_enum);
 				}
 			}
@@ -1575,42 +2755,12 @@ void _hero_render_graph_validate_pass(HeroLogicalDevice* ldev, HeroRenderGraphSe
 	for_range(image_input_enum, 0, pass_info->image_inputs_count) {
 		HeroImageInput* input = &pass_info->image_inputs[image_input_enum];
 
-		if (input->image_enum >= setup->images_count) {
-			_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_IMAGE_ENUM_DOES_NOT_EXIST, pass_enum, image_input_enum);
-		} else {
-			HeroImageInfo* info = &setup->images[input->image_enum];
-
-			//
-			// if render pass validate extra things
-			if (pass_info->layout_id.raw) {
-				if (input->attachment_idx != HERO_ATTACHMENT_IDX_INVALID && input->attachment_idx >= render_pass_layout->attachments_count) {
-					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_DOES_NOT_EXIST, pass_enum, image_input_enum);
-				}
-				HeroAttachmentLayout* layout = &render_pass_layout->attachments[input->attachment_idx];
-
-				if (layout->format != info->image_format) {
-					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_FORMAT_MISMATCH, pass_enum, image_input_enum);
-				}
-				if (layout->samples_count != (1 << info->samples_count_log2)) {
-					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH, pass_enum, image_input_enum);
-				}
-			}
-
-			if (info->swapchain_id.raw) {
-				_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_CANNOT_BE_SWAPCHAIN, pass_enum, image_input_enum);
-			}
-
-			if (HERO_IMAGE_FORMAT_IS_DEPTH(info->image_format)) {
-				_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT, pass_enum, image_input_enum);
-			}
-		}
-
 		if (input->pass_enum != HERO_PASS_ENUM_INVALID) {
-			if (input->pass_enum >= setup->passes_count) {
+			if (input->pass_enum != HERO_PASS_ENUM_INVALID && input->pass_enum >= setup->passes_count) {
 				_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_ENUM_DOES_NOT_EXIST, pass_enum, image_input_enum);
 			} else {
-				HeroPassInfo* input_pass_info = &setup->passes[input->pass_enum];
-				if (input->pass_image_output_enum >= input_pass_info->image_outputs_count) {
+				U32 count = input->pass_enum == HERO_PASS_ENUM_INVALID ? setup->cpu_image_outputs_count : setup->passes[input->pass_enum].image_outputs_count;
+				if (input->pass_image_output_enum >= count) {
 					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_IMAGE_OUTPUT_ENUM_DOES_NOT_EXIST, pass_enum, image_input_enum);
 				}
 			}
@@ -1622,7 +2772,7 @@ void _hero_render_graph_validate_pass(HeroLogicalDevice* ldev, HeroRenderGraphSe
 	for_range(buffer_output_enum, 0, pass_info->buffer_outputs_count) {
 		HeroBufferOutput* output = &pass_info->buffer_outputs[buffer_output_enum];
 
-		if (output->buffer_enum >= setup->buffers_count) {
+		if (output->buffer_info_enum >= setup->buffers_count) {
 			_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_BUFFER_ENUM_DOES_NOT_EXIST, pass_enum, buffer_output_enum);
 		}
 	}
@@ -1632,91 +2782,13 @@ void _hero_render_graph_validate_pass(HeroLogicalDevice* ldev, HeroRenderGraphSe
 	for_range(buffer_input_enum, 0, pass_info->buffer_inputs_count) {
 		HeroBufferInput* input = &pass_info->buffer_inputs[buffer_input_enum];
 
-		if (input->buffer_enum >= setup->buffers_count) {
-			_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_BUFFER_ENUM_DOES_NOT_EXIST, pass_enum, buffer_input_enum);
-		}
-
 		if (input->pass_enum != HERO_PASS_ENUM_INVALID) {
-			if (input->pass_enum >= setup->passes_count) {
+			if (input->pass_enum != HERO_PASS_ENUM_INVALID && input->pass_enum >= setup->passes_count) {
 				_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_ENUM_DOES_NOT_EXIST, pass_enum, buffer_input_enum);
 			} else {
-				HeroPassInfo* input_pass_info = &setup->passes[input->pass_enum];
-				if (input->pass_buffer_output_enum >= input_pass_info->buffer_outputs_count) {
+				U32 count = input->pass_enum == HERO_PASS_ENUM_INVALID ? setup->cpu_buffer_outputs_count : setup->passes[input->pass_enum].buffer_outputs_count;
+				if (input->pass_buffer_output_enum >= count) {
 					_hero_render_graph_error_2(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_BUFFER_OUTPUT_ENUM_DOES_NOT_EXIST, pass_enum, buffer_input_enum);
-				}
-			}
-		}
-	}
-
-	//
-	// check for image input and output duplicate ids
-	{
-		for_range(output_enum_a, 0, pass_info->image_outputs_count) {
-			for_range(output_enum_b, 0, pass_info->image_outputs_count) {
-				if (output_enum_a != output_enum_b &&
-					pass_info->image_outputs[output_enum_a].image_enum ==
-					pass_info->image_outputs[output_enum_b].image_enum
-				) {
-					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_DUPLICATED_IMAGE, pass_enum, output_enum_a, output_enum_b);
-				}
-			}
-		}
-
-		for_range(input_enum_a, 0, pass_info->image_inputs_count) {
-			for_range(input_enum_b, 0, pass_info->image_inputs_count) {
-				if (input_enum_a != input_enum_b &&
-					pass_info->image_inputs[input_enum_a].image_enum ==
-					pass_info->image_inputs[input_enum_b].image_enum
-				) {
-					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_DUPLICATED_IMAGE, pass_enum, input_enum_a, input_enum_b);
-				}
-			}
-		}
-
-		for_range(output_enum, 0, pass_info->image_outputs_count) {
-			for_range(input_enum, 0, pass_info->image_inputs_count) {
-				if (
-					pass_info->image_outputs[output_enum].image_enum ==
-					pass_info->image_inputs[input_enum].image_enum
-				) {
-					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_USED_AS_INPUT_AND_OUTPUT, pass_enum, input_enum, output_enum);
-				}
-			}
-		}
-	}
-
-	//
-	// check for buffer input and output duplicate ids
-	{
-		for_range(output_enum_a, 0, pass_info->buffer_outputs_count) {
-			for_range(output_enum_b, 0, pass_info->buffer_outputs_count) {
-				if (output_enum_a != output_enum_b &&
-					pass_info->buffer_outputs[output_enum_a].buffer_enum ==
-					pass_info->buffer_outputs[output_enum_b].buffer_enum
-				) {
-					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_DUPLICATED_BUFFER, pass_enum, output_enum_a, output_enum_b);
-				}
-			}
-		}
-
-		for_range(input_enum_a, 0, pass_info->buffer_inputs_count) {
-			for_range(input_enum_b, 0, pass_info->buffer_inputs_count) {
-				if (input_enum_a != input_enum_b &&
-					pass_info->buffer_inputs[input_enum_a].buffer_enum ==
-					pass_info->buffer_inputs[input_enum_b].buffer_enum
-				) {
-					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_DUPLICATED_BUFFER, pass_enum, input_enum_a, input_enum_b);
-				}
-			}
-		}
-
-		for_range(output_enum, 0, pass_info->buffer_outputs_count) {
-			for_range(input_enum, 0, pass_info->buffer_inputs_count) {
-				if (
-					pass_info->buffer_outputs[output_enum].buffer_enum ==
-					pass_info->buffer_inputs[input_enum].buffer_enum
-				) {
-					_hero_render_graph_error_3(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_USED_AS_INPUT_AND_OUTPUT, pass_enum, input_enum, output_enum);
 				}
 			}
 		}
@@ -1730,58 +2802,63 @@ U16 _hero_render_graph_recursively_mark_in_use(HeroLogicalDevice* ldev, HeroRend
 	// mark out images that are outputs and are readback or swapchain that they are being used
 	{
 		for_range(output_idx, 0, pass_info->image_outputs_count) {
-			HeroImageInfo* image_info = &setup->images[pass_info->image_outputs[output_idx].image_enum];
-			if (image_info->swapchain_id.raw || image_info->flags & HERO_IMAGE_INFO_FLAGS_READBACK) {
+			HeroImageOutput* output = &pass_info->image_outputs[output_idx];
+			HeroImageInfo* image_info = &setup->images[output->image_info_enum];
+			if (image_info->swapchain_id.raw || output->flags & HERO_IMAGE_OUTPUT_FLAGS_READBACK) {
+				output->flags |= HERO_IMAGE_OUTPUT_FLAGS_IS_USED;
 				image_info->flags |= HERO_IMAGE_INFO_FLAGS_IS_USED;
 			}
 		}
 		for_range(output_idx, 0, pass_info->buffer_outputs_count) {
-			HeroBufferInfo* buffer_info = &setup->buffers[pass_info->buffer_outputs[output_idx].buffer_enum];
-			if (buffer_info->flags & HERO_BUFFER_INFO_FLAGS_READBACK) {
+			HeroBufferOutput* output = &pass_info->buffer_outputs[output_idx];
+			HeroBufferInfo* buffer_info = &setup->buffers[output->buffer_info_enum];
+			if (output->flags & HERO_BUFFER_OUTPUT_FLAGS_READBACK) {
+				output->flags |= HERO_BUFFER_OUTPUT_FLAGS_IS_USED;
 				buffer_info->flags |= HERO_BUFFER_INFO_FLAGS_IS_USED;
 			}
 		}
 	}
 
 	//
-	// mark out buffers that are inputs that they are being used
-	{
-		for_range(input_idx, 0, pass_info->image_inputs_count) {
-			HeroImageInfo* image_info = &setup->images[pass_info->image_inputs[input_idx].image_enum];
-			image_info->flags |= HERO_IMAGE_INFO_FLAGS_IS_USED;
-		}
-		for_range(input_idx, 0, pass_info->buffer_inputs_count) {
-			HeroBufferInfo* buffer_info = &setup->buffers[pass_info->buffer_inputs[input_idx].buffer_enum];
-			buffer_info->flags |= HERO_BUFFER_INFO_FLAGS_IS_USED;
-		}
-	}
-
+	// now recursively mark the parent nodes with the in use flags.
+	// all find the max_execution_unit_idx of the parents so we can make ours + 1 that one, unless we have no parents.
 	U16 max_execution_unit_idx = 0;
 	bool has_parent_pass = false;
-	for_range(input_idx, 0, pass_info->image_inputs_count) {
-		HeroImageInput* image_input = &pass_info->image_inputs[input_idx];
-		HeroImageInfo* image_info = &setup->images[image_input->image_enum];
+	pass_info->execution_unit_idx = HERO_EXECUTION_UNIT_IDX_INVALID;
+	{
+		for_range(input_idx, 0, pass_info->image_inputs_count) {
+			HeroImageInput* image_input = &pass_info->image_inputs[input_idx];
 
-		if (image_input->pass_enum == HERO_PASS_ENUM_INVALID) {
-			continue;
+			if (image_input->pass_enum == HERO_PASS_ENUM_INVALID) {
+				continue;
+			}
+
+			HeroPassInfo* input_pass_info = &setup->passes[image_input->pass_enum];
+			if (input_pass_info->execution_unit_idx == HERO_EXECUTION_UNIT_IDX_INVALID) {
+				continue; // avoid a circular reference when a parent references a child that is already being processed
+			}
+
+			has_parent_pass = true;
+			U16 parent_execution_unit_idx = _hero_render_graph_recursively_mark_in_use(ldev, setup, input_pass_info);
+			max_execution_unit_idx = HERO_MAX(max_execution_unit_idx, parent_execution_unit_idx);
 		}
 
-		has_parent_pass = true;
-		U16 parent_execution_unit_idx = _hero_render_graph_recursively_mark_in_use(ldev, setup, &setup->passes[image_input->pass_enum]);
-		max_execution_unit_idx = HERO_MAX(max_execution_unit_idx, parent_execution_unit_idx);
-	}
+		for_range(input_idx, 0, pass_info->buffer_inputs_count) {
+			HeroBufferInput* buffer_input = &pass_info->buffer_inputs[input_idx];
 
-	for_range(input_idx, 0, pass_info->buffer_inputs_count) {
-		HeroBufferInput* buffer_input = &pass_info->buffer_inputs[input_idx];
-		HeroBufferInfo* buffer_info = &setup->buffers[buffer_input->buffer_enum];
+			if (buffer_input->pass_enum == HERO_PASS_ENUM_INVALID) {
+				continue;
+			}
 
-		if (buffer_input->pass_enum == HERO_PASS_ENUM_INVALID) {
-			continue;
+			HeroPassInfo* input_pass_info = &setup->passes[buffer_input->pass_enum];
+			if (input_pass_info->execution_unit_idx == HERO_EXECUTION_UNIT_IDX_INVALID) {
+				continue; // avoid a circular reference when a parent references a child that is already being processed
+			}
+
+			has_parent_pass = true;
+			U16 parent_execution_unit_idx = _hero_render_graph_recursively_mark_in_use(ldev, setup, &setup->passes[buffer_input->pass_enum]);
+			max_execution_unit_idx = HERO_MAX(max_execution_unit_idx, parent_execution_unit_idx);
 		}
-
-		has_parent_pass = true;
-		U16 parent_execution_unit_idx = _hero_render_graph_recursively_mark_in_use(ldev, setup, &setup->passes[buffer_input->pass_enum]);
-		max_execution_unit_idx = HERO_MAX(max_execution_unit_idx, parent_execution_unit_idx);
 	}
 
 	if (has_parent_pass) {
@@ -1789,7 +2866,6 @@ U16 _hero_render_graph_recursively_mark_in_use(HeroLogicalDevice* ldev, HeroRend
 	}
 
 	pass_info->execution_unit_idx = max_execution_unit_idx;
-
 	return max_execution_unit_idx;
 }
 
@@ -1800,18 +2876,19 @@ HeroResult hero_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup*
 		return HERO_ERROR(GFX_GRAPH_CANNOT_BE_EMPTY);
 	}
 
-	bool has_swapchain = false;
-	for_range(image_enum_a, 0, setup->images_count) {
-		HeroImageInfo* info_a = &setup->images[image_enum_a];
+	//
+	// ensure a swapchain is only referenced once in the image infos
+	for_range(image_info_enum_a, 0, setup->images_count) {
+		HeroImageInfo* info_a = &setup->images[image_info_enum_a];
 		if (info_a->swapchain_id.raw) {
-			for_range(image_enum_b, 0, setup->images_count) {
-				if (image_enum_a == image_enum_b) {
+			for_range(image_info_enum_b, 0, setup->images_count) {
+				if (image_info_enum_a == image_info_enum_b) {
 					continue;
 				}
 
-				HeroImageInfo* info_b = &setup->images[image_enum_b];
+				HeroImageInfo* info_b = &setup->images[image_info_enum_b];
 				if (info_b->swapchain_id.raw) {
-					if (info_a->swapchain_id.raw == info_b->swapchain_id.raw) {
+					if (info_a->swapchain_id.raw == info_b->swapchain_id.raw && (info_a->flags & HERO_IMAGE_INFO_FLAGS_IS_SWAPCHAIN) && (info_b->flags & HERO_IMAGE_INFO_FLAGS_IS_SWAPCHAIN)) {
 						return HERO_ERROR(GFX_DUPLICATE_SWAPCHAIN_IN_IMAGE_ATTACHMENTS);
 					}
 				}
@@ -1833,8 +2910,9 @@ HeroResult hero_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup*
 		HeroPassInfo* pass_info = &setup->passes[pass_enum];
 		bool has_swapchain_or_readback_output = false;
 		for_range(output_idx, 0, pass_info->image_outputs_count) {
-			HeroImageInfo* image_info = &setup->images[pass_info->image_outputs[output_idx].image_enum];
-			if (image_info->swapchain_id.raw || (image_info->flags & HERO_IMAGE_INFO_FLAGS_READBACK)) {
+			HeroImageOutput* output = &pass_info->image_outputs[output_idx];
+			HeroImageInfo* image_info = &setup->images[output->image_info_enum];
+			if (image_info->swapchain_id.raw || (output->flags & HERO_IMAGE_OUTPUT_FLAGS_READBACK)) {
 				has_swapchain_or_readback_output = true;
 				break;
 			}
@@ -1847,7 +2925,7 @@ HeroResult hero_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup*
 	}
 
 	U16 execution_units_count = max_execution_unit_idx + 1;
-	HeroPassEnum* execution_units_passes = hero_alloc_array(HeroPassEnum, hero_system_alctor, 0, execution_units_count);
+	HeroPassEnum* execution_units_passes = hero_alloc_array(HeroPassEnum, hero_system_alctor, 0, setup->passes_count);
 	HeroRangeU16* execution_units_ranges = hero_alloc_array(HeroRangeU16, hero_system_alctor, 0, execution_units_count);
 	{
 		if (!execution_units_passes || !execution_units_ranges) {
@@ -1876,14 +2954,14 @@ HeroResult hero_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup*
 				_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_PASS_UNUSED, pass_enum);
 			}
 		}
-		for_range(image_enum, 0, setup->images_count) {
-			if (!(setup->images[image_enum].flags & HERO_IMAGE_INFO_FLAGS_IS_USED)) {
-				_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED, image_enum);
+		for_range(image_info_enum, 0, setup->images_count) {
+			if (!(setup->images[image_info_enum].flags & HERO_IMAGE_INFO_FLAGS_IS_USED)) {
+				_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED, image_info_enum);
 			}
 		}
-		for_range(buffer_enum, 0, setup->buffers_count) {
-			if (!(setup->buffers[buffer_enum].flags & HERO_BUFFER_INFO_FLAGS_IS_USED)) {
-				_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED, buffer_enum);
+		for_range(buffer_info_enum, 0, setup->buffers_count) {
+			if (!(setup->buffers[buffer_info_enum].flags & HERO_BUFFER_INFO_FLAGS_IS_USED)) {
+				_hero_render_graph_error_1(setup, HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED, buffer_info_enum);
 			}
 		}
 	}
@@ -1892,6 +2970,41 @@ HeroResult hero_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup*
 		return HERO_ERROR(GENERAL);
 	}
 
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
+	printf("GARGBAGE-===1==-=--=-=-=-==-=-=\n");
 	HeroRenderGraph* render_graph;
 	HeroResult result = hero_gfx_sys.backend_vtable.render_graph_init(ldev, setup, id_out, &render_graph);
 	if (result < 0) {
@@ -1902,12 +3015,17 @@ HeroResult hero_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup*
 	render_graph->images = setup->images;
 	render_graph->buffers = setup->buffers;
 	render_graph->passes = setup->passes;
+	render_graph->cpu_image_outputs = setup->cpu_image_outputs;
+	render_graph->cpu_buffer_outputs = setup->cpu_buffer_outputs;
 	render_graph->images_count = setup->images_count;
 	render_graph->buffers_count = setup->buffers_count;
 	render_graph->passes_count = setup->passes_count;
+	render_graph->cpu_image_outputs_count = setup->cpu_image_outputs_count;
+	render_graph->cpu_buffer_outputs_count = setup->cpu_buffer_outputs_count;
 	render_graph->execution_units_count = execution_units_count;
 	render_graph->execution_units_passes = execution_units_passes;
 	render_graph->execution_units_ranges = execution_units_ranges;
+	exit(0);
 
 	return HERO_SUCCESS;
 }
@@ -1955,7 +3073,7 @@ void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
 			};
 
 			//
-			// enums[0] = HeroImageEnum
+			// enums[0] = HeroImageInfoEnum
 			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_UNUSED: {
 				HeroImageInfo* image_info = &setup->images[e->enums[0]];
 				printf(fmt, image_info->debug_name);
@@ -1963,7 +3081,7 @@ void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
 			};
 
 			//
-			// enums[0] = HeroBufferEnum
+			// enums[0] = HeroBufferInfoEnum
 			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_UNUSED: {
 				HeroBufferInfo* buffer_info = &setup->buffers[e->enums[0]];
 				printf(fmt, buffer_info->debug_name);
@@ -1983,66 +3101,6 @@ void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
 			//
 			// enums[0] = HeroPassEnum
 			// enums[1] = HeroPassImageOutputEnum
-			// enums[2] = HeroPassImageOutputEnum
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_DUPLICATED_IMAGE: {
-				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
-				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
-				break;
-			};
-
-			//
-			// enums[0] = HeroPassEnum
-			// enums[1] = HeroPassImageInputEnum
-			// enums[2] = HeroPassImageInputEnum
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_DUPLICATED_IMAGE: {
-				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
-				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
-				break;
-			};
-
-			//
-			// enums[0] = HeroPassEnum
-			// enums[1] = HeroPassImageInputEnum
-			// enums[2] = HeroPassImageOutputEnum
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_USED_AS_INPUT_AND_OUTPUT: {
-				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
-				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
-				break;
-			};
-
-			//
-			// enums[0] = HeroPassEnum
-			// enums[1] = HeroPassBufferOutputEnum
-			// enums[2] = HeroPassBufferOutputEnum
-			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_OUTPUT_DUPLICATED_BUFFER: {
-				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
-				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
-				break;
-			};
-
-			//
-			// enums[0] = HeroPassEnum
-			// enums[1] = HeroPassBufferInputEnum
-			// enums[2] = HeroPassBufferInputEnum
-			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_DUPLICATED_BUFFER: {
-				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
-				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
-				break;
-			};
-
-			//
-			// enums[0] = HeroPassEnum
-			// enums[1] = HeroPassBufferInputEnum
-			// enums[2] = HeroPassBufferOutputEnum
-			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_USED_AS_INPUT_AND_OUTPUT: {
-				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
-				printf(fmt, pass_info->debug_name, e->enums[1], e->enums[2]);
-				break;
-			};
-
-			//
-			// enums[0] = HeroPassEnum
-			// enums[1] = HeroPassImageOutputEnum
 			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_FORMAT_MISMATCH:
 			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH:
 			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT:
@@ -2051,7 +3109,8 @@ void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
 			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ATTACHMENT_DOES_NOT_EXIST:
 			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_WIDTH_MISMATCH:
 			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_HEIGHT_MISMATCH:
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH: {
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_ARRAY_LAYERS_MISMATCH:
+			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_OUTPUT_SWAPCHAIN_MISMATCH: {
 				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
 				printf(fmt, pass_info->debug_name, e->enums[1]);
 				break;
@@ -2060,13 +3119,6 @@ void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
 			//
 			// enums[0] = HeroPassEnum
 			// enums[1] = HeroPassImageInputEnum
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_FORMAT_MISMATCH:
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_SAMPLES_COUNT_MISMATCH:
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_COLOR_IMAGE_FORMAT_FOR_COLOR_ATTACHMENT:
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_EXPECTED_DEPTH_IMAGE_FORMAT_FOR_DEPTH_ATTACHMENT:
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_IMAGE_ENUM_DOES_NOT_EXIST:
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_ATTACHMENT_DOES_NOT_EXIST:
-			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_CANNOT_BE_SWAPCHAIN:
 			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_ENUM_DOES_NOT_EXIST:
 			case HERO_RENDER_GRAPH_ERROR_TYPE_IMAGE_INPUT_PASS_IMAGE_OUTPUT_ENUM_DOES_NOT_EXIST: {
 				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
@@ -2086,7 +3138,6 @@ void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
 			//
 			// enums[0] = HeroPassEnum
 			// enums[1] = HeroPassBufferInputEnum
-			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_BUFFER_ENUM_DOES_NOT_EXIST:
 			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_ENUM_DOES_NOT_EXIST:
 			case HERO_RENDER_GRAPH_ERROR_TYPE_BUFFER_INPUT_PASS_BUFFER_OUTPUT_ENUM_DOES_NOT_EXIST: {
 				HeroPassInfo* pass_info = &setup->passes[e->enums[0]];
@@ -2100,6 +3151,24 @@ void hero_render_graph_print_errors(HeroRenderGraphSetup* setup) {
 void _hero_render_graph_print_execution_unit_identation(U32 indent_count, FILE* f) {
 	for_range(i, 0, indent_count) {
 		fputs("    ", f);
+	}
+}
+
+HeroImageOutput* _hero_render_graph_get_output_from_input_image(HeroRenderGraph* render_graph, HeroImageInput* input) {
+	if (input->pass_enum == HERO_PASS_ENUM_INVALID) {
+		return &render_graph->cpu_image_outputs[input->pass_image_output_enum];
+	} else {
+		HeroPassInfo* input_pass_info = &render_graph->passes[input->pass_enum];
+		return &input_pass_info->image_outputs[input->pass_image_output_enum];
+	}
+}
+
+HeroBufferOutput* _hero_render_graph_get_output_from_input_buffer(HeroRenderGraph* render_graph, HeroBufferInput* input) {
+	if (input->pass_enum == HERO_PASS_ENUM_INVALID) {
+		return &render_graph->cpu_buffer_outputs[input->pass_buffer_output_enum];
+	} else {
+		HeroPassInfo* input_pass_info = &render_graph->passes[input->pass_enum];
+		return &input_pass_info->buffer_outputs[input->pass_buffer_output_enum];
 	}
 }
 
@@ -2133,24 +3202,26 @@ void hero_render_graph_print_execution_units(HeroLogicalDevice* ldev, HeroRender
 				fputs("┃    ┣ INPUTS\n", f);
 				for_range (image_input_enum, 0, pass_info->image_inputs_count) {
 					HeroImageInput* image_input = &pass_info->image_inputs[image_input_enum];
-					HeroImageInfo* image_info = &render_graph->images[image_input->image_enum];
+					const char* pass_name = image_input->pass_enum == HERO_PASS_ENUM_INVALID ? "CPU" : render_graph->passes[image_input->pass_enum].debug_name;
+					HeroImageOutput* image_output = _hero_render_graph_get_output_from_input_image(render_graph, image_input);
 
 					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
 					if (image_input_enum + 1 == pass_info->image_inputs_count) {
-						fprintf(f, "┃    ┃   ┗ IMAGE %s\n", image_info->debug_name);
+						fprintf(f, "┃    ┃   ┗ PASS.%s.IMAGE.%s\n", pass_name, image_output->debug_name);
 					} else {
-						fprintf(f, "┃    ┃   ┣ IMAGE %s\n", image_info->debug_name);
+						fprintf(f, "┃    ┃   ┣ PASS.%s.IMAGE.%s\n", pass_name, image_output->debug_name);
 					}
 				}
 				for_range (buffer_input_enum, 0, pass_info->buffer_inputs_count) {
 					HeroBufferInput* buffer_input = &pass_info->buffer_inputs[buffer_input_enum];
-					HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_input->buffer_enum];
+					const char* pass_name = buffer_input->pass_enum == HERO_PASS_ENUM_INVALID ? "CPU" : render_graph->passes[buffer_input->pass_enum].debug_name;
+					HeroBufferOutput* buffer_output = _hero_render_graph_get_output_from_input_buffer(render_graph, buffer_input);
 
 					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
 					if (buffer_input_enum + 1 == pass_info->buffer_inputs_count) {
-						fprintf(f, "┃    ┃   ┗ BUFFER %s\n", buffer_info->debug_name);
+						fprintf(f, "┃    ┃   ┗ PASS.%s.BUFFER.%s\n", pass_name, buffer_output->debug_name);
 					} else {
-						fprintf(f, "┃    ┃   ┣ BUFFER %s\n", buffer_info->debug_name);
+						fprintf(f, "┃    ┃   ┣ PASS.%s.BUFFER.%s\n", pass_name, buffer_output->debug_name);
 					}
 				}
 			}
@@ -2160,24 +3231,22 @@ void hero_render_graph_print_execution_units(HeroLogicalDevice* ldev, HeroRender
 				fputs("┃    ┗ OUTPUTS\n", f);
 				for_range (image_output_enum, 0, pass_info->image_outputs_count) {
 					HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
-					HeroImageInfo* image_info = &render_graph->images[image_output->image_enum];
 
 					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
 					if (image_output_enum + 1 == pass_info->image_outputs_count) {
-						fprintf(f, "┃        ┗ IMAGE %s\n", image_info->debug_name);
+						fprintf(f, "┃        ┗ IMAGE %s\n", image_output->debug_name);
 					} else {
-						fprintf(f, "┃        ┣ IMAGE %s\n", image_info->debug_name);
+						fprintf(f, "┃        ┣ IMAGE %s\n", image_output->debug_name);
 					}
 				}
 				for_range (buffer_output_enum, 0, pass_info->buffer_outputs_count) {
 					HeroBufferOutput* buffer_output = &pass_info->buffer_outputs[buffer_output_enum];
-					HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_output->buffer_enum];
 
 					_hero_render_graph_print_execution_unit_identation(execution_unit_idx, f);
 					if (buffer_output_enum + 1 == pass_info->buffer_outputs_count) {
-						fprintf(f, "┃        ┗ BUFFER %s\n", buffer_info->debug_name);
+						fprintf(f, "┃        ┗ BUFFER %s\n", buffer_output->debug_name);
 					} else {
-						fprintf(f, "┃        ┣ BUFFER %s\n", buffer_info->debug_name);
+						fprintf(f, "┃        ┣ BUFFER %s\n", buffer_output->debug_name);
 					}
 				}
 			}
@@ -2203,24 +3272,49 @@ void hero_render_graph_print_graphviz_dot(HeroLogicalDevice* ldev, HeroRenderGra
 	fputs("\t]\n", f);
 	fprintf(f, "\tlabel=\"RenderGraph: %s\"\n", render_graph->debug_name);
 
-	if (0) {
+#if 0
 		fprintf(f, "\tsubgraph cluster_1 {\n");
 		fprintf(f, "\t\tlabel=\"Resources\"\n");
-		for_range(image_enum, 0, render_graph->images_count) {
-			HeroImageInfo* image_info = &render_graph->images[image_enum];
-			fprintf(f, "\t\tIMAGE_%zu [label=\"{IMAGE.%s|{width|%u}|{height|%u}|{array_layers|%u}|{mip_levels|%u}|{samples_count|%u}|{format|%u}|{persistant|%u}|{readback|%u}}\", shape=\"record\"]\n", image_enum, image_info->debug_name, image_info->width, image_info->height, image_info->array_layers_count, image_info->mip_levels_count, (1 << image_info->samples_count_log2), image_info->image_format, !!(image_info->flags & HERO_IMAGE_INFO_FLAGS_PERSISTENT), !!(image_info->flags & HERO_IMAGE_INFO_FLAGS_READBACK));
+		for_range(image_info_enum, 0, render_graph->images_count) {
+			HeroImageInfo* image_info = &render_graph->images[image_info_enum];
+			fprintf(f, "\t\tIMAGE_%zu [label=\"{IMAGE.%s|{width|%u}|{height|%u}|{array_layers|%u}|{mip_levels|%u}|{samples_count|%u}|{format|%u}|{persistent|%u}|{readback|%u}}\", shape=\"record\"]\n", image_info_enum, image_info->debug_name, image_info->width, image_info->height, image_info->array_layers_count, image_info->mip_levels_count, (1 << image_info->samples_count_log2), image_info->format, !!(image_info->flags & HERO_IMAGE_INFO_FLAGS_PERSISTENT), !!(image_info->flags & HERO_IMAGE_INFO_FLAGS_READBACK));
 		}
 
-		for_range(buffer_enum, 0, render_graph->buffers_count) {
-			HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_enum];
-			fprintf(f, "\t\tBUFFER_%zu [label=\"{BUFFER.%s|{size:%lu}|{persistant:%u}|{readback:%u}\", shape=\"record\"]\n", buffer_enum, buffer_info->debug_name, buffer_info->size, !!(buffer_info->flags & HERO_BUFFER_INFO_FLAGS_PERSISTENT), !!(buffer_info->flags & HERO_BUFFER_INFO_FLAGS_READBACK));
+		for_range(buffer_info_enum, 0, render_graph->buffers_count) {
+			HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_info_enum];
+			fprintf(f, "\t\tBUFFER_%zu [label=\"{BUFFER.%s|{size:%lu}|{persistent:%u}|{readback:%u}\", shape=\"record\"]\n", buffer_info_enum, buffer_info->debug_name, buffer_info->size, !!(buffer_info->flags & HERO_BUFFER_INFO_FLAGS_PERSISTENT), !!(buffer_info->flags & HERO_BUFFER_INFO_FLAGS_READBACK));
 		}
 		fprintf(f, "\t}\n");
-	}
+#endif
 
 	{
 		fprintf(f, "\tsubgraph cluster_2 {\n");
 		fprintf(f, "\t\tlabel=\"Graph\"\n");
+
+		for_range(execution_unit_idx, 0, render_graph->execution_units_count) {
+			fprintf(f, "\t\t{ rank=same ");
+			for_range(pass_enum, 0, render_graph->passes_count) {
+				HeroPassInfo* pass_info = &render_graph->passes[pass_enum];
+				if (pass_info->execution_unit_idx == execution_unit_idx) {
+					fprintf(f, "PASS_%zu\n", pass_enum);
+				}
+			}
+			fprintf(f, "}\n");
+		}
+
+		//
+		// CPU outputs
+		{
+			for_range(output_enum, 0, render_graph->cpu_image_outputs_count) {
+				HeroImageOutput* image_output = &render_graph->cpu_image_outputs[output_enum];
+				fprintf(f, "\t\tPASS_%u_IMAGE_OUTPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", HERO_PASS_ENUM_INVALID, output_enum, image_output->debug_name);
+			}
+
+			for_range(output_enum, 0, render_graph->cpu_buffer_outputs_count) {
+				HeroBufferOutput* buffer_output = &render_graph->cpu_buffer_outputs[output_enum];
+				fprintf(f, "\t\tPASS_%u_BUFFER_OUTPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", HERO_PASS_ENUM_INVALID, output_enum, buffer_output->debug_name);
+			}
+		}
 
 		for_range(pass_enum, 0, render_graph->passes_count) {
 			HeroPassInfo* pass_info = &render_graph->passes[pass_enum];
@@ -2228,40 +3322,28 @@ void hero_render_graph_print_graphviz_dot(HeroLogicalDevice* ldev, HeroRenderGra
 
 			for_range(output_enum, 0, pass_info->image_outputs_count) {
 				HeroImageOutput* image_output = &pass_info->image_outputs[output_enum];
-				HeroImageInfo* image_info = &render_graph->images[image_output->image_enum];
-				fprintf(f, "\t\tPASS_%zu_IMAGE_OUTPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", pass_enum, output_enum, image_info->debug_name);
+				fprintf(f, "\t\tPASS_%zu_IMAGE_OUTPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", pass_enum, output_enum, image_output->debug_name);
 				fprintf(f, "\t\tPASS_%zu -> PASS_%zu_IMAGE_OUTPUT_%zu [label=\"%zu\"]\n", pass_enum, pass_enum, output_enum, output_enum);
 			}
 
 			for_range(input_enum, 0, pass_info->image_inputs_count) {
 				HeroImageInput* image_input = &pass_info->image_inputs[input_enum];
-				HeroImageInfo* image_info = &render_graph->images[image_input->image_enum];
-				if (image_input->pass_enum == HERO_PASS_ENUM_INVALID) {
-					fprintf(f, "\t\tPASS_%zu_IMAGE_INPUT_%zu [label=\"IMAGE.%s\", shape=\"box\"]\n", pass_enum, input_enum, image_info->debug_name);
-					fprintf(f, "\t\tPASS_%zu_IMAGE_INPUT_%zu -> PASS_%zu [label=\"%zu\"]\n", pass_enum, input_enum, pass_enum, input_enum);
-				} else {
-					HeroPassInfo* input_pass_info = &render_graph->passes[image_input->pass_enum];
-					fprintf(f, "\t\tPASS_%u_IMAGE_OUTPUT_%u -> PASS_%zu [label=\"%zu\"]\n", image_input->pass_enum, image_input->pass_image_output_enum, pass_enum, input_enum);
-				}
+				U16 input_pass_execution_unit_idx = image_input->pass_enum == HERO_PASS_ENUM_INVALID ? 0 : render_graph->passes[image_input->pass_enum].execution_unit_idx;
+				const char* style = input_pass_execution_unit_idx > pass_info->execution_unit_idx ? ", style=dashed" : "";
+				fprintf(f, "\t\tPASS_%u_IMAGE_OUTPUT_%u -> PASS_%zu [label=\"%zu\"%s]", image_input->pass_enum, image_input->pass_image_output_enum, pass_enum, input_enum, style);
 			}
 
 			for_range(output_enum, 0, pass_info->buffer_outputs_count) {
 				HeroBufferOutput* buffer_output = &pass_info->buffer_outputs[output_enum];
-				HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_output->buffer_enum];
-				fprintf(f, "\t\tPASS_%zu_BUFFER_OUTPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", pass_enum, output_enum, buffer_info->debug_name);
+				fprintf(f, "\t\tPASS_%zu_BUFFER_OUTPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", pass_enum, output_enum, buffer_output->debug_name);
 				fprintf(f, "\t\tPASS_%zu -> PASS_%zu_BUFFER_OUTPUT_%zu [label=\"%zu\"]\n", pass_enum, pass_enum, output_enum, output_enum);
 			}
 
 			for_range(input_enum, 0, pass_info->buffer_inputs_count) {
 				HeroBufferInput* buffer_input = &pass_info->buffer_inputs[input_enum];
-				HeroBufferInfo* buffer_info = &render_graph->buffers[buffer_input->buffer_enum];
-				if (buffer_input->pass_enum == HERO_PASS_ENUM_INVALID) {
-					fprintf(f, "\t\tPASS_%zu_BUFFER_INPUT_%zu [label=\"BUFFER.%s\", shape=\"cylinder\"]\n", pass_enum, input_enum, buffer_info->debug_name);
-					fprintf(f, "\t\tPASS_%zu_BUFFER_INPUT_%zu -> PASS_%zu [label=\"%zu\"]\n", pass_enum, input_enum, pass_enum, input_enum);
-				} else {
-					HeroPassInfo* input_pass_info = &render_graph->passes[buffer_input->pass_enum];
-					fprintf(f, "\t\tPASS_%u_BUFFER_OUTPUT_%u -> PASS_%zu [label=\"%zu\"]\n", buffer_input->pass_enum, buffer_input->pass_buffer_output_enum, pass_enum, input_enum);
-				}
+				U16 input_pass_execution_unit_idx = buffer_input->pass_enum == HERO_PASS_ENUM_INVALID ? 0 : render_graph->passes[buffer_input->pass_enum].execution_unit_idx;
+				const char* style = input_pass_execution_unit_idx > pass_info->execution_unit_idx ? ", style=dashed" : "";
+				fprintf(f, "\t\tPASS_%u_BUFFER_OUTPUT_%u -> PASS_%zu [label=\"%zu\"%s]", buffer_input->pass_enum, buffer_input->pass_buffer_output_enum, pass_enum, input_enum, style);
 			}
 		}
 		fprintf(f, "\t}\n");
@@ -2288,6 +3370,7 @@ void hero_render_graph_print_graphviz_dot(HeroLogicalDevice* ldev, HeroRenderGra
 
 	fprintf(f, "}\n");
 }
+#endif
 
 // ===========================================
 //
@@ -4012,7 +5095,7 @@ HeroResult _hero_vulkan_init(HeroGfxSysSetup* setup) {
 			.applicationVersion = VK_MAKE_API_VERSION(0, HERO_VERSION_MAJOR, HERO_VERSION_MINOR, HERO_VERSION_PATCH),
 			.pEngineName = HERO_ENGINE_NAME,
 			.engineVersion = VK_MAKE_API_VERSION(0, HERO_VERSION_MAJOR, HERO_VERSION_MINOR, HERO_VERSION_PATCH),
-			.apiVersion = VK_MAKE_API_VERSION(0, 1, 1, 0),
+			.apiVersion = VK_MAKE_API_VERSION(0, 1, 2, 0),
 		};
 
 		VkInstanceCreateInfo create_info = {
@@ -4229,9 +5312,20 @@ HeroResult _hero_vulkan_logical_device_init(HeroPhysicalDevice* physical_device,
 		}
 	}
 
+	VkPhysicalDeviceBufferDeviceAddressFeatures buffer_device_address_features = {0};
+	buffer_device_address_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES;
+	buffer_device_address_features.bufferDeviceAddress = VK_TRUE;
+
+	VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing_features = {0};
+	descriptor_indexing_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+	descriptor_indexing_features.pNext = &buffer_device_address_features;
+    descriptor_indexing_features.shaderInputAttachmentArrayDynamicIndexing = VK_TRUE;
+    descriptor_indexing_features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
+    descriptor_indexing_features.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
+
 	VkDeviceCreateInfo create_info = {
 		.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO,
-		.pNext = NULL,
+		.pNext = &descriptor_indexing_features,
 		.flags = 0,
 		.pQueueCreateInfos = queue_create_infos,
 		.queueCreateInfoCount = queues_count,
@@ -4370,10 +5464,12 @@ HeroResult _hero_vulkan_logical_device_init(HeroPhysicalDevice* physical_device,
 	if (result < 0) {
 		return result;
 	}
+	/*
 	result = hero_object_pool(HeroCommandPoolVulkan, init)(&ldev_vulkan->command_pool_pool, setup->command_pools_cap, hero_system_alctor, HERO_GFX_ALLOC_TAG_COMMAND_POOL_POOL);
 	if (result < 0) {
 		return result;
 	}
+	*/
 	result = hero_object_pool(HeroRenderGraphVulkan, init)(&ldev_vulkan->render_graph_pool, setup->render_graphs_cap, hero_system_alctor, HERO_GFX_ALLOC_TAG_RENDER_GRAPH_POOL);
 	if (result < 0) {
 		return result;
@@ -4422,12 +5518,24 @@ HeroResult _hero_vulkan_logical_device_init(HeroPhysicalDevice* physical_device,
 			vk_image_create_info.extent.depth = 1;
 			vk_image_create_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
 			vk_image_create_info.format = VK_FORMAT_R8_UNORM;
-			vk_image_create_info.imageType = VK_IMAGE_TYPE_2D;
 			vk_image_create_info.samples = 1;
 			vk_image_create_info.mipLevels = 1;
 			vk_image_create_info.arrayLayers = 1;
 
+			vk_image_create_info.imageType = VK_IMAGE_TYPE_1D;
+			vk_result = ldev_vulkan->vkCreateImage(ldev_vulkan->handle, &vk_image_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_image_1d);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+
+			vk_image_create_info.imageType = VK_IMAGE_TYPE_2D;
 			vk_result = ldev_vulkan->vkCreateImage(ldev_vulkan->handle, &vk_image_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_image_2d);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+
+			vk_image_create_info.imageType = VK_IMAGE_TYPE_3D;
+			vk_result = ldev_vulkan->vkCreateImage(ldev_vulkan->handle, &vk_image_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_image_3d);
 			if (vk_result < 0) {
 				return _hero_vulkan_convert_from_result(vk_result);
 			}
@@ -4452,7 +5560,17 @@ HeroResult _hero_vulkan_logical_device_init(HeroPhysicalDevice* physical_device,
 			}
 
 			VkDeviceSize vk_device_memory_offset = 0;
+			vk_result = ldev_vulkan->vkBindImageMemory(ldev_vulkan->handle, ldev_vulkan->null_image_1d, vk_device_memory, vk_device_memory_offset);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+
 			vk_result = ldev_vulkan->vkBindImageMemory(ldev_vulkan->handle, ldev_vulkan->null_image_2d, vk_device_memory, vk_device_memory_offset);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+
+			vk_result = ldev_vulkan->vkBindImageMemory(ldev_vulkan->handle, ldev_vulkan->null_image_3d, vk_device_memory, vk_device_memory_offset);
 			if (vk_result < 0) {
 				return _hero_vulkan_convert_from_result(vk_result);
 			}
@@ -4460,9 +5578,7 @@ HeroResult _hero_vulkan_logical_device_init(HeroPhysicalDevice* physical_device,
 
 			VkImageViewCreateInfo vk_image_view_create_info = {0};
 			vk_image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-			vk_image_view_create_info.image = ldev_vulkan->null_image_2d;
 			vk_image_view_create_info.format = VK_FORMAT_R8_UNORM;
-			vk_image_view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
 			vk_image_view_create_info.components.r = VK_COMPONENT_SWIZZLE_R;
 			vk_image_view_create_info.components.g = VK_COMPONENT_SWIZZLE_G;
 			vk_image_view_create_info.components.b = VK_COMPONENT_SWIZZLE_B;
@@ -4471,7 +5587,21 @@ HeroResult _hero_vulkan_logical_device_init(HeroPhysicalDevice* physical_device,
 			vk_image_view_create_info.subresourceRange.levelCount = 1;
 			vk_image_view_create_info.subresourceRange.layerCount = 1;
 
+			vk_image_view_create_info.image = ldev_vulkan->null_image_1d;
+			vk_image_view_create_info.viewType = VK_IMAGE_VIEW_TYPE_1D;
+			vk_result = ldev_vulkan->vkCreateImageView(ldev_vulkan->handle, &vk_image_view_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_image_view_1d);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+			vk_image_view_create_info.image = ldev_vulkan->null_image_2d;
+			vk_image_view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
 			vk_result = ldev_vulkan->vkCreateImageView(ldev_vulkan->handle, &vk_image_view_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_image_view_2d);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+			vk_image_view_create_info.image = ldev_vulkan->null_image_3d;
+			vk_image_view_create_info.viewType = VK_IMAGE_VIEW_TYPE_3D;
+			vk_result = ldev_vulkan->vkCreateImageView(ldev_vulkan->handle, &vk_image_view_create_info, HERO_VULKAN_TODO_ALLOCATOR, &ldev_vulkan->null_image_view_3d);
 			if (vk_result < 0) {
 				return _hero_vulkan_convert_from_result(vk_result);
 			}
@@ -4527,7 +5657,10 @@ HeroResult _hero_vulkan_logical_device_deinit(HeroLogicalDevice* ldev) {
 }
 
 HeroResult _hero_vulkan_descriptor_pool_free_used_resources(HeroLogicalDevice* ldev, HeroDescriptorPoolVulkan* descriptor_pool_vulkan);
+
+/*
 HeroResult _hero_vulkan_command_pool_free_used_resources(HeroLogicalDevice* ldev, HeroCommandPoolVulkan* command_pool_vulkan);
+*/
 
 HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev) {
 	HeroResult result;
@@ -4545,6 +5678,7 @@ HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev) {
 		_HeroGfxSubmitVulkan* submit = hero_stack(_HeroGfxSubmitVulkan, get)(&ldev_vulkan->submits, 0);
 		vk_result = ldev_vulkan->vkGetFenceStatus(ldev_vulkan->handle, submit->fence_render);
 		if (vk_result == VK_SUCCESS) {
+			/*
 			HeroCommandPoolId command_pool_id = {0};
 			HeroCommandPoolVulkan* command_pool_vulkan;
 			while (hero_object_pool(HeroCommandPoolVulkan, iter_next)(&ldev_vulkan->command_pool_pool, &command_pool_id, &command_pool_vulkan) != HERO_SUCCESS_FINISHED) {
@@ -4553,6 +5687,7 @@ HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev) {
 					return result;
 				}
 			}
+			*/
 
 			HeroDescriptorPoolId descriptor_pool_id = {0};
 			HeroDescriptorPoolVulkan* descriptor_pool_vulkan;
@@ -4564,32 +5699,58 @@ HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev) {
 			}
 
 			{
-				U32 count = 0;
-				for_range(i, 0, ldev_vulkan->command_pools_to_deallocate.count) {
-					VkCommandPool vk_command_pool = ldev_vulkan->command_pools_to_deallocate.data[i];
-					if (vk_command_pool == VK_NULL_HANDLE) {
+				U32 idx = 0;
+				while (idx < ldev_vulkan->objects_to_deallocate.count) {
+					HeroVulkanObjectDealloc* dealloc = &ldev_vulkan->objects_to_deallocate.data[idx];
+					if (dealloc->image == VK_NULL_HANDLE) {
+						idx += 1; // add 1 to remove this null entry from the array
 						break;
 					}
 
-					ldev_vulkan->vkDestroyCommandPool(ldev_vulkan->handle, vk_command_pool, HERO_VULKAN_TODO_ALLOCATOR);
-				}
+					HERO_DEBUG_ASSERT(dealloc->header & HERO_VULKAN_OBJECT_DEALLOC_IS_HEADER, "expected deallocation to start with the header");
 
-				hero_stack(VkCommandPool, remove_shift_range)(&ldev_vulkan->command_pools_to_deallocate, 0, count);
-			}
+					U32 entries_count = HERO_VULKAN_OBJECT_DEALLOC_HEADER_ENTRIES_COUNT(*dealloc);
+					U32 objects_count = entries_count - 1; // minus 1 for the header itself
+					switch (HERO_VULKAN_OBJECT_DEALLOC_HEADER_OBJECT_TYPE(*dealloc)) {
+						case VK_OBJECT_TYPE_IMAGE:
+							for_range(i, 0, objects_count) {
+								ldev_vulkan->vkDestroyImage(ldev_vulkan->handle, dealloc[i].image, HERO_VULKAN_TODO_ALLOCATOR);
 
-			{
-				U32 count = 0;
-				for_range(i, 0, ldev_vulkan->descriptor_pools_to_deallocate.count) {
-					count += 1;
-					VkDescriptorPool vk_descriptor_pool = ldev_vulkan->descriptor_pools_to_deallocate.data[i];
-					if (vk_descriptor_pool == VK_NULL_HANDLE) {
-						break;
+								i += 1;
+								ldev_vulkan->vkDestroyImageView(ldev_vulkan->handle, dealloc[i].image_view, HERO_VULKAN_TODO_ALLOCATOR);
+							}
+							break;
+						case VK_OBJECT_TYPE_BUFFER:
+							for_range(i, 0, objects_count) {
+								ldev_vulkan->vkDestroyBuffer(ldev_vulkan->handle, dealloc[i].buffer, HERO_VULKAN_TODO_ALLOCATOR);
+							}
+							break;
+						case VK_OBJECT_TYPE_DESCRIPTOR_POOL:
+							for_range(i, 0, objects_count) {
+								ldev_vulkan->vkDestroyDescriptorPool(ldev_vulkan->handle, dealloc[i].descriptor_pool, HERO_VULKAN_TODO_ALLOCATOR);
+							}
+							break;
+						case VK_OBJECT_TYPE_COMMAND_POOL:
+							for_range(i, 0, objects_count) {
+								ldev_vulkan->vkDestroyCommandPool(ldev_vulkan->handle, dealloc[i].command_pool, HERO_VULKAN_TODO_ALLOCATOR);
+							}
+							break;
+						case VK_OBJECT_TYPE_RENDER_PASS:
+							for_range(i, 0, objects_count) {
+								ldev_vulkan->vkDestroyRenderPass(ldev_vulkan->handle, dealloc[i].render_pass, HERO_VULKAN_TODO_ALLOCATOR);
+							}
+							break;
+						case VK_OBJECT_TYPE_FRAMEBUFFER:
+							for_range(i, 0, objects_count) {
+								ldev_vulkan->vkDestroyFramebuffer(ldev_vulkan->handle, dealloc[i].frame_buffer, HERO_VULKAN_TODO_ALLOCATOR);
+							}
+							break;
 					}
 
-					ldev_vulkan->vkDestroyDescriptorPool(ldev_vulkan->handle, vk_descriptor_pool, HERO_VULKAN_TODO_ALLOCATOR);
+					idx += entries_count;
 				}
 
-				hero_stack(VkDescriptorPool, remove_shift_range)(&ldev_vulkan->descriptor_pools_to_deallocate, 0, count);
+				hero_stack(HeroVulkanObjectDealloc, remove_shift_range)(&ldev_vulkan->objects_to_deallocate, 0, idx);
 			}
 
 			{
@@ -4667,6 +5828,7 @@ HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev) {
 	//
 	// push on a VK_NULL_HANDLE to seperate the previous frame resources from this frame's resources
 	{
+		/*
 		HeroCommandPoolId command_pool_id = {0};
 		HeroCommandPoolVulkan* command_pool_vulkan;
 		while (hero_object_pool(HeroCommandPoolVulkan, iter_next)(&ldev_vulkan->command_pool_pool, &command_pool_id, &command_pool_vulkan) != HERO_SUCCESS_FINISHED) {
@@ -4678,6 +5840,7 @@ HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev) {
 				}
 			}
 		}
+		*/
 
 		HeroDescriptorPoolId descriptor_pool_id = {0};
 		HeroDescriptorPoolVulkan* descriptor_pool_vulkan;
@@ -4694,21 +5857,16 @@ HeroResult _hero_vulkan_logical_device_frame_start(HeroLogicalDevice* ldev) {
 			}
 		}
 
-		if (ldev_vulkan->command_pools_to_deallocate.count) {
-			result = hero_stack(VkCommandPool, push_value)(&ldev_vulkan->command_pools_to_deallocate, hero_system_alctor, HERO_GFX_ALLOC_TAG_LOGICAL_DEVICE_VULKAN_COMMAND_POOLS_TO_DEALLOCATE, VK_NULL_HANDLE);
+		//
+		// if we have objects to deallocate, push on a null entry to seperate the frame.
+		if (ldev_vulkan->objects_to_deallocate.count) {
+			result = hero_stack(HeroVulkanObjectDealloc, push_value)(&ldev_vulkan->objects_to_deallocate, hero_system_alctor, HERO_GFX_ALLOC_TAG_LOGICAL_DEVICE_VULKAN_OBJECTS_TO_DEALLOCATE, ((HeroVulkanObjectDealloc) { .image = VK_NULL_HANDLE }));
 
 			if (result < 0) {
 				return result;
 			}
 		}
-
-		if (ldev_vulkan->descriptor_pools_to_deallocate.count) {
-			result = hero_stack(VkDescriptorPool, push_value)(&ldev_vulkan->descriptor_pools_to_deallocate, hero_system_alctor, HERO_GFX_ALLOC_TAG_LOGICAL_DEVICE_VULKAN_DESCRIPTOR_POOLS_TO_DEALLOCATE, VK_NULL_HANDLE);
-
-			if (result < 0) {
-				return result;
-			}
-		}
+		ldev_vulkan->objects_to_deallocate_prev_object_type = VK_OBJECT_TYPE_UNKNOWN;
 
 		{
 			_HeroGfxStagingBufferSysVulkan* sys = &ldev_vulkan->staging_buffer_sys;
@@ -4920,6 +6078,7 @@ HeroResult _hero_vulkan_logical_device_queue_transfer(HeroLogicalDevice* ldev) {
 	return HERO_SUCCESS;
 }
 
+/*
 HeroResult _hero_vulkan_logical_device_queue_command_buffers(HeroLogicalDevice* ldev, HeroCommandPoolId command_pool_id, HeroCommandPoolBufferId* command_pool_buffer_ids, U32 command_pool_buffers_count) {
 	HeroResult result;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
@@ -4959,6 +6118,7 @@ HeroResult _hero_vulkan_logical_device_queue_command_buffers(HeroLogicalDevice* 
 
 	return HERO_SUCCESS;
 }
+*/
 
 HeroResult _hero_vulkan_logical_device_submit(HeroLogicalDevice* ldev, HeroSwapchainId* swapchain_ids, U32 swapchains_count) {
 	HeroResult result;
@@ -5071,6 +6231,41 @@ HeroResult _hero_vulkan_logical_device_submit(HeroLogicalDevice* ldev, HeroSwapc
 	submit->fence_render = vk_fence;
 
 	ldev->last_submitted_frame_idx += 1;
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_dealloc_object_once_next_frame_has_executed(HeroLogicalDeviceVulkan* ldev_vulkan, VkObjectType object_type, U32 count, HeroVulkanObjectDealloc** out) {
+	VkObjectType objects_to_deallocate_prev_object_type = ldev_vulkan->objects_to_deallocate_prev_object_type;
+
+	// if we are an image, make enough room to have an image view be store after every image
+	count *= (object_type == VK_OBJECT_TYPE_IMAGE) * 2;
+
+	// add another count for the header if this is a different type from the last
+	count += objects_to_deallocate_prev_object_type == VK_OBJECT_TYPE_UNKNOWN;
+
+	HeroVulkanObjectDealloc* deallocs;
+	HeroResult result = hero_stack(HeroVulkanObjectDealloc, push_many)(&ldev_vulkan->objects_to_deallocate, count, hero_system_alctor, HERO_GFX_ALLOC_TAG_LOGICAL_DEVICE_VULKAN_OBJECTS_TO_DEALLOCATE, &deallocs);
+	if (result < 0) {
+		return result;
+	}
+
+	if (objects_to_deallocate_prev_object_type != VK_OBJECT_TYPE_UNKNOWN) {
+		//
+		// here we are adding objects of the same type
+		HeroVulkanObjectDealloc* existing_header = &ldev_vulkan->objects_to_deallocate.data[ldev_vulkan->objects_to_deallocate_prev_idx];
+		U32 existing_count = HERO_VULKAN_OBJECT_DEALLOC_HEADER_ENTRIES_COUNT(*existing_header);
+		existing_header->header = HERO_VULKAN_OBJECT_DEALLOC_HEADER(object_type, existing_count + count);
+		*out = &deallocs[0];
+	} else {
+		//
+		// new type so setup the new header
+		deallocs[0].header = HERO_VULKAN_OBJECT_DEALLOC_HEADER(object_type, count);
+		*out = &deallocs[1];
+	}
+
+	ldev_vulkan->objects_to_deallocate_prev_idx = deallocs - ldev_vulkan->objects_to_deallocate.data;
+	ldev_vulkan->objects_to_deallocate_prev_object_type = object_type;
+
 	return HERO_SUCCESS;
 }
 
@@ -5213,7 +6408,7 @@ HeroResult _hero_vulkan_stage_buffer_update(HeroLogicalDeviceVulkan* ldev_vulkan
 
 HeroResult _hero_vulkan_vertex_layout_register(HeroVertexLayout* vl, HeroVertexLayoutId* id_out, HeroVertexLayout** out) {
 	HeroVertexLayoutVulkan* vertex_layout_vulkan;
-	HeroResult result = hero_object_pool(HeroVertexLayoutVulkan, alloc)(&hero_gfx_sys_vulkan.vertex_layout_pool, &vertex_layout_vulkan, id_out);
+	HeroResult result = hero_object_pool(HeroVertexLayoutVulkan, alloc)(&hero_gfx_sys_vulkan.vertex_layout_pool, 0, &vertex_layout_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -5396,7 +6591,7 @@ HeroResult _hero_vulkan_buffer_init(HeroLogicalDevice* ldev, HeroBufferSetup* se
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
 
 	HeroBufferVulkan* buffer_vulkan;
-	result = hero_object_pool(HeroBufferVulkan, alloc)(&ldev_vulkan->buffer_pool, &buffer_vulkan, id_out);
+	result = hero_object_pool(HeroBufferVulkan, alloc)(&ldev_vulkan->buffer_pool, 0, &buffer_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -5645,7 +6840,7 @@ HeroResult _hero_vulkan_image_init(HeroLogicalDevice* ldev, HeroImageSetup* setu
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
 
 	HeroImageVulkan* image_vulkan;
-	result = hero_object_pool(HeroImageVulkan, alloc)(&ldev_vulkan->image_pool, &image_vulkan, id_out);
+	result = hero_object_pool(HeroImageVulkan, alloc)(&ldev_vulkan->image_pool, 0, &image_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -5749,7 +6944,7 @@ HeroResult _hero_vulkan_sampler_init(HeroLogicalDevice* ldev, HeroSamplerSetup* 
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
 
 	HeroSamplerVulkan* sampler_vulkan;
-	result = hero_object_pool(HeroSamplerVulkan, alloc)(&ldev_vulkan->sampler_pool, &sampler_vulkan, id_out);
+	result = hero_object_pool(HeroSamplerVulkan, alloc)(&ldev_vulkan->sampler_pool, 0, &sampler_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -5838,7 +7033,7 @@ HeroResult _hero_vulkan_shader_module_init(HeroLogicalDevice* ldev, HeroShaderMo
 	}
 
 	HeroShaderModuleVulkan* shader_module_vulkan;
-	result = hero_object_pool(HeroShaderModuleVulkan, alloc)(&ldev_vulkan->shader_module_pool, &shader_module_vulkan, id_out);
+	result = hero_object_pool(HeroShaderModuleVulkan, alloc)(&ldev_vulkan->shader_module_pool, 0, &shader_module_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -6178,7 +7373,7 @@ HeroResult _hero_vulkan_shader_init(HeroLogicalDevice* ldev, HeroShaderSetup* se
 	}
 
 	HeroShaderVulkan* shader_vulkan;
-	result = hero_object_pool(HeroShaderVulkan, alloc)(&ldev_vulkan->shader_pool, &shader_vulkan, id_out);
+	result = hero_object_pool(HeroShaderVulkan, alloc)(&ldev_vulkan->shader_pool, 0, &shader_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -6301,7 +7496,7 @@ HeroResult _hero_vulkan_descriptor_pool_init(HeroLogicalDevice* ldev, HeroDescri
 	}
 
 	HeroDescriptorPoolVulkan* descriptor_pool_vulkan;
-	result = hero_object_pool(HeroDescriptorPoolVulkan, alloc)(&ldev_vulkan->descriptor_pool_pool, &descriptor_pool_vulkan, id_out);
+	result = hero_object_pool(HeroDescriptorPoolVulkan, alloc)(&ldev_vulkan->descriptor_pool_pool, 0, &descriptor_pool_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -6327,12 +7522,12 @@ HeroResult _hero_vulkan_descriptor_pool_reset_now(HeroLogicalDeviceVulkan* ldev_
 
 		hero_dealloc_array(U32, hero_system_alctor, HERO_GFX_ALLOC_TAG_DESCRIPTOR_POOL_VULKAN_POOL_FREE_COUNTS, pool->layout_free_counts, descriptor_pool_vulkan->layouts_count);
 
-		//
-		// push the VkDescriptorPool on this array to be freed once the next frame has finish executing
-		result = hero_stack(VkDescriptorPool, push_value)(&ldev_vulkan->descriptor_pools_to_deallocate, hero_system_alctor, HERO_GFX_ALLOC_TAG_LOGICAL_DEVICE_VULKAN_DESCRIPTOR_POOLS_TO_DEALLOCATE, pool->handle);
+		HeroVulkanObjectDealloc* dealloc;
+		result = _hero_vulkan_dealloc_object_once_next_frame_has_executed(ldev_vulkan, VK_OBJECT_TYPE_DESCRIPTOR_POOL, 1, &dealloc);
 		if (result < 0) {
 			return result;
 		}
+		dealloc->descriptor_pool = pool->handle;
 	}
 	descriptor_pool_vulkan->pools.count = 0;
 
@@ -6787,7 +7982,7 @@ HeroResult _hero_vulkan_shader_globals_init(HeroLogicalDevice* ldev, HeroShaderG
 	}
 
 	HeroShaderGlobalsVulkan* shader_globals_vulkan;
-	result = hero_object_pool(HeroShaderGlobalsVulkan, alloc)(&ldev_vulkan->shader_globals_pool, &shader_globals_vulkan, id_out);
+	result = hero_object_pool(HeroShaderGlobalsVulkan, alloc)(&ldev_vulkan->shader_globals_pool, 0, &shader_globals_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -7002,7 +8197,7 @@ HeroResult _hero_vulkan_render_pass_layout_init(HeroLogicalDevice* ldev, HeroRen
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
 
 	HeroRenderPassLayoutVulkan* render_pass_layout_vulkan;
-	result = hero_object_pool(HeroRenderPassLayoutVulkan, alloc)(&ldev_vulkan->render_pass_layout_pool, &render_pass_layout_vulkan, id_out);
+	result = hero_object_pool(HeroRenderPassLayoutVulkan, alloc)(&ldev_vulkan->render_pass_layout_pool, 0, &render_pass_layout_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -7057,7 +8252,7 @@ HeroResult _hero_vulkan_render_pass_init(HeroLogicalDevice* ldev, HeroRenderPass
 	}
 
 	HeroRenderPassVulkan* render_pass_vulkan;
-	result = hero_object_pool(HeroRenderPassVulkan, alloc)(&ldev_vulkan->render_pass_pool, &render_pass_vulkan, id_out);
+	result = hero_object_pool(HeroRenderPassVulkan, alloc)(&ldev_vulkan->render_pass_pool, 0, &render_pass_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -7137,7 +8332,7 @@ HeroResult _hero_vulkan_frame_buffer_init(HeroLogicalDevice* ldev, HeroFrameBuff
 	}
 
 	HeroFrameBufferVulkan* frame_buffer_vulkan;
-	result = hero_object_pool(HeroFrameBufferVulkan, alloc)(&ldev_vulkan->frame_buffer_pool, &frame_buffer_vulkan, id_out);
+	result = hero_object_pool(HeroFrameBufferVulkan, alloc)(&ldev_vulkan->frame_buffer_pool, 0, &frame_buffer_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -7194,7 +8389,7 @@ HeroResult _hero_vulkan_pipeline_cache_init(HeroLogicalDevice* ldev, HeroPipelin
 	}
 
 	HeroPipelineCacheVulkan* pipeline_cache_vulkan;
-	result = hero_object_pool(HeroPipelineCacheVulkan, alloc)(&ldev_vulkan->pipeline_cache_pool, &pipeline_cache_vulkan, id_out);
+	result = hero_object_pool(HeroPipelineCacheVulkan, alloc)(&ldev_vulkan->pipeline_cache_pool, 0, &pipeline_cache_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -7491,7 +8686,7 @@ VK_PIPELINE_INIT_SHADER_END: {}
 	}
 
 	HeroPipelineVulkan* pipeline_vulkan;
-	result = hero_object_pool(HeroPipelineVulkan, alloc)(&ldev_vulkan->pipeline_pool, &pipeline_vulkan, id_out);
+	result = hero_object_pool(HeroPipelineVulkan, alloc)(&ldev_vulkan->pipeline_pool, 0, &pipeline_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -7565,7 +8760,7 @@ HeroResult _hero_vulkan_material_init(HeroLogicalDevice* ldev, HeroMaterialSetup
 	}
 
 	HeroMaterialVulkan* material_vulkan;
-	result = hero_object_pool(HeroMaterialVulkan, alloc)(&ldev_vulkan->material_pool, &material_vulkan, id_out);
+	result = hero_object_pool(HeroMaterialVulkan, alloc)(&ldev_vulkan->material_pool, 0, &material_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -7868,7 +9063,7 @@ HeroResult _hero_vulkan_swapchain_reinit(HeroLogicalDevice* ldev, HeroSwapchainV
 
 		HeroImageId image_id;
 		HeroImageVulkan* image_vulkan;
-		result = hero_object_pool(HeroImageVulkan, alloc)(&ldev_vulkan->image_pool, &image_vulkan, &image_id);
+		result = hero_object_pool(HeroImageVulkan, alloc)(&ldev_vulkan->image_pool, 0, &image_vulkan, &image_id);
 		if (result < 0) {
 			return result;
 		}
@@ -7907,7 +9102,7 @@ HeroResult _hero_vulkan_swapchain_init(HeroLogicalDevice* ldev, HeroSwapchainSet
 	}
 
 	HeroSwapchainVulkan* swapchain_vulkan;
-	result = hero_object_pool(HeroSwapchainVulkan, alloc)(&ldev_vulkan->swapchain_pool, &swapchain_vulkan, id_out);
+	result = hero_object_pool(HeroSwapchainVulkan, alloc)(&ldev_vulkan->swapchain_pool, 0, &swapchain_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -7993,26 +9188,29 @@ HeroResult _hero_vulkan_swapchain_next_image(HeroLogicalDevice* ldev, HeroSwapch
 		*next_image_idx_out = image_idx;
 	}
 
+	swapchain->has_been_resized = has_created_new_swapchain;
 	return has_created_new_swapchain ? HERO_SUCCESS_IS_NEW : HERO_SUCCESS;
 }
 
+/*
 HeroResult _hero_vulkan_command_pool_reset_now(HeroLogicalDeviceVulkan* ldev_vulkan, HeroCommandPoolVulkan* command_pool_vulkan) {
 	HeroResult result;
 
-	//
-	// push the VkCommandPool on this array to be freed once the next frame has finish executing
-	result = hero_stack(VkCommandPool, push_value)(&ldev_vulkan->command_pools_to_deallocate, hero_system_alctor, HERO_GFX_ALLOC_TAG_LOGICAL_DEVICE_VULKAN_COMMAND_POOLS_TO_DEALLOCATE, command_pool_vulkan->command_pool);
+	HeroVulkanObjectDealloc* dealloc;
+	result = _hero_vulkan_dealloc_object_once_next_frame_has_executed(ldev_vulkan, VK_OBJECT_TYPE_COMMAND_POOL, 1, &dealloc);
 	if (result < 0) {
 		return result;
 	}
+	dealloc->command_pool = command_pool_vulkan->command_pool;
 
 	//
 	// push the static VkCommandPool on this array to be freed once the next frame has finish executing
 	if (command_pool_vulkan->command_pool_static != VK_NULL_HANDLE) {
-		result = hero_stack(VkCommandPool, push_value)(&ldev_vulkan->command_pools_to_deallocate, hero_system_alctor, HERO_GFX_ALLOC_TAG_LOGICAL_DEVICE_VULKAN_COMMAND_POOLS_TO_DEALLOCATE, command_pool_vulkan->command_pool_static);
+		result = _hero_vulkan_dealloc_object_once_next_frame_has_executed(ldev_vulkan, VK_OBJECT_TYPE_COMMAND_POOL, 1, &dealloc);
 		if (result < 0) {
 			return result;
 		}
+		dealloc->command_pool = command_pool_vulkan->command_pool_static;
 	}
 
 	//
@@ -8054,7 +9252,7 @@ HeroResult _hero_vulkan_command_pool_init(HeroLogicalDevice* ldev, HeroCommandPo
 	}
 
 	HeroCommandPoolVulkan* command_pool_vulkan;
-	result = hero_object_pool(HeroCommandPoolVulkan, alloc)(&ldev_vulkan->command_pool_pool, &command_pool_vulkan, id_out);
+	result = hero_object_pool(HeroCommandPoolVulkan, alloc)(&ldev_vulkan->command_pool_pool, 0, &command_pool_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -8313,7 +9511,7 @@ HeroResult _hero_vulkan_command_recorder_end(HeroCommandRecorder* command_record
 
 	HeroCommandPoolBufferId command_pool_buffer_id;
 	HeroCommandPoolBufferVulkan* command_pool_buffer_vulkan;
-	result = hero_object_pool(HeroCommandPoolBufferVulkan, alloc)(&command_pool_vulkan->command_buffer_pool, &command_pool_buffer_vulkan, &command_pool_buffer_id);
+	result = hero_object_pool(HeroCommandPoolBufferVulkan, alloc)(&command_pool_vulkan->command_buffer_pool, 0, &command_pool_buffer_vulkan, &command_pool_buffer_id);
 	if (result < 0) {
 		return result;
 	}
@@ -8709,31 +9907,2271 @@ HeroResult _hero_vulkan_cmd_compute_dispatch(HeroCommandRecorder* command_record
 
 	return HERO_SUCCESS;
 }
+*/
 
 HeroResult _hero_vulkan_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroRenderGraphId* id_out, HeroRenderGraph** out) {
 	HeroResult result;
 	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
 
 	HeroRenderGraphVulkan* render_graph_vulkan;
-	result = hero_object_pool(HeroRenderGraphVulkan, alloc)(&ldev_vulkan->render_graph_pool, &render_graph_vulkan, id_out);
+	result = hero_object_pool(HeroRenderGraphVulkan, alloc)(&ldev_vulkan->render_graph_pool, 0, &render_graph_vulkan, id_out);
 	if (result < 0) {
 		return result;
 	}
 
-	HeroPassInfoVulkan*   passes_vulkan = hero_alloc_array(HeroPassInfoVulkan, hero_system_alctor, 0, setup->passes_count);
-	HeroImageInfoVulkan*  images_vulkan = hero_alloc_array(HeroImageInfoVulkan, hero_system_alctor, 0, setup->images_count);
-	HeroBufferInfoVulkan* buffers_vulkan = hero_alloc_array(HeroBufferInfoVulkan, hero_system_alctor, 0, setup->buffers_count);
-	if ((setup->passes_count && !passes_vulkan) || (setup->images_count && !images_vulkan) || (setup->buffers_count && !buffers_vulkan)) {
+	*out = &render_graph_vulkan->public_;
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_render_graph_deinit(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph* render_graph) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroRenderGraphVulkan* render_graph_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroRenderGraphVulkan, render_graph);
+
+	return hero_object_pool(HeroRenderGraphVulkan, dealloc)(&ldev_vulkan->render_graph_pool, id);
+}
+
+HeroResult _hero_vulkan_render_graph_get(HeroLogicalDevice* ldev, HeroRenderGraphId id, HeroRenderGraph** out) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	HeroRenderGraphVulkan* render_graph_vulkan;
+	result = hero_object_pool(HeroRenderGraphVulkan, get)(&ldev_vulkan->render_graph_pool, id, &render_graph_vulkan);
+	if (result < 0) {
+		return result;
+	}
+
+	*out = &render_graph_vulkan->public_;
+	return HERO_SUCCESS;
+}
+
+static VkDescriptorType hero_vulkan_descriptor_binding_types[HERO_VULKAN_DESCRIPTOR_BINDING_COUNT] = {
+	[HERO_VULKAN_DESCRIPTOR_BINDING_SAMPLERS] = VK_DESCRIPTOR_TYPE_SAMPLER,
+	[HERO_VULKAN_DESCRIPTOR_BINDING_RO_IMAGE_1D] = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+	[HERO_VULKAN_DESCRIPTOR_BINDING_RO_IMAGE_2D] = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+	[HERO_VULKAN_DESCRIPTOR_BINDING_RO_IMAGE_3D] = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+	[HERO_VULKAN_DESCRIPTOR_BINDING_RW_IMAGE_1D] = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+	[HERO_VULKAN_DESCRIPTOR_BINDING_RW_IMAGE_2D] = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+	[HERO_VULKAN_DESCRIPTOR_BINDING_RW_IMAGE_3D] = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
+};
+
+HeroResult _hero_vulkan_frame_graph_init(HeroLogicalDevice* ldev, HeroFrameGraphSetup* setup, HeroFrameGraphId* id_out, HeroFrameGraph** out) {
+	HeroResult result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	HeroFrameGraphVulkan* frame_graph_vulkan;
+	result = hero_object_pool(HeroFrameGraphVulkan, alloc)(&ldev_vulkan->frame_graph_pool, 0, &frame_graph_vulkan, id_out);
+	if (result < 0) {
+		return result;
+	}
+
+	{
+		frame_graph_vulkan->passes = hero_alloc_array(HeroPassVulkan, hero_system_alctor, 0, setup->passes_cap);
+		if (!frame_graph_vulkan->passes) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+	}
+
+	//
+	// allocate resource device memory pools
+	{
+		VkMemoryAllocateInfo vk_alloc_info = {
+			.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+			.pNext = NULL,
+			.memoryTypeIndex = 0, // TODO: find GPU_LOCAL memory
+		};
+
+		//
+		// allocate persistent resource memory pools
+		{
+			vk_alloc_info.allocationSize = setup->persistent_images_memory_pool_size;
+			VkResult vk_result = ldev_vulkan->vkAllocateMemory(ldev_vulkan->handle, &vk_alloc_info, HERO_VULKAN_TODO_ALLOCATOR, &frame_graph_vulkan->persistent_images_device_memory);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+
+			vk_alloc_info.allocationSize = setup->persistent_buffers_memory_pool_size;
+			vk_result = ldev_vulkan->vkAllocateMemory(ldev_vulkan->handle, &vk_alloc_info, HERO_VULKAN_TODO_ALLOCATOR, &frame_graph_vulkan->persistent_buffers_device_memory);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+
+			frame_graph_vulkan->persistent_vulkan_resources = hero_alloc_array(HeroVulkanResource, hero_system_alctor, 0, setup->physical_resources_cap);
+			if (!frame_graph_vulkan->persistent_vulkan_resources) {
+				return HERO_ERROR(ALLOCATION_FAILURE);
+			}
+		}
+
+		//
+		// allocate the active frames resource memory pools
+		//
+		{
+			frame_graph_vulkan->active_frames = hero_alloc_array(HeroFrameGraphVulkanActiveFrame, hero_system_alctor, 0, setup->active_frames_count);
+			if (!frame_graph_vulkan->active_frames) {
+				return HERO_ERROR(ALLOCATION_FAILURE);
+			}
+
+			for_range(i, 0, setup->active_frames_count) {
+				HeroFrameGraphVulkanActiveFrame* active_frame = &frame_graph_vulkan->active_frames[i];
+
+				vk_alloc_info.allocationSize = setup->images_memory_pool_size;
+				VkResult vk_result = ldev_vulkan->vkAllocateMemory(ldev_vulkan->handle, &vk_alloc_info, HERO_VULKAN_TODO_ALLOCATOR, &active_frame->images_device_memory);
+				if (vk_result < 0) {
+					return _hero_vulkan_convert_from_result(vk_result);
+				}
+
+				vk_alloc_info.allocationSize = setup->buffers_memory_pool_size;
+				vk_result = ldev_vulkan->vkAllocateMemory(ldev_vulkan->handle, &vk_alloc_info, HERO_VULKAN_TODO_ALLOCATOR, &active_frame->buffers_device_memory);
+				if (vk_result < 0) {
+					return _hero_vulkan_convert_from_result(vk_result);
+				}
+			}
+
+			frame_graph_vulkan->active_frames_vulkan_resources = hero_alloc_array(HeroVulkanResource, hero_system_alctor, 0, (U32)setup->active_frames_count * (U32)setup->physical_resources_cap);
+			if (!frame_graph_vulkan->active_frames_vulkan_resources) {
+				return HERO_ERROR(ALLOCATION_FAILURE);
+			}
+		}
+	}
+
+	{
+		frame_graph_vulkan->active_frames_frame_buffers = hero_alloc_array(VkFramebuffer, hero_system_alctor, 0, (U32)setup->active_frames_count * (U32)setup->passes_cap);
+		if (!frame_graph_vulkan->active_frames_frame_buffers) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph_vulkan->active_frames_command_buffers = hero_alloc_array(VkCommandBuffer, hero_system_alctor, 0, (U32)setup->active_frames_count * (U32)setup->passes_cap);
+		if (!frame_graph_vulkan->active_frames_command_buffers) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+	}
+
+	{
+		frame_graph_vulkan->execution_units_image_barrier_physical_resource_indices = hero_alloc_array(U16, hero_system_alctor, 0, setup->resources_cap);
+		if (!frame_graph_vulkan->execution_units_image_barrier_physical_resource_indices) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph_vulkan->execution_units_image_barriers = hero_alloc_array(VkImageMemoryBarrier, hero_system_alctor, 0, setup->resources_cap);
+		if (!frame_graph_vulkan->execution_units_image_barriers) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph_vulkan->execution_units_buffer_barrier_physical_resource_indices = hero_alloc_array(U16, hero_system_alctor, 0, setup->resources_cap);
+		if (!frame_graph_vulkan->execution_units_buffer_barrier_physical_resource_indices) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph_vulkan->execution_units_buffer_barriers = hero_alloc_array(VkBufferMemoryBarrier, hero_system_alctor, 0, setup->resources_cap);
+		if (!frame_graph_vulkan->execution_units_buffer_barriers) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		frame_graph_vulkan->execution_units = hero_alloc_array(HeroExecutionUnitVulkan, hero_system_alctor, 0, setup->resources_cap);
+		if (!frame_graph_vulkan->execution_units) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+	}
+
+	//
+	// create the command pool and allocate all of the command buffers for all passes
+	{
+		VkCommandPoolCreateInfo vk_command_pool_create_info = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+			.pNext = NULL,
+			.flags =
+				VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | // command buffers will be recycled using vkResetCommandBuffer
+				VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,             // command buffers will short lived by being reset after every use
+			.queueFamilyIndex = ldev_vulkan->queue_family_idx_uber,
+		};
+
+		VkCommandPool vk_command_pool_transient_reset;
+		VkResult vk_result = ldev_vulkan->vkCreateCommandPool(ldev_vulkan->handle, &vk_command_pool_create_info, HERO_VULKAN_TODO_ALLOCATOR, &vk_command_pool_transient_reset);
+		if (vk_result < 0) {
+			return _hero_vulkan_convert_from_result(vk_result);
+		}
+
+		VkCommandBufferAllocateInfo vk_command_buffer_alloc_info = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+			.pNext = NULL,
+			.commandPool = vk_command_pool_transient_reset,
+			.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+			.commandBufferCount = (U32)setup->passes_cap * (U32)setup->active_frames_count,
+		};
+
+		vk_result = ldev_vulkan->vkAllocateCommandBuffers(ldev_vulkan->handle, &vk_command_buffer_alloc_info, frame_graph_vulkan->active_frames_command_buffers);
+		if (vk_result < 0) {
+			return _hero_vulkan_convert_from_result(vk_result);
+		}
+
+		frame_graph_vulkan->command_pool_transient_reset = vk_command_pool_transient_reset;
+	}
+
+	{
+		VkDescriptorSetLayoutBinding bindings[HERO_VULKAN_DESCRIPTOR_BINDING_COUNT];
+
+		for_range(binding, 0, HERO_VULKAN_DESCRIPTOR_BINDING_COUNT) {
+			VkDescriptorSetLayoutBinding* b = &bindings[binding];
+			b->binding = binding;
+			b->descriptorType = hero_vulkan_descriptor_binding_types[binding];
+			b->descriptorCount = setup->resources_cap;
+			b->stageFlags= VK_SHADER_STAGE_ALL;
+			b->pImmutableSamplers = NULL;
+		};
+		bindings[HERO_VULKAN_DESCRIPTOR_BINDING_SAMPLERS].descriptorCount = ldev_vulkan->sampler_pool.cap;
+
+		VkDescriptorSetLayoutCreateInfo vk_set_layout_create_info = {
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.bindingCount = HERO_VULKAN_DESCRIPTOR_BINDING_COUNT,
+			.pBindings = bindings,
+		};
+
+		VkResult vk_result = ldev_vulkan->vkCreateDescriptorSetLayout(ldev_vulkan->handle, &vk_set_layout_create_info, HERO_VULKAN_TODO_ALLOCATOR, &frame_graph_vulkan->descriptor_set_layout);
+		if (vk_result < 0) {
+			return _hero_vulkan_convert_from_result(vk_result);
+		}
+	}
+
+	{
+		VkDescriptorPoolSize pool_sizes[HERO_VULKAN_DESCRIPTOR_BINDING_COUNT];
+		for_range(binding, 0, HERO_VULKAN_DESCRIPTOR_BINDING_COUNT) {
+			pool_sizes[binding].type = hero_vulkan_descriptor_binding_types[binding];
+			pool_sizes[binding].descriptorCount = setup->resources_cap;
+		}
+		pool_sizes[HERO_VULKAN_DESCRIPTOR_BINDING_SAMPLERS].descriptorCount = ldev_vulkan->sampler_pool.cap;
+
+		VkDescriptorPoolCreateInfo vk_pool_create_info = {
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+			.pNext = NULL,
+			.flags = 0,
+			.maxSets = setup->active_frames_count,
+			.poolSizeCount = HERO_VULKAN_DESCRIPTOR_BINDING_COUNT,
+			.pPoolSizes = pool_sizes,
+		};
+
+		VkResult vk_result = ldev_vulkan->vkCreateDescriptorPool(ldev_vulkan->handle, &vk_pool_create_info, HERO_VULKAN_TODO_ALLOCATOR, &frame_graph_vulkan->descriptor_pool);
+		if (vk_result < 0) {
+			return _hero_vulkan_convert_from_result(vk_result);
+		}
+
+		VkDescriptorSetAllocateInfo vk_alloc_info = {
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+			.pNext = NULL,
+			.descriptorPool = frame_graph_vulkan->descriptor_pool,
+			.descriptorSetCount = 1,
+			.pSetLayouts = &frame_graph_vulkan->descriptor_set_layout,
+		};
+
+		for_range(active_frame_idx, 0, setup->active_frames_count) {
+			VkDescriptorSet* dst = &frame_graph_vulkan->active_frames[active_frame_idx].descriptor_set;
+			vk_result = ldev_vulkan->vkAllocateDescriptorSets(ldev_vulkan->handle, &vk_alloc_info, dst);
+			if (vk_result < 0) {
+				return _hero_vulkan_convert_from_result(vk_result);
+			}
+		}
+	}
+
+	*out = &frame_graph_vulkan->public_;
+	return HERO_SUCCESS;
+
+}
+
+HeroResult _hero_vulkan_frame_graph_deinit(HeroLogicalDevice* ldev, HeroFrameGraphId id, HeroFrameGraph* frame_graph) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroFrameGraphVulkan* frame_graph_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroFrameGraphVulkan, frame_graph);
+
+	return hero_object_pool(HeroFrameGraphVulkan, dealloc)(&ldev_vulkan->frame_graph_pool, id);
+}
+
+HeroResult _hero_vulkan_frame_graph_get(HeroLogicalDevice* ldev, HeroFrameGraphId id, HeroFrameGraph** out) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	HeroFrameGraphVulkan* frame_graph_vulkan;
+	result = hero_object_pool(HeroFrameGraphVulkan, get)(&ldev_vulkan->frame_graph_pool, id, &frame_graph_vulkan);
+	if (result < 0) {
+		return result;
+	}
+
+	*out = &frame_graph_vulkan->public_;
+	return HERO_SUCCESS;
+
+}
+
+HeroResult _hero_vulkan_frame_graph_init_image(HeroLogicalDevice* ldev, HeroFrameGraphVulkan* frame_graph_vulkan, HeroPassPhysicalResource* physical_resource) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroFrameGraph* frame_graph = &frame_graph_vulkan->public_;
+
+	HeroImageInfo* image_info;
+	{
+		HeroPassEnum pass_enum = HERO_RESOURCE_ID_PASS_ENUM(physical_resource->id);
+		HeroPassResourceId pass_resource_id = HERO_RESOURCE_ID_PASS_RESOURCE_ID(physical_resource->id);
+		HeroPass* pass = &frame_graph->passes[pass_enum];
+		HeroPassResource* resource = _hero_frame_graph_pass_resource_find(frame_graph, pass, pass_resource_id);
+		result = _hero_image_info_get(ldev, resource->data.image_info_id, &image_info);
+		if (result < 0) {
+			return result;
+		}
+	}
+
+	bool is_persistent = !!(physical_resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_PERSISTENT);
+
+	U32 active_frame_idx = 0;
+	U32 physical_resource_idx = physical_resource - frame_graph_vulkan->public_.physical_resources;
+NEXT_ACTIVE_FRAME: {}
+
+	VkImageCreateInfo vk_image_create_info = {0};
+	vk_image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+	vk_image_create_info.extent.width = image_info->width;
+	vk_image_create_info.extent.height = image_info->height;
+	vk_image_create_info.extent.depth = image_info->depth;
+	vk_image_create_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT; // TODO: collect usage data earlier and assign only what is needed
+	if (HERO_IMAGE_FORMAT_IS_DEPTH(image_info->format)) {
+		vk_image_create_info.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	} else {
+		vk_image_create_info.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	}
+	vk_image_create_info.format = _hero_vulkan_convert_to_format[image_info->format];
+	vk_image_create_info.imageType = image_info->type;
+	vk_image_create_info.samples = 1 << image_info->samples_count_log2;
+	vk_image_create_info.mipLevels = image_info->mip_levels_count;
+	vk_image_create_info.arrayLayers = image_info->array_layers_count;
+
+	VkImage image;
+	vk_result = ldev_vulkan->vkCreateImage(ldev_vulkan->handle, &vk_image_create_info, HERO_VULKAN_TODO_ALLOCATOR, &image);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	VkDeviceMemory device_memory = is_persistent
+		? frame_graph_vulkan->persistent_images_device_memory
+		: frame_graph_vulkan->active_frames[active_frame_idx].images_device_memory;
+	vk_result = ldev_vulkan->vkBindImageMemory(ldev_vulkan->handle, image, device_memory, physical_resource->mem_range.start_idx);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	VkImageViewCreateInfo vk_image_view_create_info = {0};
+	vk_image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	vk_image_view_create_info.image = image;
+	vk_image_view_create_info.format = _hero_vulkan_convert_to_format[image_info->format];
+	vk_image_view_create_info.viewType = _hero_vulkan_convert_to_image_view_type[image_info->format];
+	vk_image_view_create_info.components.r = VK_COMPONENT_SWIZZLE_R;
+	vk_image_view_create_info.components.g = VK_COMPONENT_SWIZZLE_G;
+	vk_image_view_create_info.components.b = VK_COMPONENT_SWIZZLE_B;
+	vk_image_view_create_info.components.a = VK_COMPONENT_SWIZZLE_A;
+	vk_image_view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	vk_image_view_create_info.subresourceRange.levelCount = image_info->mip_levels_count;
+	vk_image_view_create_info.subresourceRange.layerCount = image_info->array_layers_count;
+
+	VkImageView image_view;
+	vk_result = ldev_vulkan->vkCreateImageView(ldev_vulkan->handle, &vk_image_view_create_info, HERO_VULKAN_TODO_ALLOCATOR, &image_view);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	HeroVulkanResource* vulkan_resource;
+	if (is_persistent) {
+		vulkan_resource = &frame_graph_vulkan->persistent_vulkan_resources[physical_resource_idx];
+	} else {
+		vulkan_resource = &frame_graph_vulkan->active_frames_vulkan_resources[active_frame_idx * frame_graph_vulkan->public_.physical_resources_cap + physical_resource_idx];
+	}
+	vulkan_resource->image = image;
+	vulkan_resource->image_view = image_view;
+
+	if (!is_persistent && active_frame_idx < frame_graph_vulkan->public_.active_frames_count) {
+		active_frame_idx += 1;
+		goto NEXT_ACTIVE_FRAME;
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_frame_graph_init_buffer(HeroLogicalDevice* ldev, HeroFrameGraphVulkan* frame_graph_vulkan, HeroPassPhysicalResource* physical_resource) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	bool is_persistent = !!(physical_resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_PERSISTENT);
+
+	U32 active_frame_idx = 0;
+	U32 physical_resource_idx = physical_resource - frame_graph_vulkan->public_.physical_resources;
+NEXT_ACTIVE_FRAME: {}
+
+	VkBufferCreateInfo vk_create_info = {0};
+	vk_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	vk_create_info.size = physical_resource->mem_range.end_idx - physical_resource->mem_range.start_idx;
+	vk_create_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT; // TODO: collect usage data earlier and assign only what is needed
+
+	VkBuffer buffer;
+	vk_result = ldev_vulkan->vkCreateBuffer(ldev_vulkan->handle, &vk_create_info, HERO_VULKAN_TODO_ALLOCATOR, &buffer);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	VkDeviceMemory device_memory = is_persistent
+		? frame_graph_vulkan->persistent_buffers_device_memory
+		: frame_graph_vulkan->active_frames[active_frame_idx].buffers_device_memory;
+	vk_result = ldev_vulkan->vkBindBufferMemory(ldev_vulkan->handle, buffer, device_memory, physical_resource->mem_range.start_idx);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	HeroVulkanResource* vulkan_resource;
+	if (is_persistent) {
+		vulkan_resource = &frame_graph_vulkan->persistent_vulkan_resources[physical_resource_idx];
+	} else {
+		vulkan_resource = &frame_graph_vulkan->active_frames_vulkan_resources[active_frame_idx * frame_graph_vulkan->public_.physical_resources_cap + physical_resource_idx];
+	}
+	vulkan_resource->buffer = buffer;
+
+	if (!is_persistent && active_frame_idx < frame_graph_vulkan->public_.active_frames_count) {
+		active_frame_idx += 1;
+		goto NEXT_ACTIVE_FRAME;
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroVulkanResource* _hero_vulkan_frame_graph_vulkan_resource_get(HeroFrameGraphVulkan* frame_graph_vulkan, HeroPassResource* resource, U32 active_frame_idx) {
+	if (resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_PERSISTENT) {
+		return &frame_graph_vulkan->persistent_vulkan_resources[resource->physical_resource_idx];
+	} else {
+		return &frame_graph_vulkan->active_frames_vulkan_resources[active_frame_idx * frame_graph_vulkan->public_.physical_resources_cap + resource->physical_resource_idx];
+	}
+}
+
+HeroResult _hero_vulkan_frame_graph_init_frame_buffer(HeroLogicalDevice* ldev, HeroFrameGraphVulkan* frame_graph_vulkan, HeroPass* pass, HeroPassVulkan* pass_vulkan) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	U32 active_frame_idx = 0;
+	U32 swapchain_image_idx = 0;
+	U32 swapchain_images_count = 0;
+
+	HeroRangeU16 color_output_attachments_range = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_COLOR_OUTPUT_ATTACHMENT];
+	HeroRangeU16 depth_stencil_attachments_range = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_DEPTH_STENCIL_ATTACHMENT];
+	U32 color_output_attachments_count = color_output_attachments_range.end_idx - color_output_attachments_range.start_idx;
+	U32 attachments_count = color_output_attachments_count + depth_stencil_attachments_range.end_idx - depth_stencil_attachments_range.start_idx;
+	HeroPassResource* pass_resources = frame_graph_vulkan->public_.pass_resources;
+	VkImageView* vk_attachments = hero_alloc_array(VkImageView, hero_system_alctor, 0, attachments_count);
+
+NEXT_ACTIVE_FRAME: {}
+NEXT_SWAPCHAIN_IMAGE: {}
+	for_range(idx, 0, color_output_attachments_count) {
+		HeroPassResource* resource = &pass_resources[color_output_attachments_range.start_idx + idx];
+		HERO_DEBUG_ASSERT(!HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type), "internal error: expected an image resource here but got a buffer\n");
+		if (hero_object_id(HeroImageInfoId, user_bits)(resource->data.image_info_id) & HERO_IMAGE_INFO_FLAGS_IS_SWAPCHAIN) {
+			HeroImageInfo* image_info;
+			result = _hero_image_info_get(ldev, pass_resources[color_output_attachments_range.start_idx].data.image_info_id, &image_info);
+			if (result < 0) {
+				return result;
+			}
+
+			pass_vulkan->swapchain_id = image_info->swapchain_id;
+			HeroSwapchainVulkan* swapchain_vulkan;
+			result = hero_object_pool(HeroSwapchainVulkan, get)(&ldev_vulkan->swapchain_pool, image_info->swapchain_id, &swapchain_vulkan);
+			if (result < 0) {
+				return result;
+			}
+			HERO_DEBUG_ASSERT(swapchain_images_count == 0 || swapchain_images_count == swapchain_vulkan->public_.images_count, "internal error: multiple swapchains used in a single pass");
+			swapchain_images_count = swapchain_vulkan->public_.images_count;
+
+			vk_attachments[idx] = swapchain_vulkan->image_views[swapchain_image_idx];
+		} else {
+			HeroVulkanResource* vulkan_resource = _hero_vulkan_frame_graph_vulkan_resource_get(frame_graph_vulkan, resource, active_frame_idx);
+
+			vk_attachments[idx] = vulkan_resource->image_view;
+		}
+	}
+
+	if (depth_stencil_attachments_range.start_idx != depth_stencil_attachments_range.end_idx) {
+		HeroPassResource* resource = &pass_resources[depth_stencil_attachments_range.start_idx];
+		HERO_DEBUG_ASSERT(!HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type), "internal error: expected an image resource here but got a buffer\n");
+		HeroVulkanResource* vulkan_resource = _hero_vulkan_frame_graph_vulkan_resource_get(frame_graph_vulkan, resource, active_frame_idx);
+
+		vk_attachments[color_output_attachments_count] = vulkan_resource->image_view;
+	}
+
+	HeroRenderPassLayoutVulkan* render_pass_layout_vulkan;
+	result = hero_object_pool(HeroRenderPassLayoutVulkan, get)(&ldev_vulkan->render_pass_layout_pool, pass->render_pass_layout_id, &render_pass_layout_vulkan);
+	if (result < 0) {
+		return result;
+	}
+
+	HeroImageInfo* image_info;
+	result = _hero_image_info_get(ldev, pass_resources[color_output_attachments_range.start_idx].data.image_info_id, &image_info);
+	if (result < 0) {
+		return result;
+	}
+
+	pass_vulkan->frame_buffer_image_width = image_info->width;
+	pass_vulkan->frame_buffer_image_height = image_info->height;
+
+	VkFramebufferCreateInfo vk_create_info = {
+		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.renderPass = render_pass_layout_vulkan->handle,
+		.attachmentCount = attachments_count,
+		.pAttachments = vk_attachments,
+		.width = image_info->width,
+		.height = image_info->height,
+		.layers = image_info->array_layers_count,
+	};
+
+	VkFramebuffer vk_frame_buffer;
+	vk_result = ldev_vulkan->vkCreateFramebuffer(ldev_vulkan->handle, &vk_create_info, HERO_VULKAN_TODO_ALLOCATOR, &vk_frame_buffer);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	VkFramebuffer* frame_buffer_ptr = &frame_graph_vulkan->active_frames_frame_buffers[active_frame_idx * frame_graph_vulkan->public_.physical_resources_cap + pass->pass_enum];
+
+	if (swapchain_images_count) {
+		VkFramebuffer* swapchain_frame_buffers = *(VkFramebuffer**)frame_buffer_ptr;
+		if (active_frame_idx == 0) {
+			swapchain_frame_buffers = hero_alloc_array(VkFramebuffer, hero_system_alctor, 0, swapchain_images_count);
+			if (!swapchain_frame_buffers) {
+				return HERO_ERROR(ALLOCATION_FAILURE);
+			}
+			*(VkFramebuffer**)frame_buffer_ptr = swapchain_frame_buffers;
+		}
+		swapchain_frame_buffers[swapchain_image_idx] = vk_frame_buffer;
+	} else {
+		*frame_buffer_ptr = vk_frame_buffer;
+	}
+
+	if (swapchain_image_idx < swapchain_images_count) {
+		swapchain_image_idx += 1;
+		goto NEXT_SWAPCHAIN_IMAGE;
+	}
+
+	if (active_frame_idx < frame_graph_vulkan->public_.active_frames_count) {
+		active_frame_idx += 1;
+		swapchain_images_count = 0;
+		goto NEXT_ACTIVE_FRAME;
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_frame_graph_init_render_pass(HeroLogicalDevice* ldev, HeroFrameGraphVulkan* frame_graph_vulkan, HeroPass* pass, HeroPassVulkan* pass_vulkan) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroFrameGraph* frame_graph = &frame_graph_vulkan->public_;
+
+	HeroRenderPassLayoutVulkan* render_pass_layout_vulkan;
+	result = hero_object_pool(HeroRenderPassLayoutVulkan, get)(&ldev_vulkan->render_pass_layout_pool, pass->render_pass_layout_id, &render_pass_layout_vulkan);
+	if (result < 0) {
+		return result;
+	}
+
+	pass_vulkan->clear_count = 0;
+
+	HeroRangeU16 color_output_attachments_range = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_COLOR_OUTPUT_ATTACHMENT];
+	HeroRangeU16 depth_stencil_attachments_range = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_DEPTH_STENCIL_ATTACHMENT];
+	HeroRangeU16 input_attachments_range = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_INPUT_ATTACHMENT];
+	U32 color_output_attachments_count = color_output_attachments_range.end_idx - color_output_attachments_range.start_idx;
+	U32 input_attachments_count = input_attachments_range.end_idx - input_attachments_range.start_idx;
+	U32 depth_stencil_attachments_count = depth_stencil_attachments_range.end_idx - depth_stencil_attachments_range.start_idx;
+	HERO_DEBUG_ASSERT(depth_stencil_attachments_count <= 1, "internal error: we should have a maximum of 1 depth stencil attachment");
+	U32 attachments_count = color_output_attachments_count + input_attachments_count + depth_stencil_attachments_count;
+
+	VkAttachmentDescription* vk_attachments;
+	VkAttachmentReference* vk_attachment_refs;
+	VkAttachmentReference* vk_color_output_attachment_refs = NULL;
+	VkAttachmentReference* vk_input_attachment_refs = NULL;
+	VkAttachmentReference* vk_depth_stencil_attachment_ref = NULL;
+	VkSubpassDescription vk_subpass = {0};
+	{
+		vk_attachments = hero_alloc_array(VkAttachmentDescription, hero_system_alctor, HERO_GFX_ALLOC_TAG_RENDER_PASS_VULKAN_ATTACHMENT_DESCRIPTION, attachments_count);
+		if (vk_attachments == NULL) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		vk_attachment_refs = hero_alloc_array(VkAttachmentReference, hero_system_alctor, HERO_GFX_ALLOC_TAG_RENDER_PASS_VULKAN_ATTACHMENT_DESCRIPTION, attachments_count);
+		if (vk_attachment_refs == NULL) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		if (color_output_attachments_count) {
+			vk_color_output_attachment_refs = vk_attachment_refs;
+		}
+
+		if (input_attachments_count) {
+			vk_input_attachment_refs = &vk_attachment_refs[color_output_attachments_count];
+		}
+
+		if (depth_stencil_attachments_count) {
+			vk_depth_stencil_attachment_ref = &vk_attachment_refs[color_output_attachments_count + input_attachments_count];
+		}
+
+		//
+		// color outputs attachments
+		for_range(color_output_idx, color_output_attachments_range.start_idx, color_output_attachments_range.end_idx) {
+			HeroPassResource* resource = &frame_graph->pass_resources[color_output_idx];
+
+			HeroImageInfo* image_info;
+			result = _hero_image_info_get(ldev, resource->data.image_info_id, &image_info);
+			if (result < 0) {
+				return result;
+			}
+
+			U32 attachment_idx = color_output_idx - color_output_attachments_range.start_idx;
+
+			VkImageLayout image_layout = image_info->swapchain_id.raw ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+			VkAttachmentLoadOp load_op;
+			if (resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_PERSISTENT || resource->link_pass_enum != HERO_PASS_ENUM_INVALID) {
+				load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
+			} else if (resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_CLEARED) {
+				load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+				pass_vulkan->clear_count += 1;
+			} else {
+				load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			}
+
+			VkAttachmentDescription* attachment = &vk_attachments[attachment_idx];
+			*attachment = (VkAttachmentDescription) {
+				.flags = 0,
+				.format = _hero_vulkan_convert_to_format[image_info->format],
+				.samples = 1 << image_info->samples_count_log2,
+				.loadOp = load_op,
+				.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+				.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+				.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+				.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				.finalLayout = image_layout,
+			};
+
+			VkAttachmentReference* ref = &vk_attachment_refs[attachment_idx];
+			ref->attachment = attachment_idx;
+			ref->layout = image_layout;
+		}
+
+		//
+		// input attachments
+		for_range(input_idx, input_attachments_range.start_idx, input_attachments_range.end_idx) {
+			HeroPassResource* resource = &frame_graph->pass_resources[input_idx];
+
+			HeroImageInfo* image_info;
+			result = _hero_image_info_get(ldev, resource->data.image_info_id, &image_info);
+			if (result < 0) {
+				return result;
+			}
+
+			U32 attachment_idx = input_idx - input_attachments_range.start_idx;
+			attachment_idx += color_output_attachments_count; // input attachments start after the color output attachments
+
+			VkAttachmentDescription* attachment = &vk_attachments[attachment_idx];
+			*attachment = (VkAttachmentDescription) {
+				.flags = 0,
+				.format = _hero_vulkan_convert_to_format[image_info->format],
+				.samples = 1 << image_info->samples_count_log2,
+				.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+				.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+				.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+				.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+				.initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+			};
+
+			VkAttachmentReference* ref = &vk_input_attachment_refs[attachment_idx];
+			ref->attachment = attachment_idx;
+			ref->layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+		}
+
+		//
+		// depth stencil attachment
+		if (depth_stencil_attachments_count) {
+			HeroPassResource* resource = &frame_graph->pass_resources[depth_stencil_attachments_range.start_idx];
+
+			HeroImageInfo* image_info;
+			result = _hero_image_info_get(ldev, resource->data.image_info_id, &image_info);
+			if (result < 0) {
+				return result;
+			}
+
+			U32 attachment_idx = depth_stencil_attachments_range.start_idx;
+			attachment_idx += color_output_attachments_count + input_attachments_count; // input attachments start after the color output & input attachments
+
+			VkAttachmentLoadOp load_op;
+			if (resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_PERSISTENT || resource->link_pass_enum != HERO_PASS_ENUM_INVALID) {
+				load_op = VK_ATTACHMENT_LOAD_OP_LOAD;
+			} else if (resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_CLEARED) {
+				load_op = VK_ATTACHMENT_LOAD_OP_CLEAR;
+			} else {
+				load_op = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+			}
+
+			VkAttachmentDescription* attachment = &vk_attachments[attachment_idx];
+			*attachment = (VkAttachmentDescription) {
+				.flags = 0,
+				.format = _hero_vulkan_convert_to_format[image_info->format],
+				.samples = 1 << image_info->samples_count_log2,
+				.loadOp = load_op,
+				.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+				.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+				.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+				.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+				.finalLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+			};
+
+			VkAttachmentReference* ref = &vk_attachment_refs[attachment_idx];
+			ref->attachment = attachment_idx;
+			ref->layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+		}
+
+		vk_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		vk_subpass.inputAttachmentCount = input_attachments_count;
+		vk_subpass.pInputAttachments = vk_input_attachment_refs;
+		vk_subpass.colorAttachmentCount = color_output_attachments_count;
+		vk_subpass.pColorAttachments = vk_color_output_attachment_refs;
+		vk_subpass.pDepthStencilAttachment = vk_depth_stencil_attachment_ref;
+	}
+
+	VkRenderPassCreateInfo vk_create_info = {
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pAttachments = vk_attachments,
+		.attachmentCount = attachments_count,
+		.pSubpasses = &vk_subpass,
+		.subpassCount = 1,
+		.pDependencies = NULL,
+		.dependencyCount = 0,
+	};
+
+	VkRenderPass vk_render_pass;
+	vk_result = ldev_vulkan->vkCreateRenderPass(ldev_vulkan->handle, &vk_create_info, HERO_VULKAN_TODO_ALLOCATOR, &vk_render_pass);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	pass_vulkan->render_pass = vk_render_pass;
+	return HERO_SUCCESS;
+}
+
+VkImageMemoryBarrier* _hero_vulkan_frame_graph_image_barrier_find_or_insert(HeroFrameGraphVulkan* frame_graph_vulkan, HeroExecutionUnitVulkan* execution_unit, U16 physical_resource_idx) {
+	U16* image_barrier_physical_resource_indices = frame_graph_vulkan->execution_units_image_barrier_physical_resource_indices;
+	VkImageMemoryBarrier* image_barriers = frame_graph_vulkan->execution_units_image_barriers;
+	U16 end_idx = execution_unit->resource_barriers_start_idx + execution_unit->image_barriers_count;
+	for_range(idx, execution_unit->resource_barriers_start_idx, end_idx) {
+		if (image_barrier_physical_resource_indices[idx] == physical_resource_idx) {
+			return &image_barriers[idx];
+		}
+	}
+
+	image_barrier_physical_resource_indices[end_idx] = physical_resource_idx;
+	VkImageMemoryBarrier* image_barrier = &image_barriers[end_idx];
+	execution_unit->image_barriers_count += 1;
+	return image_barrier;
+}
+
+VkBufferMemoryBarrier* _hero_vulkan_frame_graph_buffer_barrier_find_or_insert(HeroFrameGraphVulkan* frame_graph_vulkan, HeroExecutionUnitVulkan* execution_unit, U16 physical_resource_idx) {
+	U16* buffer_barrier_physical_resource_indices = frame_graph_vulkan->execution_units_buffer_barrier_physical_resource_indices;
+	VkBufferMemoryBarrier* buffer_barriers = frame_graph_vulkan->execution_units_buffer_barriers;
+	U16 end_idx = execution_unit->resource_barriers_start_idx + execution_unit->buffer_barriers_count;
+	for_range(idx, execution_unit->resource_barriers_start_idx, end_idx) {
+		if (buffer_barrier_physical_resource_indices[idx] == physical_resource_idx) {
+			return &buffer_barriers[idx];
+		}
+	}
+
+	buffer_barrier_physical_resource_indices[end_idx] = physical_resource_idx;
+	VkBufferMemoryBarrier* buffer_barrier = &buffer_barriers[end_idx];
+	execution_unit->buffer_barriers_count += 1;
+	return buffer_barrier;
+}
+
+void _hero_vulkan_frame_graph_update_resource_barrier(HeroFrameGraphVulkan* frame_graph_vulkan, HeroExecutionUnitVulkan* execution_unit, HeroPassResource* resource, bool is_compute, bool is_destination) {
+	VkPipelineStageFlags* stage_flags;
+	VkAccessFlags*        access_flags;
+	VkImageLayout*        layout;
+	if (HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type)) {
+		VkBufferMemoryBarrier* buffer_barrier = _hero_vulkan_frame_graph_buffer_barrier_find_or_insert(frame_graph_vulkan, execution_unit, resource->physical_resource_idx);
+
+		if (is_destination) {
+			stage_flags = &execution_unit->dst_stage_flags;
+			access_flags = &buffer_barrier->dstAccessMask;
+			layout = NULL;
+		} else {
+			stage_flags = &execution_unit->src_stage_flags;
+			access_flags = &buffer_barrier->srcAccessMask;
+			layout = NULL;
+		}
+	} else {
+		VkImageMemoryBarrier* image_barrier = _hero_vulkan_frame_graph_image_barrier_find_or_insert(frame_graph_vulkan, execution_unit, resource->physical_resource_idx);
+
+		if (is_destination) {
+			stage_flags = &execution_unit->dst_stage_flags;
+			access_flags = &image_barrier->dstAccessMask;
+			layout = &image_barrier->newLayout;
+		} else {
+			stage_flags = &execution_unit->src_stage_flags;
+			access_flags = &image_barrier->srcAccessMask;
+			layout = &image_barrier->oldLayout;
+		}
+	}
+
+	HERO_ASSERT(*layout == VK_IMAGE_LAYOUT_UNDEFINED, "TODO: work out how to handle this instance where the image layout has been set twice to something different");
+
+	//
+	// TODO some of the resource can be done later but we need to keep
+	// track of when the resource is being using in the pipeline.
+	switch (resource->type) {
+		case HERO_PASS_RESOURCE_TYPE_INPUT_ATTACHMENT:
+			*stage_flags |= VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+			*access_flags |= VK_ACCESS_INPUT_ATTACHMENT_READ_BIT;
+			*layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			break;
+		case HERO_PASS_RESOURCE_TYPE_COLOR_OUTPUT_ATTACHMENT:
+			*stage_flags |= VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+			*access_flags |= VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+			*layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			break;
+		case HERO_PASS_RESOURCE_TYPE_DEPTH_STENCIL_ATTACHMENT:
+			*stage_flags |= VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+			*access_flags |= VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+			*layout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+			break;
+		case HERO_PASS_RESOURCE_TYPE_RO_IMAGE:
+		case HERO_PASS_RESOURCE_TYPE_RO_BUFFER:
+			*stage_flags |= is_compute ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+			*access_flags |= VK_ACCESS_SHADER_READ_BIT;
+			*layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			break;
+		case HERO_PASS_RESOURCE_TYPE_RW_IMAGE:
+		case HERO_PASS_RESOURCE_TYPE_RW_BUFFER:
+			*stage_flags |= is_compute ? VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT : VK_PIPELINE_STAGE_VERTEX_SHADER_BIT;
+			*access_flags |= VK_ACCESS_SHADER_WRITE_BIT;
+			*layout = VK_IMAGE_LAYOUT_GENERAL;
+			break;
+		case HERO_PASS_RESOURCE_TYPE_VERTEX_BUFFER:
+			*stage_flags |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+			*access_flags |= VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+			break;
+		case HERO_PASS_RESOURCE_TYPE_INDEX_BUFFER:
+			*stage_flags |= VK_PIPELINE_STAGE_VERTEX_INPUT_BIT;
+			*access_flags |= VK_ACCESS_INDEX_READ_BIT;
+			break;
+	}
+}
+
+HeroResult _hero_vulkan_frame_graph_update(HeroLogicalDevice* ldev, HeroFrameGraph* frame_graph) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroFrameGraphVulkan* frame_graph_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroFrameGraphVulkan, frame_graph);
+
+	//
+	// deallocate the old physical resources that are no longer used
+	Uptr physical_resource_idx = -1;
+	while (hero_bitset_array_iter_next_one64(frame_graph->physical_resources_that_are_unused_bitset, frame_graph->physical_resources_cap, &physical_resource_idx)) {
+		HeroPassPhysicalResource* physical_resource = &frame_graph->physical_resources[physical_resource_idx];
+		VkObjectType object_type = physical_resource->is_buffer ? VK_OBJECT_TYPE_BUFFER : VK_OBJECT_TYPE_IMAGE;
+
+		if (physical_resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_PERSISTENT) {
+			HeroVulkanResource* vulkan_resource = &frame_graph_vulkan->persistent_vulkan_resources[physical_resource_idx];
+			HeroVulkanObjectDealloc* dealloc;
+			result = _hero_vulkan_dealloc_object_once_next_frame_has_executed(ldev_vulkan, object_type, 1, &dealloc);
+			if (result < 0) {
+				return result;
+			}
+			if (physical_resource->is_buffer) {
+				dealloc->buffer = vulkan_resource->buffer;
+			} else {
+				dealloc[0].image = vulkan_resource->image;
+				dealloc[1].image_view = vulkan_resource->image_view;
+			}
+		} else {
+			HeroVulkanObjectDealloc* dealloc;
+			result = _hero_vulkan_dealloc_object_once_next_frame_has_executed(ldev_vulkan, object_type, frame_graph->active_frames_count, &dealloc);
+			if (result < 0) {
+				return result;
+			}
+			for_range(active_frame_idx, 0, frame_graph->active_frames_count) {
+				HeroVulkanResource* vulkan_resource = &frame_graph_vulkan->active_frames_vulkan_resources[active_frame_idx * frame_graph->physical_resources_cap + physical_resource_idx];
+				if (physical_resource->is_buffer) {
+					dealloc->buffer = vulkan_resource->buffer;
+				} else {
+					dealloc[0].image = vulkan_resource->image;
+					dealloc[1].image_view = vulkan_resource->image_view;
+				}
+				dealloc += 1;
+			}
+		}
+	}
+
+	//
+	// initialize any new resources that have been newly been added to the frame graph this frame
+	physical_resource_idx = -1;
+	while (hero_bitset_array_iter_next_one64(frame_graph->physical_resources_newly_allocated_bitset, frame_graph->physical_resources_cap, &physical_resource_idx)) {
+		HeroPassPhysicalResource* physical_resource = &frame_graph->physical_resources[physical_resource_idx];
+		if (physical_resource->is_buffer) {
+			_hero_vulkan_frame_graph_init_buffer(ldev, frame_graph_vulkan, physical_resource);
+		} else {
+			_hero_vulkan_frame_graph_init_image(ldev, frame_graph_vulkan, physical_resource);
+		}
+	}
+
+	//
+	// deallocate the old passes that are no longer used
+	Uptr pass_enum = -1;
+	while (hero_bitset_array_iter_next_one64(frame_graph->passes_that_are_unused_bitset, frame_graph->passes_cap, &pass_enum)) {
+		HeroPass* pass = &frame_graph->passes[pass_enum];
+
+		if (pass->render_pass_layout_id.raw == 0) {
+			// compute passes have no frame buffer or render passes so skip
+			continue;
+		}
+
+		HeroPassVulkan* pass_vulkan = &frame_graph_vulkan->passes[pass_enum];
+
+		HeroVulkanObjectDealloc* dealloc;
+		result = _hero_vulkan_dealloc_object_once_next_frame_has_executed(ldev_vulkan, VK_OBJECT_TYPE_RENDER_PASS, 1, &dealloc);
+		if (result < 0) {
+			return result;
+		}
+		dealloc->render_pass = pass_vulkan->render_pass;
+
+		U32 swapchain_images_count = 1;
+		if (pass->flags & HERO_PASS_FLAGS_HAS_SWAPCHAIN) {
+			HeroSwapchain* swapchain = NULL;
+			result = hero_swapchain_get(ldev, pass_vulkan->swapchain_id, &swapchain);
+			if (result < 0) {
+				return result;
+			}
+			swapchain_images_count = swapchain->images_count;
+		}
+
+		result = _hero_vulkan_dealloc_object_once_next_frame_has_executed(ldev_vulkan, VK_OBJECT_TYPE_FRAMEBUFFER, frame_graph->active_frames_count * swapchain_images_count, &dealloc);
+		if (result < 0) {
+			return result;
+		}
+
+		for_range(active_frame_idx, 0, frame_graph->active_frames_count) {
+			VkFramebuffer* frame_buffer = &frame_graph_vulkan->active_frames_frame_buffers[active_frame_idx * frame_graph->passes_cap + pass_enum];
+			if (pass->flags & HERO_PASS_FLAGS_HAS_SWAPCHAIN) {
+				VkFramebuffer* frame_buffers = *(VkFramebuffer**)frame_buffer;
+				for_range(image_idx, 0, swapchain_images_count) {
+					dealloc[image_idx].frame_buffer = frame_buffers[image_idx];
+				}
+				dealloc += swapchain_images_count;
+			} else {
+				dealloc->frame_buffer = *frame_buffer;
+				dealloc += 1;
+			}
+		}
+	}
+
+	//
+	// initialize any new passes that have been newly been added to the frame graph this frame
+	pass_enum = -1;
+	while (hero_bitset_array_iter_next_one64(frame_graph->passes_newly_allocated_bitset, frame_graph->passes_cap, &pass_enum)) {
+		HeroPass* pass = &frame_graph->passes[pass_enum];
+		HeroPassVulkan* pass_vulkan = &frame_graph_vulkan->passes[pass_enum];
+
+		if (pass->render_pass_layout_id.raw == 0) {
+			// compute passes have no frame buffer or render passes so skip
+			continue;
+		}
+
+		result = _hero_vulkan_frame_graph_init_frame_buffer(ldev, frame_graph_vulkan, pass, pass_vulkan);
+		if (result < 0) {
+			return result;
+		}
+
+		result = _hero_vulkan_frame_graph_init_render_pass(ldev, frame_graph_vulkan, pass, pass_vulkan);
+		if (result < 0) {
+			return result;
+		}
+	}
+
+	//
+	// work out all of the synchronization that needs to happen at each execution unit
+	HERO_DEBUG_ASSERT(frame_graph->execution_units_count, "internal error: expected to have atleast 1 execution unit");
+	{
+		HERO_ZERO_ELMT_MANY(frame_graph_vulkan->execution_units_image_barriers, frame_graph->pass_resources_cap);
+		HERO_ZERO_ELMT_MANY(frame_graph_vulkan->execution_units_buffer_barriers, frame_graph->pass_resources_cap);
+
+		{
+			HeroExecutionUnitVulkan* execution_unit = &frame_graph_vulkan->execution_units[0];
+			execution_unit->resource_barriers_start_idx = 0;
+		}
+
+		//
+		// for every execution unit
+		// set all the _destination_ flags for the resource barriers in the _current_ execution unit.
+		// this is how the resource is being used after the barrier.
+		Uptr resource_barriers_start_idx = 0;
+		for_range(execution_unit_idx, 0, frame_graph->execution_units_count) {
+			HeroExecutionUnitVulkan* execution_unit = &frame_graph_vulkan->execution_units[execution_unit_idx];
+
+			HeroRangeU16 execution_unit_passes_range = frame_graph->execution_units_pass_ranges[execution_unit_idx];
+
+			//
+			// start by setting up the resource barrier start index
+			execution_unit->resource_barriers_start_idx = resource_barriers_start_idx;
+
+			//
+			// now lets offset the resource barrier start index by the total number
+			// of resources in the execution unit's passes.
+			//
+			// essentially we are reserving the maximum space for if all resources
+			// need resource barrier (which they won't). as this makes it easier
+			// for the code after this.
+			//
+			// for every execution unit pass
+			for_range(execution_units_pass_idx, execution_unit_passes_range.start_idx, execution_unit_passes_range.end_idx) {
+				HeroPass* pass = &frame_graph->passes[frame_graph->execution_units_pass_enums[execution_units_pass_idx]];
+
+				Uptr start_idx = pass->resource_ranges_by_type[0].start_idx;
+				Uptr end_idx = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_COUNT - 1].end_idx;
+				Uptr resources_count = end_idx - start_idx;
+
+				resource_barriers_start_idx += resources_count;
+			}
+
+			//
+			// build the resource barriers for this execution unit and the ones the resources link too.
+			//
+			// for every execution unit pass
+			for_range(execution_units_pass_idx, execution_unit_passes_range.start_idx, execution_unit_passes_range.end_idx) {
+				HeroPass* pass = &frame_graph->passes[frame_graph->execution_units_pass_enums[execution_units_pass_idx]];
+				HeroPassVulkan* pass_vulkan = &frame_graph_vulkan->passes[pass->pass_enum];
+				bool is_compute = pass->render_pass_layout_id.raw;
+
+				//
+				// for every pass resource
+				Uptr start_idx = pass->resource_ranges_by_type[0].start_idx;
+				Uptr end_idx = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_COUNT - 1].end_idx;
+				for_range(resource_idx, start_idx, end_idx) {
+					HeroPassResource* resource = &frame_graph->pass_resources[resource_idx];
+					HeroPassPhysicalResource* physical_resource = &frame_graph->physical_resources[resource->physical_resource_idx];
+
+					bool links_to_prev_execution_unit = resource->link_pass_enum != HERO_PASS_ENUM_INVALID;
+					if (links_to_prev_execution_unit) {
+						_hero_vulkan_frame_graph_update_resource_barrier(frame_graph_vulkan, execution_unit, resource, is_compute, true);
+					}
+
+					bool links_to_next_execution_unit = resource->link_chain_length > 0;
+					if (links_to_next_execution_unit) {
+						if (resource->link_to_by_min_execution_unit_idx <= execution_unit_idx) {
+							HERO_ABORT("TODO links to previous frame, use a semaphore to sync");
+						} else {
+							HeroExecutionUnitVulkan* next_execution_unit = &frame_graph_vulkan->execution_units[resource->link_to_by_min_execution_unit_idx];
+
+							_hero_vulkan_frame_graph_update_resource_barrier(frame_graph_vulkan, next_execution_unit, resource, is_compute, false);
+						}
+					}
+				}
+			}
+		}
+	}
+
+	frame_graph_vulkan->num_frames_to_descriptor_sets = frame_graph->active_frames_count;
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_frame_graph_record_pass_start(HeroLogicalDevice* ldev, HeroFrameGraph* frame_graph, HeroPass* pass, _HeroCommandRecorder* command_recorder) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroFrameGraphVulkan* frame_graph_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroFrameGraphVulkan, frame_graph);
+
+	VkCommandBuffer vk_command_buffer = frame_graph_vulkan->active_frames_command_buffers[frame_graph->active_frame_idx * frame_graph->passes_cap + pass->pass_enum];
+	command_recorder->vulkan.command_buffer = vk_command_buffer;
+	{
+		//
+		// TODO: this currently resets the command buffer too implicitly.
+		// I have heard that we should explicitly reset these buffers together
+		// on the same thread at some point when they are no longer used by the GPU.
+		// maybe think about having a command pool per active frame and just resetting the whole pool but we might have to realloc the buffers aggain.
+
+		VkCommandBufferBeginInfo vk_command_buffer_begin_info = {
+			.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+			.pNext = NULL,
+			.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT, // command buffer is reset after a single submit
+			.pInheritanceInfo = NULL,
+		};
+
+		vk_result = ldev_vulkan->vkBeginCommandBuffer(vk_command_buffer, &vk_command_buffer_begin_info);
+		if (vk_result < 0) {
+			return _hero_vulkan_convert_from_result(vk_result);
+		}
+	}
+
+	HeroPassEnum first_execution_unit_pass_enum = frame_graph->execution_units_pass_enums[frame_graph->execution_units_pass_ranges[pass->execution_unit_idx].start_idx];
+	if (first_execution_unit_pass_enum == pass->pass_enum) {
+
+		HeroExecutionUnitVulkan* execution_unit = &frame_graph_vulkan->execution_units[pass->execution_unit_idx];
+
+		ldev_vulkan->vkCmdPipelineBarrier(
+				vk_command_buffer,
+				execution_unit->src_stage_flags,
+				execution_unit->dst_stage_flags,
+				VK_DEPENDENCY_BY_REGION_BIT,
+				0,    // memoryBarrierCount
+				NULL, // pMemoryBarriers
+				execution_unit->buffer_barriers_count,
+				&frame_graph_vulkan->execution_units_buffer_barriers[execution_unit->resource_barriers_start_idx],
+				execution_unit->image_barriers_count,
+				&frame_graph_vulkan->execution_units_image_barriers[execution_unit->resource_barriers_start_idx]
+			);
+	}
+
+	//
+	// if we are a render pass, then begin & setup the render pass
+	if (pass->render_pass_layout_id.raw) {
+		HeroPassVulkan* pass_vulkan = &frame_graph_vulkan->passes[pass->pass_enum];
+
+		VkFramebuffer vk_frame_buffer = frame_graph_vulkan->active_frames_frame_buffers[frame_graph->active_frame_idx * frame_graph->passes_cap + pass->pass_enum];
+		if (pass_vulkan->swapchain_id.raw) {
+			HeroSwapchainVulkan* swapchain_vulkan;
+			result = hero_object_pool(HeroSwapchainVulkan, get)(&ldev_vulkan->swapchain_pool, pass_vulkan->swapchain_id, &swapchain_vulkan);
+			if (result < 0) {
+				return result;
+			}
+
+			VkFramebuffer* swapchain_frame_buffers = (VkFramebuffer*)vk_frame_buffer;
+			vk_frame_buffer = swapchain_frame_buffers[swapchain_vulkan->image_idx];
+		}
+
+		//
+		// convert the clear values into VkClearValue
+		VkClearValue* vk_clear_values = hero_alloc_array(VkClearValue, hero_system_alctor, 0, pass_vulkan->clear_count);
+		{
+			U32 next_clear_value_idx = 0;
+			HeroRangeU16 color_output_attachments_range = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_COLOR_OUTPUT_ATTACHMENT];
+			HeroRangeU16 depth_stencil_attachments_range = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_DEPTH_STENCIL_ATTACHMENT];
+			for_range(i, color_output_attachments_range.start_idx, color_output_attachments_range.end_idx) {
+				HeroPassResource* resource = &frame_graph->pass_resources[i];
+				if (next_clear_value_idx >= pass_vulkan->clear_count) {
+					break;
+				}
+
+				if (resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_CLEARED) {
+					VkClearValue* vk_clear = &vk_clear_values[next_clear_value_idx];
+					vk_clear->color.float32[0] = resource->clear_value.color.f32[0];
+					vk_clear->color.float32[1] = resource->clear_value.color.f32[1];
+					vk_clear->color.float32[2] = resource->clear_value.color.f32[2];
+					vk_clear->color.float32[3] = resource->clear_value.color.f32[3];
+					next_clear_value_idx += 1;
+				}
+			}
+
+			for_range(i, depth_stencil_attachments_range.start_idx, depth_stencil_attachments_range.end_idx) {
+				HeroPassResource* resource = &frame_graph->pass_resources[i];
+				if (next_clear_value_idx >= pass_vulkan->clear_count) {
+					break;
+				}
+
+				if (resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_CLEARED) {
+					VkClearValue* vk_clear = &vk_clear_values[next_clear_value_idx];
+					vk_clear->depthStencil.depth = resource->clear_value.depth;
+					vk_clear->depthStencil.stencil = resource->clear_value.stencil;
+					next_clear_value_idx += 1;
+				}
+			}
+		}
+
+		HeroUAabb render_area = {
+			.x = UINT32_MAX,
+			.y = UINT32_MAX,
+			.ex = 0,
+			.ey = 0,
+		};
+		U16 viewports_count = pass->viewports_range.end_idx - pass->viewports_range.start_idx;
+		VkViewport* vk_viewports = hero_alloc_array(VkViewport, hero_system_alctor, 0, viewports_count);
+		VkRect2D* vk_scissors = hero_alloc_array(VkRect2D, hero_system_alctor, 0, viewports_count);
+		for_range(i, pass->viewports_range.start_idx, pass->viewports_range.end_idx) {
+			HeroPassViewport* pass_viewport = &frame_graph->viewports[i];
+
+			HeroViewport* viewport = &pass_viewport->viewport;
+			HeroViewport default_viewport;
+			if (!pass_viewport->has_set_viewport) {
+				default_viewport.x = 0.f;
+				default_viewport.y = 0.f;
+				default_viewport.width = pass_vulkan->frame_buffer_image_width;
+				default_viewport.height = pass_vulkan->frame_buffer_image_height;
+				default_viewport.min_depth = 0.f;
+				default_viewport.max_depth = 1.f;
+				viewport = &default_viewport;
+			}
+
+			HeroUAabb* scissor = &pass_viewport->scissor;
+			HeroUAabb default_scissor;
+			if (!pass_viewport->has_set_scissor) {
+				default_scissor.x = 0.f;
+				default_scissor.y = 0.f;
+				default_scissor.ex = pass_vulkan->frame_buffer_image_width;
+				default_scissor.ey = pass_vulkan->frame_buffer_image_height;
+				scissor = &default_scissor;
+			}
+
+			VkViewport* vk_viewport = &vk_viewports[i];
+			_hero_vulkan_convert_to_viewport(viewport, vk_viewport);
+			_hero_vulkan_convert_to_rect2d(scissor, &vk_scissors[i]);
+
+			render_area.x = HERO_MIN(render_area.x, (S32)vk_viewport->x);
+			render_area.y = HERO_MIN(render_area.y, (S32)vk_viewport->y);
+
+			S32 ex = (S32)vk_viewport->x + (S32)vk_viewport->width;
+			S32 ey = (S32)vk_viewport->y + (S32)vk_viewport->height;
+			render_area.ex = HERO_MAX(render_area.ex, ex);
+			render_area.ey = HERO_MAX(render_area.ey, ey);
+		}
+
+		VkRect2D vk_render_area = {
+			.offset.x = render_area.x,
+			.offset.y = render_area.y,
+			.extent.width = render_area.ex - render_area.x,
+			.extent.height = render_area.ey - render_area.y,
+		};
+
+		VkRenderPassBeginInfo render_pass_being_info = {
+			.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
+			.pNext = NULL,
+			.renderPass = pass_vulkan->render_pass,
+			.framebuffer = vk_frame_buffer,
+			.renderArea = vk_render_area,
+			.clearValueCount = pass_vulkan->clear_count,
+			.pClearValues = vk_clear_values,
+		};
+
+		ldev_vulkan->vkCmdBeginRenderPass(vk_command_buffer, &render_pass_being_info, VK_SUBPASS_CONTENTS_INLINE);
+
+		ldev_vulkan->vkCmdSetViewport(vk_command_buffer, 0, viewports_count, vk_viewports);
+		ldev_vulkan->vkCmdSetScissor(vk_command_buffer, 0, viewports_count, vk_scissors);
+	}
+
+	//
+	// look at all of the read write image resources for this pass and clear them if they requested to be cleared
+	HeroRangeU16 rw_image_resource_range = pass->resource_ranges_by_type[HERO_PASS_RESOURCE_TYPE_RW_IMAGE];
+	for_range(i, rw_image_resource_range.start_idx, rw_image_resource_range.end_idx) {
+		HeroPassResource* resource = &frame_graph->pass_resources[i];
+		HERO_DEBUG_ASSERT(resource->type == HERO_PASS_RESOURCE_TYPE_RW_IMAGE, "internal error: expected the resource to be HERO_PASS_RESOURCE_TYPE_RW_IMAGE");
+
+		if (!(resource->flags & HERO_PASS_RESOURCE_FLAGS_IS_CLEARED)) {
+			continue;
+		}
+
+		HeroImageInfo* info;
+		result = _hero_image_info_get(ldev, resource->data.image_info_id, &info);
+		if (result < 0) {
+			return result;
+		}
+
+		HeroVulkanResource* vulkan_resource = _hero_vulkan_frame_graph_vulkan_resource_get(frame_graph_vulkan, resource, frame_graph->active_frame_idx);
+		if (HERO_IMAGE_FORMAT_IS_DEPTH(info->format)) {
+			VkClearDepthStencilValue vk_clear_value = {
+				.depth = resource->clear_value.depth,
+				.stencil = resource->clear_value.stencil,
+			};
+
+			ldev_vulkan->vkCmdClearDepthStencilImage(
+				vk_command_buffer,
+				vulkan_resource->image,
+				VK_IMAGE_LAYOUT_GENERAL,
+				&vk_clear_value,
+				0,
+				NULL);
+		} else {
+			VkClearColorValue vk_clear_value;
+			vk_clear_value.float32[0] = resource->clear_value.color.f32[0];
+			vk_clear_value.float32[1] = resource->clear_value.color.f32[1];
+			vk_clear_value.float32[2] = resource->clear_value.color.f32[2];
+			vk_clear_value.float32[3] = resource->clear_value.color.f32[3];
+
+			ldev_vulkan->vkCmdClearColorImage(
+				vk_command_buffer,
+				vulkan_resource->image,
+				VK_IMAGE_LAYOUT_GENERAL,
+				&vk_clear_value,
+				0,
+				NULL);
+		}
+	}
+
+	command_recorder->vulkan.bound_pipeline_graphics.raw = 0;
+	command_recorder->vulkan.bound_pipeline_compute.raw = 0;
+	for_range(i, 0, HERO_BUFFER_BINDINGS_CAP) {
+		command_recorder->vulkan.bound_vertex_buffers[i] = VK_NULL_HANDLE;
+		command_recorder->vulkan.bound_vertex_buffer_offsets[i] = 0;
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_frame_graph_record_pass_end(_HeroCommandRecorder* command_recorder) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->public_.ldev;
+
+	VkCommandBuffer vk_command_buffer = command_recorder->vulkan.command_buffer;
+
+	//
+	// if we are a render pass, then begin & setup the render pass
+	if (command_recorder->public_.pass->render_pass_layout_id.raw) {
+		ldev_vulkan->vkCmdEndRenderPass(vk_command_buffer);
+	}
+
+	vk_result = ldev_vulkan->vkEndCommandBuffer(vk_command_buffer);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_frame_graph_submit(HeroLogicalDevice* ldev, HeroFrameGraph* frame_graph) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroFrameGraphVulkan* frame_graph_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroFrameGraphVulkan, frame_graph);
+
+	if (frame_graph_vulkan->num_frames_to_descriptor_sets) {
+		frame_graph_vulkan->num_frames_to_descriptor_sets -= 1;
+		VkDescriptorSet vk_descriptor_set = frame_graph_vulkan->active_frames[frame_graph->active_frame_idx].descriptor_set;
+
+		VkDescriptorImageInfo* samplers;
+		VkDescriptorImageInfo* ro_image_1ds;
+		VkDescriptorImageInfo* ro_image_2ds;
+		VkDescriptorImageInfo* ro_image_3ds;
+		VkDescriptorImageInfo* rw_image_1ds;
+		VkDescriptorImageInfo* rw_image_2ds;
+		VkDescriptorImageInfo* rw_image_3ds;
+
+		//
+		// allocate the update arrays for the resources and set them all to the null resource
+		{
+			{
+				samplers = hero_alloc_array(VkDescriptorImageInfo, hero_system_alctor, 0, ldev_vulkan->sampler_pool.cap);
+				if (samplers == NULL) {
+					return HERO_ERROR(ALLOCATION_FAILURE);
+				}
+
+				for_range(i, 0, ldev_vulkan->sampler_pool.cap) {
+					VkDescriptorImageInfo* info = &samplers[i];
+					info->sampler = ldev_vulkan->null_sampler;
+				}
+			}
+
+			{
+				ro_image_1ds = hero_alloc_array(VkDescriptorImageInfo, hero_system_alctor, 0, frame_graph->pass_resources_cap);
+				if (ro_image_1ds == NULL) {
+					return HERO_ERROR(ALLOCATION_FAILURE);
+				}
+
+				for_range(i, 0, frame_graph->pass_resources_cap) {
+					VkDescriptorImageInfo* info = &ro_image_1ds[i];
+					info->imageView = ldev_vulkan->null_image_view_1d;
+					info->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+				}
+			}
+
+			{
+				ro_image_2ds = hero_alloc_array(VkDescriptorImageInfo, hero_system_alctor, 0, frame_graph->pass_resources_cap);
+				if (ro_image_2ds == NULL) {
+					return HERO_ERROR(ALLOCATION_FAILURE);
+				}
+
+				for_range(i, 0, frame_graph->pass_resources_cap) {
+					VkDescriptorImageInfo* info = &ro_image_2ds[i];
+					info->imageView = ldev_vulkan->null_image_view_2d;
+					info->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+				}
+			}
+
+			{
+				ro_image_3ds = hero_alloc_array(VkDescriptorImageInfo, hero_system_alctor, 0, frame_graph->pass_resources_cap);
+				if (ro_image_3ds == NULL) {
+					return HERO_ERROR(ALLOCATION_FAILURE);
+				}
+
+				for_range(i, 0, frame_graph->pass_resources_cap) {
+					VkDescriptorImageInfo* info = &ro_image_3ds[i];
+					info->imageView = ldev_vulkan->null_image_view_3d;
+					info->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+				}
+			}
+
+			{
+				rw_image_1ds = hero_alloc_array(VkDescriptorImageInfo, hero_system_alctor, 0, frame_graph->pass_resources_cap);
+				if (rw_image_1ds == NULL) {
+					return HERO_ERROR(ALLOCATION_FAILURE);
+				}
+
+				for_range(i, 0, frame_graph->pass_resources_cap) {
+					VkDescriptorImageInfo* info = &rw_image_1ds[i];
+					info->imageView = ldev_vulkan->null_image_view_1d;
+					info->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+				}
+			}
+
+			{
+				rw_image_2ds = hero_alloc_array(VkDescriptorImageInfo, hero_system_alctor, 0, frame_graph->pass_resources_cap);
+				if (rw_image_2ds == NULL) {
+					return HERO_ERROR(ALLOCATION_FAILURE);
+				}
+
+				for_range(i, 0, frame_graph->pass_resources_cap) {
+					VkDescriptorImageInfo* info = &rw_image_2ds[i];
+					info->imageView = ldev_vulkan->null_image_view_2d;
+					info->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+				}
+			}
+
+			{
+				rw_image_3ds = hero_alloc_array(VkDescriptorImageInfo, hero_system_alctor, 0, frame_graph->pass_resources_cap);
+				if (rw_image_3ds == NULL) {
+					return HERO_ERROR(ALLOCATION_FAILURE);
+				}
+
+				for_range(i, 0, frame_graph->pass_resources_cap) {
+					VkDescriptorImageInfo* info = &rw_image_2ds[i];
+					info->imageView = ldev_vulkan->null_image_view_3d;
+					info->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+				}
+			}
+		}
+
+		//
+		// now set all of the resources in the update arrays
+		{
+			HeroSamplerVulkan* sampler = NULL;
+			HeroSamplerId sampler_id = {0};
+			while (hero_object_pool(HeroSamplerVulkan, iter_next)(&ldev_vulkan->sampler_pool, &sampler_id, &sampler) != HERO_SUCCESS_FINISHED) {
+				U32 idx = hero_object_id(HeroSamplerId, idx)(sampler_id);
+				VkDescriptorImageInfo* info = &samplers[idx];
+				info->sampler = sampler->handle;
+			}
+
+			for_range(resource_idx, 0, frame_graph->pass_resources_cap) {
+				HeroPassResource* resource = &frame_graph->pass_resources[resource_idx];
+				if (HERO_PASS_RESOURCE_TYPE_IS_BUFFER(resource->type)) {
+					continue;
+				}
+
+				bool is_rw = HERO_PASS_RESOURCE_TYPE_IS_MUTABLE(resource->type);
+
+				HeroImageInfo* info;
+				result = _hero_image_info_get(ldev, resource->data.image_info_id, &info);
+				if (result < 0) {
+					return result;
+				}
+
+				VkDescriptorImageInfo* infos;
+				switch (info->type) {
+					case HERO_IMAGE_TYPE_1D:
+						if (is_rw) infos = rw_image_1ds;
+						else       infos = ro_image_1ds;
+						break;
+					case HERO_IMAGE_TYPE_2D:
+						if (is_rw) infos = rw_image_2ds;
+						else       infos = ro_image_2ds;
+						break;
+					case HERO_IMAGE_TYPE_3D:
+						if (is_rw) infos = rw_image_3ds;
+						else       infos = ro_image_3ds;
+						break;
+				}
+
+				HeroVulkanResource* vulkan_resource = _hero_vulkan_frame_graph_vulkan_resource_get(frame_graph_vulkan, resource, frame_graph->active_frame_idx);
+
+				VkImageLayout image_layout = is_rw ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+				infos[resource_idx].imageView = vulkan_resource->image_view;
+				infos[resource_idx].imageLayout = image_layout;
+			}
+		}
+
+		VkWriteDescriptorSet vk_write_descriptor_sets[HERO_VULKAN_DESCRIPTOR_BINDING_COUNT];
+		for_range(binding, 0, HERO_VULKAN_DESCRIPTOR_BINDING_COUNT) {
+			VkWriteDescriptorSet* write = &vk_write_descriptor_sets[binding];
+			write->sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+			write->pNext = NULL;
+			write->dstSet = vk_descriptor_set;
+			write->dstBinding = binding;
+			write->dstArrayElement = 0;
+			write->descriptorCount = binding == HERO_VULKAN_DESCRIPTOR_BINDING_SAMPLERS ? ldev_vulkan->sampler_pool.cap : frame_graph->pass_resources_cap;
+			write->descriptorType = hero_vulkan_descriptor_binding_types[binding];
+			write->pBufferInfo = NULL;
+			write->pTexelBufferView = NULL;
+		}
+
+		vk_write_descriptor_sets[HERO_VULKAN_DESCRIPTOR_BINDING_SAMPLERS].pImageInfo = samplers;
+		vk_write_descriptor_sets[HERO_VULKAN_DESCRIPTOR_BINDING_RO_IMAGE_1D].pImageInfo = ro_image_1ds;
+		vk_write_descriptor_sets[HERO_VULKAN_DESCRIPTOR_BINDING_RO_IMAGE_2D].pImageInfo = ro_image_2ds;
+		vk_write_descriptor_sets[HERO_VULKAN_DESCRIPTOR_BINDING_RO_IMAGE_3D].pImageInfo = ro_image_3ds;
+		vk_write_descriptor_sets[HERO_VULKAN_DESCRIPTOR_BINDING_RW_IMAGE_1D].pImageInfo = rw_image_1ds;
+		vk_write_descriptor_sets[HERO_VULKAN_DESCRIPTOR_BINDING_RW_IMAGE_2D].pImageInfo = rw_image_2ds;
+		vk_write_descriptor_sets[HERO_VULKAN_DESCRIPTOR_BINDING_RW_IMAGE_3D].pImageInfo = rw_image_3ds;
+
+		ldev_vulkan->vkUpdateDescriptorSets(
+			ldev_vulkan->handle,
+			HERO_VULKAN_DESCRIPTOR_BINDING_COUNT,
+			vk_write_descriptor_sets,
+			0,
+			NULL);
+	}
+
+	return HERO_SUCCESS;
+}
+
+void _hero_vulkan_cmd_draw_start(HeroCommandRecorder* command_recorder, HeroPipelineId pipeline_id) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+
+	VkCommandBuffer vk_command_buffer = command_recorder_->vulkan.command_buffer;
+	if (pipeline_id.raw != command_recorder_->vulkan.bound_pipeline_graphics.raw) {
+		HeroPipelineVulkan* pipeline_vulkan;
+		result = hero_object_pool(HeroPipelineVulkan, get)(&ldev_vulkan->pipeline_pool, pipeline_id, &pipeline_vulkan);
+		HERO_RESULT_ASSERT(result);
+
+		ldev_vulkan->vkCmdBindPipeline(vk_command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_vulkan->handle);
+		command_recorder_->vulkan.bound_pipeline_graphics.raw = pipeline_id.raw;
+	}
+
+	command_recorder_->vulkan.vertex_buffer_binding_start = -1;
+	command_recorder_->vulkan.vertex_buffer_binding_end = 0;
+	command_recorder_->vulkan.vertices_start_idx = 0;
+	command_recorder_->vulkan.indices_start_idx = 0;
+	command_recorder_->vulkan.instances_start_idx = 0;
+	command_recorder_->vulkan.instances_count = 1;
+}
+
+void _hero_vulkan_cmd_draw_end_prepare(_HeroCommandRecorder* command_recorder) {
+	//
+	// if any of the vertex buffers have changed, lets bind them.
+	if (command_recorder->vulkan.vertex_buffer_binding_start < command_recorder->vulkan.vertex_buffer_binding_end) {
+		HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->public_.ldev;
+		U32 buffers_count = command_recorder->vulkan.vertex_buffer_binding_end - command_recorder->vulkan.vertex_buffer_binding_start;
+		ldev_vulkan->vkCmdBindVertexBuffers(command_recorder->vulkan.command_buffer,
+			command_recorder->vulkan.vertex_buffer_binding_start,
+			buffers_count,
+			&command_recorder->vulkan.bound_vertex_buffers[command_recorder->vulkan.vertex_buffer_binding_start],
+			&command_recorder->vulkan.bound_vertex_buffer_offsets[command_recorder->vulkan.vertex_buffer_binding_start]);
+	}
+}
+
+void _hero_vulkan_cmd_draw_end_vertexed(HeroCommandRecorder* command_recorder, U32 vertices_count) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+
+	_hero_vulkan_cmd_draw_end_prepare(command_recorder_);
+
+	ldev_vulkan->vkCmdDraw(command_recorder_->vulkan.command_buffer,
+		vertices_count,
+		command_recorder_->vulkan.instances_count,
+		command_recorder_->vulkan.vertices_start_idx,
+		command_recorder_->vulkan.instances_start_idx);
+}
+
+void _hero_vulkan_cmd_draw_end_indexed(HeroCommandRecorder* command_recorder, HeroPassResource* index_buffer_resource, HeroIndexType index_type, U32 indices_count) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+
+	_hero_vulkan_cmd_draw_end_prepare(command_recorder_);
+
+	HeroFrameGraph* frame_graph = command_recorder->frame_graph;
+	HeroFrameGraphVulkan* frame_graph_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroFrameGraphVulkan, frame_graph);
+	HeroVulkanResource* vulkan_resource = _hero_vulkan_frame_graph_vulkan_resource_get(frame_graph_vulkan, index_buffer_resource, frame_graph->active_frame_idx);
+
+	VkCommandBuffer vk_command_buffer = command_recorder_->vulkan.command_buffer;
+	ldev_vulkan->vkCmdBindIndexBuffer(vk_command_buffer,
+		vulkan_resource->buffer,
+		0,
+		_hero_vulkan_convert_to_index_type[index_type]);
+
+	ldev_vulkan->vkCmdDrawIndexed(vk_command_buffer,
+		indices_count,
+		command_recorder_->vulkan.instances_count,
+		command_recorder_->vulkan.indices_start_idx,
+		command_recorder_->vulkan.vertices_start_idx,
+		command_recorder_->vulkan.instances_start_idx);
+}
+
+void _hero_vulkan_cmd_draw_set_vertex_buffer(HeroCommandRecorder* command_recorder, HeroPassResource* vertex_buffer_resource, U32 binding, U64 offset) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+
+	HeroFrameGraph* frame_graph = command_recorder->frame_graph;
+	HeroFrameGraphVulkan* frame_graph_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroFrameGraphVulkan, frame_graph);
+	HeroVulkanResource* vulkan_resource = _hero_vulkan_frame_graph_vulkan_resource_get(frame_graph_vulkan, vertex_buffer_resource, frame_graph->active_frame_idx);
+
+	HERO_ASSERT_ARRAY_BOUNDS(binding, HERO_BUFFER_BINDINGS_CAP);
+
+	command_recorder_->vulkan.bound_vertex_buffers[binding] = vulkan_resource->buffer;
+	command_recorder_->vulkan.bound_vertex_buffer_offsets[binding] = offset;
+	command_recorder_->vulkan.vertex_buffer_binding_start = HERO_MIN(command_recorder_->vulkan.vertex_buffer_binding_start, binding);
+	command_recorder_->vulkan.vertex_buffer_binding_end = HERO_MAX(command_recorder_->vulkan.vertex_buffer_binding_end, binding + 1);
+}
+
+void _hero_vulkan_cmd_draw_set_vertices_start_idx(HeroCommandRecorder* command_recorder, U32 vertices_start_idx) {
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+	command_recorder_->vulkan.vertices_start_idx = vertices_start_idx;
+}
+
+void _hero_vulkan_cmd_draw_set_indices_start_idx(HeroCommandRecorder* command_recorder, U32 indices_start_idx) {
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+	command_recorder_->vulkan.indices_start_idx = indices_start_idx;
+}
+
+void _hero_vulkan_cmd_draw_set_instances(HeroCommandRecorder* command_recorder, U32 instances_start_idx, U32 instances_count) {
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+	command_recorder_->vulkan.instances_start_idx = instances_start_idx;
+	command_recorder_->vulkan.instances_count = instances_count;
+}
+
+void _hero_vulkan_cmd_compute_dispatch_start(HeroCommandRecorder* command_recorder, HeroShaderId compute_shader_id, U32 group_count_x, U32 group_count_y, U32 group_count_z) {
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+	command_recorder_->vulkan.group_count_x = group_count_x;
+	command_recorder_->vulkan.group_count_y = group_count_y;
+	command_recorder_->vulkan.group_count_z = group_count_z;
+
+	if (command_recorder_->vulkan.bound_pipeline_compute.raw != compute_shader_id.raw) {
+		HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+		VkCommandBuffer vk_command_buffer = command_recorder_->vulkan.command_buffer;
+
+		HeroShaderVulkan* shader_vulkan;
+		HeroResult result = hero_object_pool(HeroShaderVulkan, get)(&ldev_vulkan->shader_pool, compute_shader_id, &shader_vulkan);
+		HERO_RESULT_ASSERT(result);
+
+		ldev_vulkan->vkCmdBindPipeline(vk_command_buffer, VK_PIPELINE_BIND_POINT_COMPUTE, shader_vulkan->compute_pipeline);
+		command_recorder_->vulkan.bound_pipeline_compute = compute_shader_id;
+	}
+}
+
+void _hero_vulkan_cmd_compute_dispatch_end(HeroCommandRecorder* command_recorder) {
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+	VkCommandBuffer vk_command_buffer = command_recorder_->vulkan.command_buffer;
+	ldev_vulkan->vkCmdDispatch(vk_command_buffer, command_recorder_->vulkan.group_count_x, command_recorder_->vulkan.group_count_y, command_recorder_->vulkan.group_count_z);
+}
+
+typedef struct HeroShaderInfo HeroShaderInfo;
+struct HeroShaderInfo {
+	U32 samplers_start_idx;
+	U32 images_start_idx;
+	U32 buffers_start_idx;
+	U32 samplers_count;
+	U32 images_count;
+	U32 buffers_count;
+};
+
+typedef struct HeroShaderBinary HeroShaderBinary;
+struct HeroShaderBinary {
+	U8* code;
+	U32 code_size;
+
+	HeroShaderInfo* info;
+	U32 info_count;
+
+	union {
+		struct {
+			U8* sampler_push_constant_offsets;
+			U8* image_push_constant_offsets;
+			U8* buffer_push_constant_offsets;
+		} vulkan;
+	};
+};
+
+HeroShaderBinary TODO_GENERATE_THIS_SHADER_BINARY_SHIZ;
+
+void _hero_vulkan_cmd_add_sampler(HeroCommandRecorder* command_recorder, U32 binding, HeroSamplerId sampler_id) {
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+
+	HeroShaderBinary* binary = &TODO_GENERATE_THIS_SHADER_BINARY_SHIZ;
+	HeroShaderInfo* info = &binary->info[/*TODO*/0];
+
+	HERO_DEBUG_ASSERT(binding < info->samplers_count, "binding '%u' is out of bounds for the samplers with a count of '%u'", binding, info->samplers_count);
+
+	U32 dst_offset = binary->vulkan.sampler_push_constant_offsets[info->samplers_start_idx + binding];
+	command_recorder_->vulkan.push_constants[dst_offset] = hero_object_id(HeroSamplerId, idx)(sampler_id);
+}
+
+void _hero_vulkan_cmd_add_image(HeroCommandRecorder* command_recorder, U32 binding, HeroPassResource* resource) {
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+
+	HeroShaderBinary* binary = &TODO_GENERATE_THIS_SHADER_BINARY_SHIZ;
+	HeroShaderInfo* info = &binary->info[/*TODO*/0];
+
+	HERO_DEBUG_ASSERT(binding < info->images_count, "binding '%u' is out of bounds for the images with a count of '%u'", binding, info->images_count);
+
+	U32 dst_offset = binary->vulkan.image_push_constant_offsets[info->images_start_idx + binding];
+	U32 resource_idx = resource - command_recorder->frame_graph->pass_resources;
+	command_recorder_->vulkan.push_constants[dst_offset] = resource_idx;
+}
+
+void _hero_vulkan_cmd_add_buffer(HeroCommandRecorder* command_recorder, U32 binding, HeroPassResource* resource) {
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)command_recorder->ldev;
+	_HeroCommandRecorder* command_recorder_ = (_HeroCommandRecorder*)command_recorder;
+
+	HeroShaderBinary* binary = &TODO_GENERATE_THIS_SHADER_BINARY_SHIZ;
+	HeroShaderInfo* info = &binary->info[/*TODO*/0];
+
+	HERO_DEBUG_ASSERT(binding < info->buffers_count, "binding '%u' is out of bounds for the buffers with a count of '%u'", binding, info->buffers_count);
+
+	U32 dst_offset = binary->vulkan.buffer_push_constant_offsets[info->buffers_start_idx + binding];
+	U32 resource_idx = resource - command_recorder->frame_graph->pass_resources;
+	command_recorder_->vulkan.push_constants[dst_offset] = resource_idx;
+}
+
+#if 0
+
+HeroResult _hero_vulkan_render_graph_reinit_output_image_swapchain(HeroLogicalDevice* ldev, HeroImageOutput* image_output, HeroImageInfo* image_info, HeroSwapchain* swapchain, HeroImageOutputVulkan* out) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+	HeroSwapchainVulkan* swapchain_vulkan = HERO_GFX_INTERNAL_OBJECT(HeroSwapchainVulkan, swapchain);
+
+	if (image_info->flags & HERO_IMAGE_INFO_FLAGS_IS_SWAPCHAIN) {
+		out->image_view = swapchain_vulkan->image_views[swapchain_vulkan->image_idx];
+		return HERO_SUCCESS;
+	}
+
+	VkImageCreateInfo vk_image_create_info = {0};
+	vk_image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+	vk_image_create_info.extent.width = (U32)(roundf(image_info->width * (F32)swapchain->width));
+	vk_image_create_info.extent.height = (U32)(roundf(image_info->height * (F32)swapchain->height));
+	vk_image_create_info.extent.depth = 1;
+	vk_image_create_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+	vk_image_create_info.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	vk_image_create_info.format = _hero_vulkan_convert_to_format[image_info->format];
+	vk_image_create_info.imageType = VK_IMAGE_TYPE_2D;
+	vk_image_create_info.samples = 1;
+	vk_image_create_info.mipLevels = 1;
+	vk_image_create_info.arrayLayers = swapchain->array_layers_count;
+
+	vk_result = ldev_vulkan->vkCreateImage(ldev_vulkan->handle, &vk_image_create_info, HERO_VULKAN_TODO_ALLOCATOR, &out->image);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	{
+		VkMemoryRequirements mem_req;
+		ldev_vulkan->vkGetImageMemoryRequirements(ldev_vulkan->handle, out->image, &mem_req);
+
+		_HeroVulkanAllocSetup alloc_setup = {
+			.size = mem_req.size,
+			.align = mem_req.alignment,
+			.memory_type_bits = mem_req.memoryTypeBits,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.type = _HERO_VULKAN_ALLOC_TYPE_IMAGE,
+		};
+
+		result = _hero_vulkan_device_memory_alloc(ldev_vulkan, &alloc_setup, &out->device_memory);
+		if (result < 0) {
+			return result;
+		}
+	}
+
+	VkDeviceSize vk_device_memory_offset = 0;
+	vk_result = ldev_vulkan->vkBindImageMemory(ldev_vulkan->handle, out->image, out->device_memory, vk_device_memory_offset);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	VkImageViewCreateInfo vk_image_view_create_info = {0};
+	vk_image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	vk_image_view_create_info.image = out->image;
+	vk_image_view_create_info.format = _hero_vulkan_convert_to_format[image_info->format];
+	vk_image_view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	vk_image_view_create_info.components.r = VK_COMPONENT_SWIZZLE_R;
+	vk_image_view_create_info.components.g = VK_COMPONENT_SWIZZLE_G;
+	vk_image_view_create_info.components.b = VK_COMPONENT_SWIZZLE_B;
+	vk_image_view_create_info.components.a = VK_COMPONENT_SWIZZLE_A;
+	vk_image_view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	vk_image_view_create_info.subresourceRange.levelCount = image_info->mip_levels_count;
+	vk_image_view_create_info.subresourceRange.layerCount = image_info->array_layers_count;
+
+	vk_result = ldev_vulkan->vkCreateImageView(ldev_vulkan->handle, &vk_image_view_create_info, HERO_VULKAN_TODO_ALLOCATOR, &out->image_view);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_render_graph_init_output_image(HeroLogicalDevice* ldev, HeroImageOutput* image_output, HeroImageInfo* image_info, HeroImageOutputVulkan* out) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	VkImageCreateInfo vk_image_create_info = {0};
+	vk_image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+	vk_image_create_info.extent.width = (U32)roundf(image_info->width);
+	vk_image_create_info.extent.height = (U32)roundf(image_info->height);
+	vk_image_create_info.extent.depth = image_info->depth;
+	vk_image_create_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT;
+	if (HERO_IMAGE_FORMAT_IS_DEPTH(image_info->format)) {
+		vk_image_create_info.usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	} else {
+		vk_image_create_info.usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+	}
+	vk_image_create_info.format = _hero_vulkan_convert_to_format[image_info->format];
+	vk_image_create_info.imageType = image_info->type;
+	vk_image_create_info.samples = 1 << image_info->samples_count_log2;
+	vk_image_create_info.mipLevels = image_info->mip_levels_count;
+	vk_image_create_info.arrayLayers = image_info->array_layers_count;
+
+	vk_result = ldev_vulkan->vkCreateImage(ldev_vulkan->handle, &vk_image_create_info, HERO_VULKAN_TODO_ALLOCATOR, &out->image);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	{
+		VkMemoryRequirements mem_req;
+		ldev_vulkan->vkGetImageMemoryRequirements(ldev_vulkan->handle, out->image, &mem_req);
+
+		_HeroVulkanAllocSetup alloc_setup = {
+			.size = mem_req.size,
+			.align = mem_req.alignment,
+			.memory_type_bits = mem_req.memoryTypeBits,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.type = _HERO_VULKAN_ALLOC_TYPE_IMAGE,
+		};
+
+		result = _hero_vulkan_device_memory_alloc(ldev_vulkan, &alloc_setup, &out->device_memory);
+		if (result < 0) {
+			return result;
+		}
+	}
+
+	VkDeviceSize vk_device_memory_offset = 0;
+	vk_result = ldev_vulkan->vkBindImageMemory(ldev_vulkan->handle, out->image, out->device_memory, vk_device_memory_offset);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	VkImageViewCreateInfo vk_image_view_create_info = {0};
+	vk_image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	vk_image_view_create_info.image = out->image;
+	vk_image_view_create_info.format = _hero_vulkan_convert_to_format[image_info->format];
+	vk_image_view_create_info.viewType = _hero_vulkan_convert_to_image_view_type[image_info->format];
+	vk_image_view_create_info.components.r = VK_COMPONENT_SWIZZLE_R;
+	vk_image_view_create_info.components.g = VK_COMPONENT_SWIZZLE_G;
+	vk_image_view_create_info.components.b = VK_COMPONENT_SWIZZLE_B;
+	vk_image_view_create_info.components.a = VK_COMPONENT_SWIZZLE_A;
+	vk_image_view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	vk_image_view_create_info.subresourceRange.levelCount = image_info->mip_levels_count;
+	vk_image_view_create_info.subresourceRange.layerCount = image_info->array_layers_count;
+
+	vk_result = ldev_vulkan->vkCreateImageView(ldev_vulkan->handle, &vk_image_view_create_info, HERO_VULKAN_TODO_ALLOCATOR, &out->image_view);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_render_graph_init_output_buffer(HeroLogicalDevice* ldev, HeroBufferOutput* buffer_output, HeroBufferInfo* buffer_info, HeroBufferOutputVulkan* out) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	VkBufferCreateInfo vk_create_info = {0};
+	vk_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	vk_create_info.size = buffer_info->size;
+	vk_create_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
+	vk_result = ldev_vulkan->vkCreateBuffer(ldev_vulkan->handle, &vk_create_info, HERO_VULKAN_TODO_ALLOCATOR, &out->buffer);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	void* mapped_memory;
+	{
+		VkMemoryRequirements mem_req;
+		ldev_vulkan->vkGetBufferMemoryRequirements(ldev_vulkan->handle, out->buffer, &mem_req);
+
+		_HeroVulkanAllocSetup alloc_setup = {
+			.size = mem_req.size,
+			.align = mem_req.alignment,
+			.memory_type_bits = mem_req.memoryTypeBits,
+			.memory_location = HERO_MEMORY_LOCATION_SHARED,
+			.type = _HERO_VULKAN_ALLOC_TYPE_BUFFER,
+		};
+
+		result = _hero_vulkan_device_memory_alloc(ldev_vulkan, &alloc_setup, &out->device_memory);
+		if (result < 0) {
+			return result;
+		}
+	}
+
+	VkDeviceSize vk_device_memory_offset = 0;
+	vk_result = ldev_vulkan->vkBindBufferMemory(ldev_vulkan->handle, out->buffer, out->device_memory, vk_device_memory_offset);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_render_graph_reinit_frame_buffer(HeroLogicalDevice* ldev, HeroRenderGraphVulkan* render_graph_vulkan, HeroSwapchain* swapchain, HeroPassInfo* pass_info, HeroPassInfoVulkan* out) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	if (out->frame_buffer) {
+		ldev_vulkan->vkDestroyFramebuffer(ldev_vulkan->handle, out->frame_buffer, HERO_VULKAN_TODO_ALLOCATOR);
+	}
+
+	U32 output_attachments_count = 0;
+	for_range(image_output_enum, 0, pass_info->image_outputs_count) {
+		HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
+		if (image_output->attachment_idx != HERO_ATTACHMENT_IDX_INVALID) {
+			output_attachments_count += 1;
+		}
+	}
+
+	VkImageView* vk_attachments = hero_alloc_array(VkImageView, hero_system_alctor, 0, output_attachments_count);
+	U32 output_attachment_idx = 0;
+	for_range(image_output_enum, 0, pass_info->image_outputs_count) {
+		HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
+		HeroImageOutputVulkan* image_output_vulkan = &render_graph_vulkan->image_outputs[image_output->backend_image_output_enum];
+		if (image_output->attachment_idx != HERO_ATTACHMENT_IDX_INVALID) {
+			vk_attachments[output_attachment_idx] = image_output_vulkan->image_view;
+			output_attachment_idx += 1;
+		}
+	}
+
+	HeroImageOutput* image_output = &pass_info->image_outputs[0];
+	HeroImageInfo* image_info = &render_graph_vulkan->public_.images[image_output->image_info_enum];
+
+	VkFramebufferCreateInfo vk_create_info = {
+		.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.renderPass = out->render_pass,
+		.attachmentCount = output_attachments_count,
+		.pAttachments = vk_attachments,
+		.width = swapchain ? (U32)roundf(image_info->width * (F32)swapchain->width) : (U32)roundf(image_info->width),
+		.height = swapchain ? (U32)roundf(image_info->height * (F32)swapchain->height) : (U32)roundf(image_info->height),
+		.layers = image_info->array_layers_count,
+	};
+
+	VkFramebuffer vk_frame_buffer;
+	vk_result = ldev_vulkan->vkCreateFramebuffer(ldev_vulkan->handle, &vk_create_info, HERO_VULKAN_TODO_ALLOCATOR, &out->frame_buffer);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_render_graph_init_render_pass(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroPassInfo* pass_info, HeroPassInfoVulkan* out) {
+	HeroResult result;
+	VkResult vk_result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	HeroRenderPassLayoutVulkan* render_pass_layout_vulkan;
+	result = hero_object_pool(HeroRenderPassLayoutVulkan, get)(&ldev_vulkan->render_pass_layout_pool, pass_info->layout_id, &render_pass_layout_vulkan);
+	if (result < 0) {
+		return result;
+	}
+
+	U32 attachments_count = 0;
+	U32 output_attachments_count = 0;
+	U32 input_attachments_count = 0;
+	for_range(image_output_enum, 0, pass_info->image_outputs_count) {
+		HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
+		if (image_output->attachment_idx != HERO_ATTACHMENT_IDX_INVALID) {
+			attachments_count += 1;
+			output_attachments_count += 1;
+		}
+	}
+	for_range(image_input_enum, 0, pass_info->image_inputs_count) {
+		HeroImageInput* image_input = &pass_info->image_inputs[image_input_enum];
+		if (image_input->attachment_idx != HERO_ATTACHMENT_IDX_INVALID) {
+			attachments_count += 1;
+			input_attachments_count += 1;
+		}
+	}
+
+	VkAttachmentDescription* vk_attachments;
+	VkAttachmentReference* vk_attachment_output_refs;
+	VkAttachmentReference* vk_attachment_input_refs;
+	VkSubpassDescription vk_subpass = {0};
+	{
+		vk_attachments = hero_alloc_array(VkAttachmentDescription, hero_system_alctor, HERO_GFX_ALLOC_TAG_RENDER_PASS_VULKAN_ATTACHMENT_DESCRIPTION, attachments_count);
+		if (vk_attachments == NULL) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		vk_attachment_output_refs = hero_alloc_array(VkAttachmentReference, hero_system_alctor, HERO_GFX_ALLOC_TAG_RENDER_PASS_VULKAN_ATTACHMENT_REF, output_attachments_count);
+		if (output_attachments_count && vk_attachment_output_refs == NULL) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		vk_attachment_input_refs = hero_alloc_array(VkAttachmentReference, hero_system_alctor, HERO_GFX_ALLOC_TAG_RENDER_PASS_VULKAN_ATTACHMENT_REF, input_attachments_count);
+		if (input_attachments_count && vk_attachment_input_refs == NULL) {
+			return HERO_ERROR(ALLOCATION_FAILURE);
+		}
+
+		U32 attachment_idx = 0;
+		U32 output_attachment_idx = 0;
+		U32 input_attachment_idx = 0;
+		for_range(image_output_enum, 0, pass_info->image_outputs_count) {
+			HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
+			HeroImageInfo* image_info = &setup->images[image_output->image_info_enum];
+			if (image_output->attachment_idx != HERO_ATTACHMENT_IDX_INVALID) {
+				U32 idx = attachment_idx;
+				U32 output_idx = output_attachment_idx;
+				if (image_output_enum == pass_info->depth_stencil_image_output_enum) {
+					idx = attachments_count - 1;
+					output_idx = output_attachments_count - 1;
+				}
+
+				VkAttachmentDescription* attachment = &vk_attachments[idx];
+				*attachment = (VkAttachmentDescription) {
+					.flags = 0,
+					.format = _hero_vulkan_convert_to_format[image_info->format],
+					.samples = 1 << image_info->samples_count_log2,
+					.loadOp = image_output->flags & HERO_IMAGE_INFO_FLAGS_PERSISTENT ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR,
+					.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+					.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+					.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+					.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+					.finalLayout = image_info->swapchain_id.raw ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_GENERAL,
+				};
+
+				VkAttachmentReference* ref = &vk_attachment_output_refs[output_idx];
+				ref->attachment = idx;
+				ref->layout = image_info->swapchain_id.raw ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_GENERAL;
+
+				if (image_output_enum != pass_info->depth_stencil_image_output_enum) {
+					attachment_idx += 1;
+					output_attachment_idx += 1;
+				}
+			}
+		}
+		for_range(image_input_enum, 0, pass_info->image_inputs_count) {
+			HeroImageInput* image_input = &pass_info->image_inputs[image_input_enum];
+			HeroImageOutput* image_output;
+			if (image_input->pass_enum == HERO_PASS_ENUM_INVALID) {
+				image_output = &setup->cpu_image_outputs[image_input->pass_image_output_enum];
+			} else {
+				HeroPassInfo* input_pass_info = &setup->passes[image_input->pass_enum];
+				image_output = &input_pass_info->image_outputs[image_input->pass_image_output_enum];
+			}
+
+			HeroImageInfo* image_info = &setup->images[image_output->image_info_enum];
+			if (image_input->attachment_idx != HERO_ATTACHMENT_IDX_INVALID) {
+				VkAttachmentDescription* attachment = &vk_attachments[attachment_idx];
+				*attachment = (VkAttachmentDescription) {
+					.flags = 0,
+					.format = _hero_vulkan_convert_to_format[image_info->format],
+					.samples = 1 << image_info->samples_count_log2,
+					.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD,
+					.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+					.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+					.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+					.initialLayout = VK_IMAGE_LAYOUT_GENERAL,
+					.finalLayout = VK_IMAGE_LAYOUT_GENERAL,
+				};
+
+				VkAttachmentReference* ref = &vk_attachment_input_refs[input_attachment_idx];
+				ref->attachment = attachment_idx;
+				ref->layout = VK_IMAGE_LAYOUT_GENERAL;
+
+				attachment_idx += 1;
+				input_attachment_idx += 1;
+			}
+		}
+
+		vk_subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		vk_subpass.inputAttachmentCount = input_attachments_count;
+		vk_subpass.pInputAttachments = vk_attachment_input_refs;
+		vk_subpass.colorAttachmentCount = pass_info->depth_stencil_image_output_enum != HERO_PASS_IMAGE_OUTPUT_ENUM_INVALID ? output_attachments_count - 1 : output_attachments_count;
+		vk_subpass.pColorAttachments = vk_attachment_output_refs;
+		vk_subpass.pDepthStencilAttachment = pass_info->depth_stencil_image_output_enum != HERO_PASS_IMAGE_OUTPUT_ENUM_INVALID ? &vk_attachment_output_refs[output_attachments_count - 1] : NULL;
+	}
+
+	static VkSubpassDependency vk_dependencies[] = {
+		{
+			.srcSubpass      = VK_SUBPASS_EXTERNAL,
+			.dstSubpass      = 0,
+			.srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+			.dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+			.srcAccessMask   = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			.dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+			.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+		},
+		{
+			.srcSubpass      = 0,
+			.dstSubpass      = VK_SUBPASS_EXTERNAL,
+			.srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			.dstStageMask    = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+			.srcAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+			.dstAccessMask   = VK_ACCESS_MEMORY_READ_BIT,
+			.dependencyFlags = VK_DEPENDENCY_BY_REGION_BIT
+		}
+	};
+
+	VkRenderPassCreateInfo vk_create_info = {
+		.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO,
+		.pNext = NULL,
+		.flags = 0,
+		.pAttachments = vk_attachments,
+		.attachmentCount = attachments_count,
+		.pSubpasses = &vk_subpass,
+		.subpassCount = 1,
+		.pDependencies = vk_dependencies,
+		.dependencyCount = HERO_ARRAY_COUNT(vk_dependencies),
+	};
+
+	VkRenderPass vk_render_pass;
+	vk_result = ldev_vulkan->vkCreateRenderPass(ldev_vulkan->handle, &vk_create_info, HERO_VULKAN_TODO_ALLOCATOR, &vk_render_pass);
+	if (vk_result < 0) {
+		return _hero_vulkan_convert_from_result(vk_result);
+	}
+
+	out->render_pass = vk_render_pass;
+	return HERO_SUCCESS;
+}
+
+HeroResult _hero_vulkan_render_graph_init(HeroLogicalDevice* ldev, HeroRenderGraphSetup* setup, HeroRenderGraphId* id_out, HeroRenderGraph** out) {
+	HeroResult result;
+	HeroLogicalDeviceVulkan* ldev_vulkan = (HeroLogicalDeviceVulkan*)ldev;
+
+	HeroRenderGraphVulkan* render_graph_vulkan;
+	result = hero_object_pool(HeroRenderGraphVulkan, alloc)(&ldev_vulkan->render_graph_pool, 0, &render_graph_vulkan, id_out);
+	if (result < 0) {
+		return result;
+	}
+
+	U32 image_outputs_count = 0;
+	U32 buffer_outputs_count = 0;
+	for_range(image_output_enum, 0, setup->cpu_image_outputs_count) {
+		HeroImageOutput* image_output = &setup->cpu_image_outputs[image_output_enum];
+		image_output->backend_image_output_enum = image_outputs_count;
+		image_outputs_count += 1;
+	}
+	for_range(buffer_output_enum, 0, setup->cpu_buffer_outputs_count) {
+		HeroBufferOutput* buffer_output = &setup->cpu_buffer_outputs[buffer_output_enum];
+		buffer_output->backend_buffer_output_enum = buffer_outputs_count;
+		buffer_outputs_count += 1;
+	}
+	for_range(pass_enum, 0, setup->passes_count) {
+		HeroPassInfo* pass_info = &setup->passes[pass_enum];
+		for_range(image_output_enum, 0, pass_info->image_outputs_count) {
+			HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
+			image_output->backend_image_output_enum = image_outputs_count;
+			image_outputs_count += 1;
+		}
+		for_range(buffer_output_enum, 0, pass_info->buffer_outputs_count) {
+			HeroBufferOutput* buffer_output = &pass_info->buffer_outputs[buffer_output_enum];
+			buffer_output->backend_buffer_output_enum = buffer_outputs_count;
+			buffer_outputs_count += 1;
+		}
+	}
+
+	HeroPassInfoVulkan* passes_vulkan = hero_alloc_array(HeroPassInfoVulkan, hero_system_alctor, 0, setup->passes_count);
+	HeroImageOutputVulkan* image_outputs_vulkan = hero_alloc_array(HeroImageOutputVulkan, hero_system_alctor, 0, image_outputs_count);
+	HeroBufferOutputVulkan* buffer_outputs_vulkan = hero_alloc_array(HeroBufferOutputVulkan, hero_system_alctor, 0, buffer_outputs_count);
+	if ((setup->passes_count && !passes_vulkan) || (image_outputs_count && !image_outputs_vulkan) || (buffer_outputs_count && !buffer_outputs_vulkan)) {
 		return HERO_ERROR(ALLOCATION_FAILURE);
 	}
 
 	HERO_ZERO_ELMT_MANY(passes_vulkan, setup->passes_count);
-	HERO_ZERO_ELMT_MANY(images_vulkan, setup->images_count);
-	HERO_ZERO_ELMT_MANY(buffers_vulkan, setup->buffers_count);
+	HERO_ZERO_ELMT_MANY(image_outputs_vulkan, image_outputs_count);
+	HERO_ZERO_ELMT_MANY(buffer_outputs_vulkan, buffer_outputs_count);
 
 	render_graph_vulkan->passes = passes_vulkan;
-	render_graph_vulkan->images = images_vulkan;
-	render_graph_vulkan->buffers = buffers_vulkan;
+	render_graph_vulkan->image_outputs = image_outputs_vulkan;
+	render_graph_vulkan->buffer_outputs = buffer_outputs_vulkan;
+
+	for_range(image_output_enum, 0, setup->cpu_image_outputs_count) {
+		HeroImageOutput* image_output = &setup->cpu_image_outputs[image_output_enum];
+		HeroImageInfo* image_info = &setup->images[image_output->image_info_enum];
+
+		result = _hero_vulkan_render_graph_init_output_image(ldev, image_output, image_info, &image_outputs_vulkan[image_output->backend_image_output_enum]);
+		if (result < 0) {
+			return result;
+		}
+	}
+	for_range(buffer_output_enum, 0, setup->cpu_buffer_outputs_count) {
+		HeroBufferOutput* buffer_output = &setup->cpu_buffer_outputs[buffer_output_enum];
+		HeroBufferInfo* buffer_info = &setup->buffers[buffer_output->buffer_info_enum];
+
+		result = _hero_vulkan_render_graph_init_output_buffer(ldev, buffer_output, buffer_info, &buffer_outputs_vulkan[buffer_output->backend_buffer_output_enum]);
+		if (result < 0) {
+			return result;
+		}
+	}
+	for_range(pass_enum, 0, setup->passes_count) {
+		HeroPassInfo* pass_info = &setup->passes[pass_enum];
+
+		HeroSwapchain* swapchain = NULL;
+		HeroImageInfo* image_info = &setup->images[pass_info->image_outputs[0].image_info_enum];
+		if (image_info->swapchain_id.raw) {
+			result = hero_swapchain_get(ldev, image_info->swapchain_id, &swapchain);
+			if (result < 0) {
+				return result;
+			}
+		}
+
+
+		for_range(image_output_enum, 0, pass_info->image_outputs_count) {
+			HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
+			HeroImageInfo* image_info = &setup->images[image_output->image_info_enum];
+
+			if (swapchain) {
+				result = _hero_vulkan_render_graph_reinit_output_image_swapchain(ldev, image_output, image_info, swapchain, &image_outputs_vulkan[image_output->backend_image_output_enum]);
+			} else {
+				result = _hero_vulkan_render_graph_init_output_image(ldev, image_output, image_info, &image_outputs_vulkan[image_output->backend_image_output_enum]);
+			}
+			if (result < 0) {
+				return result;
+			}
+		}
+
+		for_range(buffer_output_enum, 0, pass_info->buffer_outputs_count) {
+			HeroBufferOutput* buffer_output = &pass_info->buffer_outputs[buffer_output_enum];
+			HeroBufferInfo* buffer_info = &setup->buffers[buffer_output->buffer_info_enum];
+
+			result = _hero_vulkan_render_graph_init_output_buffer(ldev, buffer_output, buffer_info, &buffer_outputs_vulkan[buffer_output->backend_buffer_output_enum]);
+			if (result < 0) {
+				return result;
+			}
+		}
+
+		if (pass_info->layout_id.raw) {
+			result = _hero_vulkan_render_graph_init_render_pass(ldev, setup, pass_info, &passes_vulkan[pass_enum]);
+			if (result < 0) {
+				return result;
+			}
+
+			result = _hero_vulkan_render_graph_reinit_frame_buffer(ldev, render_graph_vulkan, swapchain, pass_info, &passes_vulkan[pass_enum]);
+			if (result < 0) {
+				return result;
+			}
+		}
+	}
 
 	*out = &render_graph_vulkan->public_;
 	return HERO_SUCCESS;
@@ -8750,9 +12188,11 @@ HeroResult _hero_vulkan_render_graph_deinit(HeroLogicalDevice* ldev, HeroRenderG
 		return result;
 	}
 
-	hero_dealloc_array(HeroPassInfoVulkan, hero_system_alctor, 0, render_graph_vulkan->passes, render_graph->passes_count);
+	/*
 	hero_dealloc_array(HeroImageInfoVulkan, hero_system_alctor, 0, render_graph_vulkan->images, render_graph->images_count);
 	hero_dealloc_array(HeroBufferInfoVulkan, hero_system_alctor, 0, render_graph_vulkan->buffers, render_graph->buffers_count);
+	*/
+	hero_dealloc_array(HeroPassInfoVulkan, hero_system_alctor, 0, render_graph_vulkan->passes, render_graph->passes_count);
 	return hero_object_pool(HeroRenderGraphVulkan, dealloc)(&ldev_vulkan->render_graph_pool, id);
 }
 
@@ -8788,11 +12228,11 @@ HeroResult _hero_vulkan_render_graph_deinit_gpu_resources(HeroLogicalDevice* lde
 
 	HERO_ABORT("UNIMPLEMENTED");
 
-	for_range(image_enum, 0, render_graph->images_count) {
+	for_range(image_info_enum, 0, render_graph->images_count) {
 
 	}
 
-	for_range(buffer_enum, 0, render_graph->buffers_count) {
+	for_range(buffer_info_enum, 0, render_graph->buffers_count) {
 
 	}
 
@@ -8813,15 +12253,46 @@ HeroResult _hero_vulkan_render_graph_execute(HeroLogicalDevice* ldev, HeroRender
 	}
 	HeroRenderGraph* render_graph = &render_graph_vulkan->public_;
 
+	for_range(pass_enum, 0, render_graph->passes_count) {
+		HeroPassInfo* pass_info = &render_graph->passes[pass_enum];
+
+		HeroImageInfo* image_info = &render_graph->images[pass_info->image_outputs[0].image_info_enum];
+		if (image_info->swapchain_id.raw == 0) {
+			continue;
+		}
+
+		HeroSwapchain* swapchain = NULL;
+		result = hero_swapchain_get(ldev, image_info->swapchain_id, &swapchain);
+		if (result < 0) {
+			return result;
+		}
+
+		if (!swapchain->has_been_resized) {
+			continue;
+		}
+
+		for_range(image_output_enum, 0, pass_info->image_outputs_count) {
+			HeroImageOutput* image_output = &pass_info->image_outputs[image_output_enum];
+			result = _hero_vulkan_render_graph_reinit_output_image_swapchain(ldev, image_output, image_info, swapchain, &render_graph_vulkan->image_outputs[image_output->backend_image_output_enum]);
+		}
+
+		if (pass_info->layout_id.raw) {
+			result = _hero_vulkan_render_graph_reinit_frame_buffer(ldev, render_graph_vulkan, swapchain, pass_info, &render_graph_vulkan->passes[pass_enum]);
+			if (result < 0) {
+				return result;
+			}
+		}
+	}
+
 	//
 	// allocate all the graphics resources if we have not execute at all since the resource where last destroyed
 	//
 	if (!render_graph_vulkan->initialized_gpu_resources) {
-		for_range(image_enum, 0, render_graph->images_count) {
+		for_range(image_info_enum, 0, render_graph->images_count) {
 
 		}
 
-		for_range(buffer_enum, 0, render_graph->buffers_count) {
+		for_range(buffer_info_enum, 0, render_graph->buffers_count) {
 
 		}
 
@@ -8833,6 +12304,8 @@ HeroResult _hero_vulkan_render_graph_execute(HeroLogicalDevice* ldev, HeroRender
 
 	return HERO_SUCCESS;
 }
+
+#endif
 
 HeroGfxSysVulkan hero_gfx_sys_vulkan;
 
@@ -8862,7 +12335,9 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.logical_device_deinit = _hero_vulkan_logical_device_deinit;
 			hero_gfx_sys.backend_vtable.logical_device_frame_start = _hero_vulkan_logical_device_frame_start;
 			hero_gfx_sys.backend_vtable.logical_device_queue_transfer = _hero_vulkan_logical_device_queue_transfer;
+			/*
 			hero_gfx_sys.backend_vtable.logical_device_queue_command_buffers = _hero_vulkan_logical_device_queue_command_buffers;
+			*/
 			hero_gfx_sys.backend_vtable.logical_device_submit = _hero_vulkan_logical_device_submit;
 			hero_gfx_sys.backend_vtable.vertex_layout_register = _hero_vulkan_vertex_layout_register;
 			hero_gfx_sys.backend_vtable.vertex_layout_deregister = _hero_vulkan_vertex_layout_deregister;
@@ -8922,6 +12397,7 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.swapchain_deinit = _hero_vulkan_swapchain_deinit;
 			hero_gfx_sys.backend_vtable.swapchain_get = _hero_vulkan_swapchain_get;
 			hero_gfx_sys.backend_vtable.swapchain_next_image = _hero_vulkan_swapchain_next_image;
+			/*
 			hero_gfx_sys.backend_vtable.command_pool_init = _hero_vulkan_command_pool_init;
 			hero_gfx_sys.backend_vtable.command_pool_deinit = _hero_vulkan_command_pool_deinit;
 			hero_gfx_sys.backend_vtable.command_pool_reset = _hero_vulkan_command_pool_reset;
@@ -8937,11 +12413,33 @@ HeroResult hero_gfx_sys_init(HeroGfxSysSetup* setup) {
 			hero_gfx_sys.backend_vtable.cmd_draw_set_push_constants = _hero_vulkan_cmd_draw_set_push_constants;
 			hero_gfx_sys.backend_vtable.cmd_draw_set_instances = _hero_vulkan_cmd_draw_set_instances;
 			hero_gfx_sys.backend_vtable.cmd_compute_dispatch = _hero_vulkan_cmd_compute_dispatch;
+			*/
 			hero_gfx_sys.backend_vtable.render_graph_init = _hero_vulkan_render_graph_init;
 			hero_gfx_sys.backend_vtable.render_graph_deinit = _hero_vulkan_render_graph_deinit;
 			hero_gfx_sys.backend_vtable.render_graph_get = _hero_vulkan_render_graph_get;
+			hero_gfx_sys.backend_vtable.frame_graph_init = _hero_vulkan_frame_graph_init;
+			hero_gfx_sys.backend_vtable.frame_graph_deinit = _hero_vulkan_frame_graph_deinit;
+			hero_gfx_sys.backend_vtable.frame_graph_get = _hero_vulkan_frame_graph_get;
+			hero_gfx_sys.backend_vtable.frame_graph_update = _hero_vulkan_frame_graph_update;
+			hero_gfx_sys.backend_vtable.frame_graph_record_pass_start = _hero_vulkan_frame_graph_record_pass_start;
+			hero_gfx_sys.backend_vtable.frame_graph_record_pass_end = _hero_vulkan_frame_graph_record_pass_end;
+			hero_gfx_sys.backend_vtable.frame_graph_submit = _hero_vulkan_frame_graph_submit;
+			hero_gfx_sys.backend_vtable.cmd_draw_start = _hero_vulkan_cmd_draw_start;
+			hero_gfx_sys.backend_vtable.cmd_draw_end_vertexed = _hero_vulkan_cmd_draw_end_vertexed;
+			hero_gfx_sys.backend_vtable.cmd_draw_end_indexed = _hero_vulkan_cmd_draw_end_indexed;
+			hero_gfx_sys.backend_vtable.cmd_draw_set_vertex_buffer = _hero_vulkan_cmd_draw_set_vertex_buffer;
+			hero_gfx_sys.backend_vtable.cmd_draw_set_vertices_start_idx = _hero_vulkan_cmd_draw_set_vertices_start_idx;
+			hero_gfx_sys.backend_vtable.cmd_draw_set_indices_start_idx = _hero_vulkan_cmd_draw_set_indices_start_idx;
+			hero_gfx_sys.backend_vtable.cmd_draw_set_instances = _hero_vulkan_cmd_draw_set_instances;
+			hero_gfx_sys.backend_vtable.cmd_compute_dispatch_start = _hero_vulkan_cmd_compute_dispatch_start;
+			hero_gfx_sys.backend_vtable.cmd_compute_dispatch_end = _hero_vulkan_cmd_compute_dispatch_end;
+			hero_gfx_sys.backend_vtable.cmd_add_sampler = _hero_vulkan_cmd_add_sampler;
+			hero_gfx_sys.backend_vtable.cmd_add_image = _hero_vulkan_cmd_add_image;
+			hero_gfx_sys.backend_vtable.cmd_add_buffer = _hero_vulkan_cmd_add_buffer;
+#if 0
 			hero_gfx_sys.backend_vtable.render_graph_deinit_gpu_resources = _hero_vulkan_render_graph_deinit_gpu_resources;
 			hero_gfx_sys.backend_vtable.render_graph_execute = _hero_vulkan_render_graph_execute;
+#endif
 			result = _hero_vulkan_init(setup);
 			break;
 		};

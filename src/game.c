@@ -766,7 +766,7 @@ HeroResult game_scene_play_entity_add(GameScenePlay* scene, GameEntityType type,
 	HeroResult result;
 	GameEntity* entity;
 	GameEntityId id;
-	result = hero_object_pool(GameEntity, alloc)(&scene->entity_pool, &entity, &id);
+	result = hero_object_pool(GameEntity, alloc)(&scene->entity_pool, 0, &entity, &id);
 	if (result < 0) {
 		return result;
 	}
@@ -2202,24 +2202,6 @@ HeroResult game_gfx_island_gen_debug_init() {
 	}
 
 	{
-		HeroAttachmentLayout attachments[] = {
-			{
-				.format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
-				.samples_count = HERO_SAMPLE_COUNT_1,
-				.post_usage = HERO_ATTACHEMENT_POST_USAGE_SAMPLED,
-			},
-		};
-
-		HeroRenderPassLayoutSetup setup = {
-			.attachments = attachments,
-			.attachments_count = HERO_ARRAY_COUNT(attachments),
-		};
-
-		result = hero_render_pass_layout_init(ldev, &setup, &gfx->render_pass_layout_id);
-		HERO_RESULT_ASSERT(result);
-	}
-
-	{
 		HeroRenderState render_state = {0};
 		render_state.topology = HERO_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		render_state.viewports_count = 1;
@@ -2315,6 +2297,7 @@ HeroResult game_gfx_island_gen_debug_deinit() {
 
 HeroResult game_gfx_island_gen_debug_render(HeroCommandRecorder* command_recorder) {
 	HeroResult result;
+	/*
 	GameGfxIslandGenDebug* gfx = &game.gfx.island_gen_debug;
 
 	if (gfx->scene_render_data.has_been_updated) {
@@ -2351,6 +2334,7 @@ HeroResult game_gfx_island_gen_debug_render(HeroCommandRecorder* command_recorde
 	result = hero_cmd_render_pass_end(command_recorder);
 	HERO_RESULT_ASSERT(result);
 
+	*/
 	return HERO_SUCCESS;
 }
 
@@ -3117,10 +3101,10 @@ HeroResult game_gfx_play_init() {
 		};
 
 		HeroClearValue clear_values[] = {
-			{ .color.float32 = { 1.f, 0.f, 0.f, 1.f } },
+			{ .color.f32 = { 1.f, 0.f, 0.f, 1.f } },
 			{
-				.depth_stencil.depth = 1.f,
-				.depth_stencil.stencil = 0,
+				.depth = 1.f,
+				.stencil = 0,
 			}
 		};
 
@@ -3184,6 +3168,7 @@ int game_render_entity_billboard_sort_fn(const void* a, const void* b) {
 HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 	GameGfxPlay* gfx = &game.gfx.play;
 	HeroResult result;
+	/*
 
 	if (gfx->scene_render_data.terrain_tile_tint_map) {
 		// TODO support sub updates
@@ -3362,6 +3347,7 @@ HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 
 	result = hero_cmd_render_pass_end(command_recorder);
 	HERO_RESULT_ASSERT(result);
+	*/
 
 	return HERO_SUCCESS;
 }
@@ -3375,335 +3361,76 @@ HeroResult game_gfx_play_render(HeroCommandRecorder* command_recorder) {
 // ===========================================
 
 enum {
-	GAME_GFX_PLAY_IMAGE_0,
-	GAME_GFX_PLAY_IMAGE_1,
-	GAME_GFX_PLAY_IMAGE_2,
-	GAME_GFX_PLAY_IMAGE_3,
-	GAME_GFX_PLAY_IMAGE_4,
-	GAME_GFX_PLAY_IMAGE_5,
-	GAME_GFX_PLAY_IMAGE_6,
+	GAME_GFX_PLAY_IMAGE_SWAPCHAIN_SIZED_RGBA8,
+	GAME_GFX_PLAY_IMAGE_SWAPCHAIN_SIZED_D32,
+	GAME_GFX_PLAY_IMAGE_SWAPCHAIN,
 
 	GAME_GFX_PLAY_IMAGE_COUNT,
 };
 
 enum {
-	GAME_GFX_PLAY_PASS_A,
-	GAME_GFX_PLAY_PASS_B,
-	GAME_GFX_PLAY_PASS_C,
-	GAME_GFX_PLAY_PASS_D,
-	GAME_GFX_PLAY_PASS_E,
+	GAME_GFX_PLAY_PASS_VOXEL_MAP_RAY_TRACER,
+	GAME_GFX_PLAY_PASS_SCENE,
+	GAME_GFX_PLAY_PASS_UI,
 
 	GAME_GFX_PLAY_PASS_COUNT,
 };
 
-U32 game_gfx_play_render_pass_estimate(HeroPassInfo* info) {
-	return 42;
+enum {
+	GAME_GFX_PLAY_VOXEL_RAY_TRACER_IMAGE_HEIGHT_MAP,
+	GAME_GFX_PLAY_VOXEL_RAY_TRACER_IMAGE_COLOR_OUTPUT,
+	GAME_GFX_PLAY_VOXEL_RAY_TRACER_IMAGE_DEPTH,
+	GAME_GFX_PLAY_SCENE_IMAGE_COLOR_OUTPUT,
+	GAME_GFX_PLAY_SCENE_IMAGE_DEPTH,
+	GAME_GFX_PLAY_SCENE_ENTITY_BILLBOARDS_VERTEX_BUFFER,
+	GAME_GFX_PLAY_SCENE_ENTITY_BILLBOARDS_INDEX_BUFFER,
+	GAME_GFX_PLAY_SCENE_ENTITY_BILLBOARDS_RO_BUFFER,
+};
+
+HeroResult game_gfx_play_pass_voxel_map_raytracer_record(HeroCommandRecorder* command_recorder) {
+	return HERO_SUCCESS;
 }
 
-HeroResult game_gfx_play_render_pass_record(HeroPassInfo* info, HeroCommandRecorder* command_recorder) {
-	return 42;
+HeroResult game_gfx_play_pass_scene_record(HeroCommandRecorder* command_recorder) {
+	return HERO_SUCCESS;
 }
 
 void _game_gfx_init_render_graph(void) {
-	static HeroImageInfo images[GAME_GFX_PLAY_IMAGE_COUNT] = {
-		[GAME_GFX_PLAY_IMAGE_0] = {
-			.debug_name = "0",
-			.swapchain_id = {0},
-
-			.width = 1024,
-			.height = 1024,
-			.array_layers_count = 1,
-			.mip_levels_count = 1,
-			.samples_count_log2 = 1,
-			.image_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
-			.flags = 0,
-		},
-		[GAME_GFX_PLAY_IMAGE_1] = {
-			.debug_name = "1",
-			.swapchain_id = {0},
-
-			.width = 1024,
-			.height = 1024,
-			.array_layers_count = 1,
-			.mip_levels_count = 1,
-			.samples_count_log2 = 1,
-			.image_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
-			.flags = 0,
-		},
-		[GAME_GFX_PLAY_IMAGE_2] = {
-			.debug_name = "2",
-			.swapchain_id = {0},
-
-			.width = 1024,
-			.height = 1024,
-			.array_layers_count = 1,
-			.mip_levels_count = 1,
-			.samples_count_log2 = 1,
-			.image_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
-			.flags = 0,
-		},
-		[GAME_GFX_PLAY_IMAGE_3] = {
-			.debug_name = "3",
-			.swapchain_id = {0},
-
-			.width = 1024,
-			.height = 1024,
-			.array_layers_count = 1,
-			.mip_levels_count = 1,
-			.samples_count_log2 = 1,
-			.image_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
-			.flags = 0,
-		},
-		[GAME_GFX_PLAY_IMAGE_4] = {
-			.debug_name = "4",
-			.swapchain_id = {0},
-
-			.width = 1024,
-			.height = 1024,
-			.array_layers_count = 1,
-			.mip_levels_count = 1,
-			.samples_count_log2 = 1,
-			.image_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
-			.flags = 0,
-		},
-		[GAME_GFX_PLAY_IMAGE_5] = {
-			.debug_name = "5",
-			.swapchain_id = {0},
-
-			.width = 1024,
-			.height = 1024,
-			.array_layers_count = 1,
-			.mip_levels_count = 1,
-			.samples_count_log2 = 1,
-			.image_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
-			.flags = 0,
-		},
-		[GAME_GFX_PLAY_IMAGE_6] = {
-			.debug_name = "6",
-			.swapchain_id = {0},
-
-			.width = 1024,
-			.height = 1024,
-			.array_layers_count = 1,
-			.mip_levels_count = 1,
-			.samples_count_log2 = 1,
-			.image_format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
-			.flags = HERO_IMAGE_INFO_FLAGS_READBACK,
-		},
-	};
-
-	static HeroPassInfo passes[GAME_GFX_PLAY_PASS_COUNT];
-	{
-		static HeroImageOutput a_image_outputs[] = {
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_1,
-			},
-		};
-
-		passes[GAME_GFX_PLAY_PASS_A] = (HeroPassInfo){
-			.debug_name = "A",
-			.layout_id = {0},
-			.flags = 0,
-			.cmd_estimate_fn = game_gfx_play_render_pass_estimate,
-			.record_fn = game_gfx_play_render_pass_record,
-			.record_userdata = NULL,
-			.depth_stencil_image_output_enum = HERO_PASS_IMAGE_OUTPUT_ENUM_INVALID,
-			.image_outputs = a_image_outputs,
-			.image_inputs = NULL,
-			.buffer_outputs = NULL,
-			.buffer_inputs = NULL,
-			.image_outputs_count = HERO_ARRAY_COUNT(a_image_outputs),
-			.image_inputs_count = 0,
-			.buffer_outputs_count = 0,
-			.buffer_inputs_count = 0,
-		};
-	};
-	{
-		static HeroImageInput b_image_inputs[] = {
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_0,
-				.pass_enum = HERO_PASS_ENUM_INVALID,
-				.pass_image_output_enum = 0,
-			},
-		};
-
-		static HeroImageOutput b_image_outputs[] = {
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_2,
-			},
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_3,
-			},
-		};
-
-		passes[GAME_GFX_PLAY_PASS_B] = (HeroPassInfo){
-			.debug_name = "B",
-			.layout_id = {0},
-			.flags = 0,
-			.cmd_estimate_fn = game_gfx_play_render_pass_estimate,
-			.record_fn = game_gfx_play_render_pass_record,
-			.record_userdata = NULL,
-			.depth_stencil_image_output_enum = HERO_PASS_IMAGE_OUTPUT_ENUM_INVALID,
-			.image_outputs = b_image_outputs,
-			.image_inputs = b_image_inputs,
-			.buffer_outputs = NULL,
-			.buffer_inputs = NULL,
-			.image_outputs_count = HERO_ARRAY_COUNT(b_image_outputs),
-			.image_inputs_count = HERO_ARRAY_COUNT(b_image_inputs),
-			.buffer_outputs_count = 0,
-			.buffer_inputs_count = 0,
-		};
-	};
-	{
-		static HeroImageInput c_image_inputs[] = {
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_1,
-				.pass_enum = GAME_GFX_PLAY_PASS_A,
-				.pass_image_output_enum = 0,
-			},
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_2,
-				.pass_enum = GAME_GFX_PLAY_PASS_B,
-				.pass_image_output_enum = 0,
-			},
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_3,
-				.pass_enum = GAME_GFX_PLAY_PASS_B,
-				.pass_image_output_enum = 1,
-			},
-		};
-
-		static HeroImageOutput c_image_outputs[] = {
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_4,
-			},
-		};
-
-		passes[GAME_GFX_PLAY_PASS_C] = (HeroPassInfo){
-			.debug_name = "C",
-			.layout_id = {0},
-			.flags = 0,
-			.cmd_estimate_fn = game_gfx_play_render_pass_estimate,
-			.record_fn = game_gfx_play_render_pass_record,
-			.record_userdata = NULL,
-			.depth_stencil_image_output_enum = HERO_PASS_IMAGE_OUTPUT_ENUM_INVALID,
-			.image_outputs = c_image_outputs,
-			.image_inputs = c_image_inputs,
-			.buffer_outputs = NULL,
-			.buffer_inputs = NULL,
-			.image_outputs_count = HERO_ARRAY_COUNT(c_image_outputs),
-			.image_inputs_count = HERO_ARRAY_COUNT(c_image_inputs),
-			.buffer_outputs_count = 0,
-			.buffer_inputs_count = 0,
-		};
-	};
-
-	{
-		static HeroImageOutput d_image_outputs[] = {
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_5,
-			},
-		};
-
-		passes[GAME_GFX_PLAY_PASS_D] = (HeroPassInfo){
-			.debug_name = "D",
-			.layout_id = {0},
-			.flags = 0,
-			.cmd_estimate_fn = game_gfx_play_render_pass_estimate,
-			.record_fn = game_gfx_play_render_pass_record,
-			.record_userdata = NULL,
-			.depth_stencil_image_output_enum = HERO_PASS_IMAGE_OUTPUT_ENUM_INVALID,
-			.image_outputs = d_image_outputs,
-			.image_inputs = NULL,
-			.buffer_outputs = NULL,
-			.buffer_inputs = NULL,
-			.image_outputs_count = HERO_ARRAY_COUNT(d_image_outputs),
-			.image_inputs_count = 0,
-			.buffer_outputs_count = 0,
-			.buffer_inputs_count = 0,
-		};
-	};
-	{
-		static HeroImageInput e_image_inputs[] = {
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_4,
-				.pass_enum = GAME_GFX_PLAY_PASS_C,
-				.pass_image_output_enum = 0,
-			},
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_5,
-				.pass_enum = GAME_GFX_PLAY_PASS_D,
-				.pass_image_output_enum = 0,
-			},
-		};
-
-		static HeroImageOutput e_image_outputs[] = {
-			{
-				.attachment_idx = HERO_ATTACHMENT_IDX_INVALID,
-				.image_enum = GAME_GFX_PLAY_IMAGE_6,
-			},
-		};
-
-		passes[GAME_GFX_PLAY_PASS_E] = (HeroPassInfo){
-			.debug_name = "E",
-			.layout_id = {0},
-			.flags = 0,
-			.cmd_estimate_fn = game_gfx_play_render_pass_estimate,
-			.record_fn = game_gfx_play_render_pass_record,
-			.record_userdata = NULL,
-			.depth_stencil_image_output_enum = HERO_PASS_IMAGE_OUTPUT_ENUM_INVALID,
-			.image_outputs = e_image_outputs,
-			.image_inputs = e_image_inputs,
-			.buffer_outputs = NULL,
-			.buffer_inputs = NULL,
-			.image_outputs_count = HERO_ARRAY_COUNT(e_image_outputs),
-			.image_inputs_count = HERO_ARRAY_COUNT(e_image_inputs),
-			.buffer_outputs_count = 0,
-			.buffer_inputs_count = 0,
-		};
-	};
-
-	HeroRenderGraphError errors[64];
+	HeroResult result;
 	HeroRenderGraphSetup setup = {
-		.debug_name = "play",
-		.images = images,
-		.buffers = NULL,
-		.passes = passes,
-		.images_count = HERO_ARRAY_COUNT(images),
-		.buffers_count = 0,
-		.passes_count = HERO_ARRAY_COUNT(passes),
-
-		.errors_out = errors,
-		.errors_cap = HERO_ARRAY_COUNT(errors),
-
-		.report_unused_error = true,
+		.resource_pool_caps = {
+			[HERO_PASS_RESOURCE_TYPE_INPUT_ATTACHMENT] =         256,
+			[HERO_PASS_RESOURCE_TYPE_COLOR_OUTPUT_ATTACHMENT] =  256,
+			[HERO_PASS_RESOURCE_TYPE_DEPTH_STENCIL_ATTACHMENT] = 256,
+			[HERO_PASS_RESOURCE_TYPE_RO_IMAGE] =                 256,
+			[HERO_PASS_RESOURCE_TYPE_RW_IMAGE] =                 256,
+			[HERO_PASS_RESOURCE_TYPE_RO_BUFFER] =                256,
+			[HERO_PASS_RESOURCE_TYPE_RW_BUFFER] =                256,
+			[HERO_PASS_RESOURCE_TYPE_VERTEX_BUFFER] =            256,
+			[HERO_PASS_RESOURCE_TYPE_INDEX_BUFFER] =             256,
+		},
+		.passes_cap = 8,
+		.viewports_cap = 8,
 	};
 
-	HeroRenderGraphId render_graph_id;
-	HeroResult result = hero_render_graph_init(game.gfx.ldev, &setup, &render_graph_id);
-	if (result < 0 && setup.errors_count) {
-		hero_render_graph_print_errors(&setup);
-		exit(1);
-	}
+	result = hero_render_graph_init(game.gfx.ldev, &setup, &game.gfx.render_graph_id);
 	HERO_RESULT_ASSERT(result);
 
-	hero_render_graph_print_execution_units(game.gfx.ldev, render_graph_id, stdout, true);
+	HeroImageInfo image_info_swapchain_sized_rgba8;
+	hero_image_info_init_swapchain_sized(&image_info_swapchain_sized_rgba8, HERO_IMAGE_FORMAT_R8G8B8A8_UNORM, game.gfx.swapchain_id);
+	result = hero_image_info_register(game.gfx.ldev, 0, &image_info_swapchain_sized_rgba8, &game.gfx.image_info_swapchain_sized_rgba8_id);
+	HERO_RESULT_ASSERT(result);
 
-	FILE* graph_file = fopen("render_graph_play.dot", "w");
-	HERO_ASSERT(graph_file, "failed to open render_graph_play.dot");
-	hero_render_graph_print_graphviz_dot(game.gfx.ldev, render_graph_id, graph_file);
-	fclose(graph_file);
+	HeroImageInfo image_info_swapchain_sized_d32;
+	hero_image_info_init_swapchain_sized(&image_info_swapchain_sized_d32, HERO_IMAGE_FORMAT_D32, game.gfx.swapchain_id);
+	result = hero_image_info_register(game.gfx.ldev, 0, &image_info_swapchain_sized_d32, &game.gfx.image_info_swapchain_sized_rgba8_id);
+	HERO_RESULT_ASSERT(result);
+
+	HeroImageInfo image_info_voxel_height_map;
+	hero_image_info_init_2d(&image_info_voxel_height_map, HERO_IMAGE_FORMAT_R32_SFLOAT, 1024, 1024);
+	result = hero_image_info_register(game.gfx.ldev, 0, &image_info_voxel_height_map, &game.gfx.image_info_voxel_height_map_id);
+	HERO_RESULT_ASSERT(result);
+
 }
 
 void game_gfx_init(void) {
@@ -3881,6 +3608,7 @@ void game_gfx_init(void) {
 	result = game_gfx_swapchain_frame_buffers_reinit(swapchain);
 	HERO_RESULT_ASSERT(result);
 
+	/*
 	{
 		HeroCommandPoolSetup setup = {
 			.support_static = false,
@@ -3890,6 +3618,7 @@ void game_gfx_init(void) {
 		result = hero_command_pool_init(game.gfx.ldev, &setup, &game.gfx.command_pool_id);
 		HERO_RESULT_ASSERT(result);
 	}
+	*/
 
 	result = game_gfx_island_gen_debug_init();
 	HERO_RESULT_ASSERT(result);
@@ -3921,6 +3650,70 @@ void game_gfx_init(void) {
 	_game_gfx_init_render_graph();
 }
 
+void _game_gfx_update_render_graph(void) {
+	HeroResult result;
+	HeroRenderGraph* render_graph;
+	result = hero_render_graph_get(game.gfx.ldev, game.gfx.render_graph_id, &render_graph);
+	HERO_RESULT_ASSERT(result);
+
+	{
+		HeroPassSetup setup = {
+			.name = "voxel map raytracer",
+			.userdata = NULL,
+			.render_pass_layout_id.raw = 0,
+			.pass_enum = GAME_GFX_PLAY_PASS_VOXEL_MAP_RAY_TRACER,
+			.viewports_count = 0,
+		};
+		hero_render_graph_pass_start(render_graph, &setup);
+
+		{
+			hero_pass_add_ro_image(render_graph, GAME_GFX_PLAY_VOXEL_RAY_TRACER_IMAGE_HEIGHT_MAP, game.gfx.image_info_voxel_height_map_id);
+			hero_pass_and_make_persistent(render_graph);
+			hero_pass_and_make_cpu_writeable(render_graph);
+		}
+
+		hero_pass_add_rw_image(render_graph, GAME_GFX_PLAY_VOXEL_RAY_TRACER_IMAGE_COLOR_OUTPUT, game.gfx.image_info_swapchain_sized_rgba8_id);
+		hero_pass_add_rw_image(render_graph, GAME_GFX_PLAY_VOXEL_RAY_TRACER_IMAGE_DEPTH, game.gfx.image_info_swapchain_sized_d32_id);
+
+		hero_render_graph_pass_end(render_graph);
+	}
+
+	{
+		HeroPassSetup setup = {
+			.name = "scene",
+			.userdata = NULL,
+			.render_pass_layout_id = game.gfx.play.render_pass_layout_id,
+			.pass_enum = GAME_GFX_PLAY_PASS_SCENE,
+			.viewports_count = 1,
+		};
+		hero_render_graph_pass_start(render_graph, &setup);
+
+		hero_pass_add_color_output_attachment(render_graph, GAME_GFX_PLAY_SCENE_IMAGE_COLOR_OUTPUT, game.gfx.image_info_swapchain_sized_rgba8_id);
+
+		hero_pass_add_depth_stencil_attachment_linked(render_graph, GAME_GFX_PLAY_SCENE_IMAGE_DEPTH, GAME_GFX_PLAY_PASS_VOXEL_MAP_RAY_TRACER, GAME_GFX_PLAY_VOXEL_RAY_TRACER_IMAGE_DEPTH);
+
+		{
+			hero_pass_add_vertex_buffer(render_graph, GAME_GFX_PLAY_SCENE_ENTITY_BILLBOARDS_VERTEX_BUFFER, 1024 * sizeof(GameBillboardVertex));
+			hero_pass_and_make_cpu_writeable(render_graph);
+		}
+
+		{
+			hero_pass_add_index_buffer(render_graph, GAME_GFX_PLAY_SCENE_ENTITY_BILLBOARDS_INDEX_BUFFER, 1024 * sizeof(U16));
+			hero_pass_and_make_cpu_writeable(render_graph);
+		}
+
+		{
+			hero_pass_add_ro_buffer(render_graph, GAME_GFX_PLAY_SCENE_ENTITY_BILLBOARDS_RO_BUFFER, sizeof(GamePlayGlobalUBO));
+			hero_pass_and_make_cpu_writeable(render_graph);
+		}
+
+		hero_render_graph_pass_end(render_graph);
+	}
+
+	result = hero_ui_window_update_render_graph(game.ui_window_id, render_graph, GAME_GFX_PLAY_PASS_UI, game.gfx.image_info_swapchain_sized_rgba8_id);
+	HERO_RESULT_ASSERT(result);
+}
+
 void game_gfx_render(void) {
 	HeroResult result;
 
@@ -3945,6 +3738,8 @@ void game_gfx_render(void) {
 	game.gfx.render_width = swapchain->width;
 	game.gfx.render_height = swapchain->height;
 
+	_game_gfx_update_render_graph();
+
 	/*
 	static F32 angle = 0.f;
 	angle += 1.f / 60.f * 0.25f;
@@ -3962,6 +3757,7 @@ void game_gfx_render(void) {
 	mat4x4_mul(mvp, &view, mvp);
 	*/
 
+	/*
 	HeroCommandRecorder* command_recorder;
 	result = hero_command_recorder_start(game.gfx.ldev, game.gfx.command_pool_id, &command_recorder);
 	HERO_RESULT_ASSERT(result);
@@ -3996,6 +3792,7 @@ void game_gfx_render(void) {
 	HERO_RESULT_ASSERT(result);
 
 	result = hero_logical_device_submit(game.gfx.ldev, &game.gfx.swapchain_id, 1);
+	*/
 	HERO_RESULT_ASSERT(result);
 }
 
@@ -4041,7 +3838,6 @@ void game_init(void) {
 			.image_atlases_cap = 16,
 			.shader_id = game.gfx.ui_shader_id,
 			.descriptor_pool_id = game.gfx.descriptor_pool_id,
-			.render_pass_layout_id = game.gfx.render_pass_layout_id,
 			.text_size_fn = game_ui_text_size,
 			.text_render_fn = game_ui_text_render,
 		};

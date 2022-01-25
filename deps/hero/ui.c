@@ -10,7 +10,14 @@
 
 HeroResult hero_ui_image_atlas_init(HeroLogicalDevice* ldev, HeroUIImageAtlasSetup* setup, HeroUIImageAtlasId* id_out) {
 	HeroUIImageAtlas* atlas;
-	HeroResult result = hero_object_pool(HeroUIImageAtlas, alloc)(&hero_ui_sys.image_atlas_pool, &atlas, id_out);
+	HeroResult result = hero_object_pool(HeroUIImageAtlas, alloc)(&hero_ui_sys.image_atlas_pool, 0, &atlas, id_out);
+	if (result < 0) {
+		return result;
+	}
+
+	HeroImageInfo image_info;
+	hero_image_info_init_2d(&image_info, HERO_IMAGE_FORMAT_R8G8B8A8_UNORM, atlas->width, atlas->height);
+	result = hero_image_info_register(ldev, 0, &image_info, &atlas->image_info_id);
 	if (result < 0) {
 		return result;
 	}
@@ -25,8 +32,6 @@ HeroResult hero_ui_image_atlas_init(HeroLogicalDevice* ldev, HeroUIImageAtlasSet
 	atlas->sampler_id = setup->sampler_id;
 	atlas->width = image->width;
 	atlas->height = image->height;
-	atlas->width_inv = 1.f / image->width;
-	atlas->height_inv = 1.f / image->height;
 	atlas->images_count = setup->images_count;
 	atlas->is_uniform = setup->is_uniform;
 	if (setup->is_uniform) {
@@ -93,10 +98,10 @@ HeroResult hero_ui_image_atlas_image_uv_aabb(HeroUIImageAtlasId id, U32 image_id
 		*uv_aabb_out = atlas->data.image_rects[image_idx];
 	}
 
-	uv_aabb_out->x *= atlas->width_inv;
-	uv_aabb_out->y *= atlas->height_inv;
-	uv_aabb_out->ex *= atlas->width_inv;
-	uv_aabb_out->ey *= atlas->height_inv;
+	uv_aabb_out->x /=  (F32)atlas->width;
+	uv_aabb_out->y /=  (F32)atlas->height;
+	uv_aabb_out->ex /= (F32)atlas->width;
+	uv_aabb_out->ey /= (F32)atlas->height;
 
 	return HERO_SUCCESS;
 }
@@ -206,7 +211,7 @@ HeroUIWidgetFlags hero_ui_widget_flags(HeroUIWindow* window, HeroUIWidgetId id) 
 }
 
 HeroResult _hero_ui_widget_alloc(HeroUIWindow* window, HeroUIWidget** ptr_out, HeroUIWidgetId* id_out) {
-	return hero_object_pool(HeroUIWidget, alloc)(&window->widget_pool, ptr_out, id_out);
+	return hero_object_pool(HeroUIWidget, alloc)(&window->widget_pool, 0, ptr_out, id_out);
 }
 
 HeroResult _hero_ui_widget_dealloc(HeroUIWindow* window, HeroUIWidget* widget, HeroUIWidgetId widget_id) {
@@ -732,7 +737,7 @@ HeroResult hero_ui_window_init(HeroUIWindowSetup* setup, HeroUIWindowId* id_out)
 	HeroResult result;
 
 	HeroUIWindow* window;
-	result = hero_object_pool(HeroUIWindow, alloc)(&hero_ui_sys.window_pool, &window, id_out);
+	result = hero_object_pool(HeroUIWindow, alloc)(&hero_ui_sys.window_pool, 0, &window, id_out);
 	if (result < 0) {
 		return result;
 	}
@@ -1005,6 +1010,7 @@ HeroResult _hero_window_ui_render_new_material(HeroUIWindow* window, HeroLogical
 	return HERO_SUCCESS;
 }
 
+/*
 HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, HeroCommandRecorder* command_recorder) {
 	HeroUIWindow* window;
 	HeroResult result = hero_object_pool(HeroUIWindow, get)(&hero_ui_sys.window_pool, id, &window);
@@ -1386,6 +1392,88 @@ RECORD_DRAW:
 
 	return HERO_SUCCESS;
 }
+*/
+
+HeroResult hero_ui_pass_record(HeroCommandRecorder* command_recorder) {
+
+	return HERO_SUCCESS;
+}
+
+enum {
+	HERO_UI_IMAGE_COLOR_OUTPUT,
+	HERO_UI_VERTEX_BUFFER,
+	HERO_UI_INDEX_BUFFER,
+	HERO_UI_RO_BUFFER,
+	HERO_UI_RO_BUFFER_COLORS_START =  100,
+	HERO_UI_RO_BUFFER_AABBS_START =   200,
+	HERO_UI_RO_BUFFER_CIRCLES_START = 300,
+	HERO_UI_RO_IMAGE_ATLASES_START =  400,
+};
+
+HeroResult hero_ui_window_update_render_graph(HeroUIWindowId id, HeroRenderGraph* render_graph, HeroPassEnum ui_pass_enum, HeroImageInfoId color_output_image_info_id) {
+	HeroUIWindow* window;
+	HeroResult result = hero_object_pool(HeroUIWindow, get)(&hero_ui_sys.window_pool, id, &window);
+	if (result < 0) {
+		return result;
+	}
+	HeroUIWindowRender* render = &window->render;
+
+	HeroPassSetup setup = {
+		.name = "ui",
+		.userdata = NULL,
+		.render_pass_layout_id = hero_ui_sys.render_pass_layout_id,
+		.pass_enum = ui_pass_enum,
+		.viewports_count = 1,
+	};
+	hero_render_graph_pass_start(render_graph, &setup);
+
+	hero_pass_add_color_output_attachment(render_graph, HERO_UI_IMAGE_COLOR_OUTPUT, color_output_image_info_id);
+
+	{
+		hero_pass_add_vertex_buffer(render_graph, HERO_UI_VERTEX_BUFFER, 1024 * sizeof(HeroUIVertex));
+		hero_pass_and_make_cpu_writeable(render_graph);
+	}
+
+	{
+		hero_pass_add_index_buffer(render_graph, HERO_UI_INDEX_BUFFER, 1024 * sizeof(U16));
+		hero_pass_and_make_cpu_writeable(render_graph);
+	}
+
+	{
+		hero_pass_add_ro_buffer(render_graph, HERO_UI_RO_BUFFER, sizeof(HeroUIGlobalUBO));
+		hero_pass_and_make_cpu_writeable(render_graph);
+	}
+
+	for_range(i, 0, render->color_uniform_buffer_ids.count) {
+		hero_pass_add_ro_buffer(render_graph, HERO_UI_RO_BUFFER_COLORS_START + i, sizeof(HeroUIColorUBO));
+		hero_pass_and_make_cpu_writeable(render_graph);
+	}
+
+	for_range(i, 0, render->aabb_uniform_buffer_ids.count) {
+		hero_pass_add_ro_buffer(render_graph, HERO_UI_RO_BUFFER_AABBS_START + i, sizeof(HeroUIAabbUBO));
+		hero_pass_and_make_cpu_writeable(render_graph);
+	}
+
+	for_range(i, 0, render->circle_uniform_buffer_ids.count) {
+		hero_pass_add_ro_buffer(render_graph, HERO_UI_RO_BUFFER_CIRCLES_START + i, sizeof(HeroUICircleUBO));
+		hero_pass_and_make_cpu_writeable(render_graph);
+	}
+
+	for_range(i, 0, render->render_data.unique_image_atlas_ids.count) {
+		HeroUIImageAtlasId atlas_id = render->render_data.unique_image_atlas_ids.data[i];
+
+		HeroUIImageAtlas* atlas;
+		result = hero_ui_image_atlas_get(atlas_id, &atlas);
+		if (result < 0) {
+			return result;
+		}
+
+		hero_pass_add_ro_image(render_graph, HERO_UI_RO_IMAGE_ATLASES_START + i, atlas->image_info_id);
+		hero_pass_and_make_cpu_writeable(render_graph);
+	}
+
+	return HERO_SUCCESS;
+}
 
 // ===========================================
 //
@@ -1417,6 +1505,24 @@ HeroResult hero_ui_sys_init(HeroUISysSetup* setup) {
 
 	result = hero_vertex_layout_register(&hero_ui_vertex_layout, true, &hero_ui_sys.vertex_layout_id);
 	HERO_RESULT_ASSERT(result);
+
+	{
+		HeroAttachmentLayout attachments[] = {
+			{
+				.format = HERO_IMAGE_FORMAT_R8G8B8A8_UNORM,
+				.samples_count = HERO_SAMPLE_COUNT_1,
+				.post_usage = HERO_ATTACHEMENT_POST_USAGE_SAMPLED,
+			},
+		};
+
+		HeroRenderPassLayoutSetup render_pass_layout_setup = {
+			.attachments = attachments,
+			.attachments_count = HERO_ARRAY_COUNT(attachments),
+		};
+
+		result = hero_render_pass_layout_init(setup->ldev, &render_pass_layout_setup, &hero_ui_sys.render_pass_layout_id);
+		HERO_RESULT_ASSERT(result);
+	}
 
 	HeroPipelineId pipeline_id;
 	{
@@ -1455,7 +1561,7 @@ HeroResult hero_ui_sys_init(HeroUISysSetup* setup) {
 		HeroPipelineGraphicsSetup pipeline_setup = {
 			.render_state = &render_state,
 			.shader_id = setup->shader_id,
-			.render_pass_layout_id = setup->render_pass_layout_id,
+			.render_pass_layout_id = hero_ui_sys.render_pass_layout_id,
 			.vertex_layout_id = hero_ui_sys.vertex_layout_id,
 			.cache_id.raw = 0,
 		};

@@ -608,10 +608,14 @@ struct GameGfx {
 	HeroRenderPassLayoutId render_pass_layout_id;
 	HeroRenderPassId render_pass_id;
 
+	HeroRenderGraphId render_graph_id;
+	HeroImageInfoId image_info_swapchain_sized_rgba8_id;
+	HeroImageInfoId image_info_swapchain_sized_d32_id;
+	HeroImageInfoId image_info_voxel_height_map_id;
+
 	HeroShaderId ui_shader_id;
 
 	HeroDescriptorPoolId descriptor_pool_id;
-	HeroCommandPoolId command_pool_id;
 	HeroImageId noise_image_id;
 	HeroImageId font_ascii_image_id;
 	HeroSamplerId clamp_nearest_sampler_id;

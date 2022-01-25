@@ -10,7 +10,6 @@
 #error "HERO_OBJECT_TYPE must be defined with the type of the object pool's element"
 #endif
 
-
 HERO_STATIC_ASSERT(offsetof(HERO_OBJECT_TYPE, header) == 0, "header must be the first field in the HERO_OBJECT_TYPE structure");
 HERO_STATIC_ASSERT(sizeof(((HERO_OBJECT_TYPE*)0)->header) == sizeof(HeroObjectHeader), "header must be of type HeroObjectHeader");
 
@@ -18,8 +17,16 @@ HERO_STATIC_ASSERT(sizeof(((HERO_OBJECT_TYPE*)0)->header) == sizeof(HeroObjectHe
 #define HERO_OBJECT_ID_IDX_BITS 20
 #endif
 
-#if HERO_OBJECT_ID_IDX_BITS > 30
-#error "HERO_OBJECT_ID_IDX_BITS must leave 1 bit for the is allocated bit and another for the counter bits"
+#ifndef HERO_OBJECT_ID_COUNTER_BITS
+#define HERO_OBJECT_ID_COUNTER_BITS 12
+#endif
+
+#ifndef HERO_OBJECT_ID_USER_BITS
+#define HERO_OBJECT_ID_USER_BITS 0
+#endif
+
+#if HERO_OBJECT_ID_IDX_BITS + HERO_OBJECT_ID_COUNTER_BITS + HERO_OBJECT_ID_USER_BITS != 32
+#error "the index, counter and user bits must be 32 in total"
 #endif
 
 #ifndef HERO_OBJECT_NAME
@@ -36,7 +43,15 @@ static inline U32 HERO_OBJECT_ID_FN(idx)(HERO_OBJECT_ID_TYPE id) {
 }
 
 static inline U32 HERO_OBJECT_ID_FN(counter)(HERO_OBJECT_ID_TYPE id) {
-	return (id.raw >> HERO_OBJECT_ID_COUNTER_SHIFT(HERO_OBJECT_ID_IDX_BITS)) & HERO_OBJECT_ID_COUNTER_MASK(HERO_OBJECT_ID_IDX_BITS);
+	return (id.raw >> HERO_OBJECT_ID_COUNTER_SHIFT(HERO_OBJECT_ID_IDX_BITS)) & HERO_OBJECT_ID_COUNTER_MASK(HERO_OBJECT_ID_COUNTER_BITS);
+}
+
+static inline U32 HERO_OBJECT_ID_FN(user_bits)(HERO_OBJECT_ID_TYPE id) {
+#if HERO_OBJECT_ID_USER_BITS == 0
+	return 0;
+#else
+	return (id.raw >> HERO_OBJECT_ID_USER_SHIFT(HERO_OBJECT_ID_IDX_BITS, HERO_OBJECT_ID_COUNTER_BITS)) & HERO_OBJECT_ID_USER_MASK(HERO_OBJECT_ID_USER_BITS);
+#endif
 }
 
 static inline HeroResult HERO_OBJECT_POOL_FN(init)(HERO_OBJECT_POOL* object_pool, U32 cap, HeroIAlctor alctor, HeroAllocTag tag) {
@@ -47,16 +62,16 @@ static inline void HERO_OBJECT_POOL_FN(deinit)(HERO_OBJECT_POOL* object_pool, He
 	_hero_object_pool_deinit((HeroObjectPool*)object_pool, alctor, tag, sizeof(HERO_OBJECT_TYPE), alignof(HERO_OBJECT_TYPE));
 }
 
-static inline HeroResult HERO_OBJECT_POOL_FN(alloc)(HERO_OBJECT_POOL* object_pool, HERO_OBJECT_TYPE** ptr_out, HERO_OBJECT_ID_TYPE* id_out) {
-	return _hero_object_pool_alloc((HeroObjectPool*)object_pool, sizeof(HERO_OBJECT_TYPE), HERO_OBJECT_ID_IDX_BITS, (void**)ptr_out, &id_out->raw);
+static inline HeroResult HERO_OBJECT_POOL_FN(alloc)(HERO_OBJECT_POOL* object_pool, U32 user_bits, HERO_OBJECT_TYPE** ptr_out, HERO_OBJECT_ID_TYPE* id_out) {
+	return _hero_object_pool_alloc((HeroObjectPool*)object_pool, user_bits, sizeof(HERO_OBJECT_TYPE), HERO_OBJECT_ID_IDX_BITS, HERO_OBJECT_ID_COUNTER_BITS, HERO_OBJECT_ID_USER_BITS, (void**)ptr_out, &id_out->raw);
 }
 
 static inline HeroResult HERO_OBJECT_POOL_FN(dealloc)(HERO_OBJECT_POOL* object_pool, HERO_OBJECT_ID_TYPE id) {
-	return _hero_object_pool_dealloc((HeroObjectPool*)object_pool, id.raw, sizeof(HERO_OBJECT_TYPE), HERO_OBJECT_ID_IDX_BITS);
+	return _hero_object_pool_dealloc((HeroObjectPool*)object_pool, id.raw, sizeof(HERO_OBJECT_TYPE), HERO_OBJECT_ID_IDX_BITS, HERO_OBJECT_ID_COUNTER_BITS);
 }
 
 static inline HeroResult HERO_OBJECT_POOL_FN(get)(HERO_OBJECT_POOL* object_pool, HERO_OBJECT_ID_TYPE id, HERO_OBJECT_TYPE** ptr_out) {
-	return _hero_object_pool_get((HeroObjectPool*)object_pool, id.raw, sizeof(HERO_OBJECT_TYPE), HERO_OBJECT_ID_IDX_BITS, (void**)ptr_out);
+	return _hero_object_pool_get((HeroObjectPool*)object_pool, id.raw, sizeof(HERO_OBJECT_TYPE), HERO_OBJECT_ID_IDX_BITS, HERO_OBJECT_ID_COUNTER_BITS, (void**)ptr_out);
 }
 
 static inline HeroResult HERO_OBJECT_POOL_FN(get_id)(HERO_OBJECT_POOL* object_pool, HERO_OBJECT_TYPE* object, HERO_OBJECT_ID_TYPE* id_out) {
@@ -77,6 +92,8 @@ static inline HeroResult HERO_OBJECT_POOL_FN(iter_prev)(HERO_OBJECT_POOL* object
 
 #undef HERO_OBJECT_ID_TYPE
 #undef HERO_OBJECT_TYPE
+#undef HERO_OBJECT_ID_USER_BITS
+#undef HERO_OBJECT_ID_COUNTER_BITS
 #undef HERO_OBJECT_ID_IDX_BITS
 #undef HERO_OBJECT_NAME
 #undef HERO_OBJECT_ID_FN

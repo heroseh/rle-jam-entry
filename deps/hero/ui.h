@@ -138,11 +138,13 @@ typedef struct HeroUIImageAtlas HeroUIImageAtlas;
 struct HeroUIImageAtlas {
 	HeroObjectHeader header;
 	HeroImageId image_id;
+	HeroImageInfoId image_info_id;
 	HeroSamplerId sampler_id;
-	F32 width;
-	F32 height;
-	F32 width_inv;
-	F32 height_inv;
+	U32 width;
+	U32 height;
+
+	F32 ui_width;
+	F32 ui_height;
 	U32 images_count: 31;
 	U32 is_uniform: 1;
 	union {
@@ -414,6 +416,7 @@ void hero_ui_window_end(HeroUIWindow* window);
 HeroResult hero_ui_window_update(HeroUIWindowId id);
 HeroResult hero_ui_window_update_render_data(HeroUIWindowId id);
 HeroResult hero_ui_window_render(HeroUIWindowId id, HeroLogicalDevice* ldev, HeroCommandRecorder* command_recorder);
+HeroResult hero_ui_window_update_render_graph(HeroUIWindowId id, HeroRenderGraph* render_graph, HeroPassEnum ui_pass_enum, HeroImageInfoId color_output_image_info_id);
 
 // ===========================================
 //
@@ -435,6 +438,7 @@ struct HeroUISys {
 	HeroObjectPool(HeroUIWindow) window_pool;
 	HeroObjectPool(HeroUIImageAtlas) image_atlas_pool;
 	HeroShaderId shader_id;
+	HeroRenderPassLayoutId render_pass_layout_id;
 	HeroDescriptorPoolId descriptor_pool_id;
 	HeroVertexLayoutId vertex_layout_id;
 	HeroPipelineId pipeline_id;
@@ -452,7 +456,6 @@ struct HeroUISysSetup {
 	U32 image_atlases_cap;
 	HeroShaderId shader_id;
 	HeroDescriptorPoolId descriptor_pool_id;
-	HeroRenderPassLayoutId render_pass_layout_id;
 	HeroUITextSizeFn text_size_fn;
 	HeroUITextRenderFn text_render_fn;
 };
