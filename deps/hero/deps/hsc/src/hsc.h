@@ -79,11 +79,39 @@
 void _hsc_assert_failed(const char* cond, const char* file, int line, const char* message, ...);
 HSC_NORETURN void _hsc_abort(const char* file, int line, const char* message, ...);
 
+// align must be a power of 2
 #define HSC_INT_ROUND_UP_ALIGN(i, align) (((i) + ((align) - 1)) & ~((align) - 1))
+// align must be a power of 2
+#define HSC_INT_ROUND_DOWN_ALIGN(i, align) ((i) & ~((align) - 1))
+
+#define HSC_ARRAY_COUNT(array) (sizeof(array) / sizeof(*(array)))
+#define HSC_IS_POWER_OF_TWO(v) (((v) != 0) && (((v) & ((v) - 1)) == 0))
+#define HSC_PTR_ADD(ptr, by) (void*)((Uptr)(ptr) + (Uptr)(by))
+#define HSC_PTR_SUB(ptr, by) (void*)((Uptr)(ptr) - (Uptr)(by))
+#define HSC_PTR_DIFF(to, from) ((char*)(to) - (char*)(from))
+// align must be a power of 2
+#define HSC_PTR_ROUND_UP_ALIGN(ptr, align) ((void*)HSC_INT_ROUND_UP_ALIGN((Uptr)ptr, align))
+// align must be a power of 2
+#define HSC_PTR_ROUND_DOWN_ALIGN(ptr, align) ((void*)HSC_INT_ROUND_DOWN_ALIGN((Uptr)ptr, align))
+#define HSC_ZERO_ELMT(ptr) memset(ptr, 0, sizeof(*(ptr)))
+#define HSC_ONE_ELMT(ptr) memset(ptr, 0xff, sizeof(*(ptr)))
+#define HSC_ZERO_ELMT_MANY(ptr, elmts_count) memset(ptr, 0, sizeof(*(ptr)) * (elmts_count))
+#define HSC_ONE_ELMT_MANY(ptr, elmts_count) memset(ptr, 0xff, sizeof(*(ptr)) * (elmts_count))
+#define HSC_ZERO_ARRAY(array) memset(array, 0, sizeof(array))
+#define HSC_ONE_ARRAY(array) memset(array, 0xff, sizeof(array))
+#define HSC_COPY_ARRAY(dst, src) memcpy(dst, src, sizeof(dst))
+#define HSC_COPY_ELMT_MANY(dst, src, elmts_count) memcpy(dst, src, elmts_count * sizeof(*(dst)))
+#define HSC_COPY_OVERLAP_ELMT_MANY(dst, src, elmts_count) memmove(dst, src, elmts_count * sizeof(*(dst)))
+#define HSC_CMP_ARRAY(a, b) (memcmp(a, b, sizeof(a)) == 0)
+#define HSC_CMP_ELMT(a, b) (memcmp(a, b, sizeof(*(a))) == 0)
+#define HSC_CMP_ELMT_MANY(a, b, elmts_count) (memcmp(a, b, elmts_count * sizeof(*(a))) == 0)
 
 #define HSC_DEFINE_ID(Name) typedef struct Name { uint32_t idx_plus_one; } Name;
 HSC_DEFINE_ID(HscFileId);
 HSC_DEFINE_ID(HscStringId);
+HSC_DEFINE_ID(HscCompoundTypeId);
+HSC_DEFINE_ID(HscArrayTypeId);
+HSC_DEFINE_ID(HscFnTypeId);
 
 typedef struct HscLocation HscLocation;
 struct HscLocation {
@@ -123,14 +151,137 @@ typedef double   F64;
 // ===========================================
 //
 //
+// Hash Table
+//
+//
+// ===========================================
+
+typedef struct HscHashTable HscHashTable;
+struct HscHashTable {
+	U32* keys;
+	U32* values;
+	U32 count;
+	U32 cap;
+};
+
+void hsc_hash_table_init(HscHashTable* hash_table);
+bool hsc_hash_table_find(HscHashTable* hash_table, U32 key, U32** value_ptr_out);
+bool hsc_hash_table_find_or_insert(HscHashTable* hash_table, U32 key, U32** value_ptr_out);
+
+// ===========================================
+//
+//
 // Syntax Generator
 //
 //
 // ===========================================
 
-typedef uint8_t HscToken;
+typedef U32 HscType;
 enum {
-	HSC_TOKEN_INVALID,
+#define HSC_TYPE_BASIC_START HSC_TYPE_VOID
+	HSC_TYPE_VOID,
+	HSC_TYPE_BOOL,
+	HSC_TYPE_U8,
+	HSC_TYPE_U16,
+	HSC_TYPE_U32,
+	HSC_TYPE_U64,
+	HSC_TYPE_S8,
+	HSC_TYPE_S16,
+	HSC_TYPE_S32,
+	HSC_TYPE_S64,
+	HSC_TYPE_F8,
+	HSC_TYPE_F16,
+	HSC_TYPE_F32,
+	HSC_TYPE_F64,
+#define HSC_TYPE_BASIC_END (HSC_TYPE_F64 + 1)
+#define HSC_TYPE_BASIC_COUNT (HSC_TYPE_BASIC_END - HSC_TYPE_BASIC_START)
+
+#define HSC_TYPE_VECTOR_START HSC_TYPE_VEC2_START
+	HSC_TYPE_VEC2_START = 16,
+	HSC_TYPE_VEC3_START = HSC_TYPE_VEC2_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_VEC4_START = HSC_TYPE_VEC3_START + HSC_TYPE_VEC2_START,
+#define HSC_TYPE_VECTOR_END HSC_TYPE_MAT2x2_START
+#define HSC_TYPE_MATRIX_START HSC_TYPE_MAT2x2_START
+	HSC_TYPE_MAT2x2_START = HSC_TYPE_VEC4_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_MAT2x3_START = HSC_TYPE_MAT2x2_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_MAT2x4_START = HSC_TYPE_MAT2x3_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_MAT3x2_START = HSC_TYPE_MAT2x4_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_MAT3x3_START = HSC_TYPE_MAT3x2_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_MAT3x4_START = HSC_TYPE_MAT3x3_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_MAT4x2_START = HSC_TYPE_MAT3x4_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_MAT4x3_START = HSC_TYPE_MAT4x2_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_MAT4x4_START = HSC_TYPE_MAT4x3_START + HSC_TYPE_VEC2_START,
+#define HSC_TYPE_MATRIX_END HSC_TYPE_STRUCT_FLAG
+	HSC_TYPE_STRUCT_FLAG = HSC_TYPE_MAT4x4_START + HSC_TYPE_VEC2_START,
+	HSC_TYPE_UNION_FLAG,
+	HSC_TYPE_ARRAY_FLAG,
+	HSC_TYPE_COUNT,
+};
+
+#define HSC_TYPE_SCALAR(type)            ((type) & (HSC_TYPE_VEC2_START - 1))
+#define HSC_TYPE_IS_BASIC(type)          ((type) >= HSC_TYPE_VEC2_START && (type) <= HSC_TYPE_MAT2x2_START)
+#define HSC_TYPE_IS_VECTOR(type)         ((type) >= HSC_TYPE_VECTOR_START && (type) < HSC_TYPE_VECTOR_END)
+#define HSC_TYPE_IS_MATRIX(type)         ((type) >= HSC_TYPE_MATRIX_START && (type) < HSC_TYPE_MATRIX_END)
+#define HSC_TYPE_IS_STRUCT(type)         ((type) & HSC_TYPE_STRUCT_FLAG)
+#define HSC_TYPE_IS_UNION(type)          ((type) & HSC_TYPE_UNION_FLAG)
+#define HSC_TYPE_IS_COMPOUND_TYPE(type)  ((type) & (HSC_TYPE_STRUCT_FLAG | HSC_TYPE_UNION_FLAG))
+#define HSC_TYPE_IS_ARRAY(type)          ((type) & HSC_TYPE_ARRAY_FLAG)
+#define HSC_TYPE_VECTOR_COMPONENTS(type) ((type) / HSC_TYPE_VEC2_START)
+#define HSC_TYPE_MATRX_COLUMNS(type)     (((type) + 32) / 48)
+#define HSC_TYPE_MATRX_ROWS(type)        (((((type) - 64) / 16) + 1) & 3) + 2)
+#define HSC_TYPE_COMPOUND_TYPE_ID(type)  ((HscCompoundTypeId) { .idx_plus_one = (type) >> 8 })
+#define HSC_TYPE_ARRAY_TYPE_ID(type)     ((HscArrayId) { .idx_plus_one = (type) >> 8 })
+
+//
+// 'basic_type' must be HSC_TYPE_IS_BASIC(basic_type) == true
+#define HSC_TYPE_VEC2(basic_type)   (HSC_TYPE_VEC2_START + (basic_type))
+#define HSC_TYPE_VEC3(basic_type)   (HSC_TYPE_VEC3_START + (basic_type))
+#define HSC_TYPE_VEC4(basic_type)   (HSC_TYPE_VEC4_START + (basic_type))
+#define HSC_TYPE_MAT2x2(basic_type) (HSC_TYPE_MAT2x2_START + (basic_type))
+#define HSC_TYPE_MAT2x3(basic_type) (HSC_TYPE_MAT2x3_START + (basic_type))
+#define HSC_TYPE_MAT2x4(basic_type) (HSC_TYPE_MAT2x4_START + (basic_type))
+#define HSC_TYPE_MAT3x2(basic_type) (HSC_TYPE_MAT3x2_START + (basic_type))
+#define HSC_TYPE_MAT3x3(basic_type) (HSC_TYPE_MAT3x3_START + (basic_type))
+#define HSC_TYPE_MAT3x4(basic_type) (HSC_TYPE_MAT3x4_START + (basic_type))
+#define HSC_TYPE_MAT4x2(basic_type) (HSC_TYPE_MAT4x2_START + (basic_type))
+#define HSC_TYPE_MAT4x3(basic_type) (HSC_TYPE_MAT4x3_START + (basic_type))
+#define HSC_TYPE_MAT4x4(basic_type) (HSC_TYPE_MAT4x4_START + (basic_type))
+
+//
+// inherits HscType
+typedef U32 HscDecl;
+enum {
+	HSC_DECL_FN_FLAG = HSC_TYPE_COUNT,
+};
+#define HSC_DECL_IS_FN(type) ((type) & HSC_DECL_FN_FLAG)
+#define HSC_DECL_FN_ID(type) ((HscFnId) { .idx_plus_one = (type) >> 8 })
+
+typedef U8 HscToken;
+enum {
+#define HSC_TOKEN_INTRINSIC_TYPES_START HSC_TYPE_BASIC_START
+	//
+	// INFO:
+	// HSC_TYPE_BASIC_START - HSC_TYPE_BASIC_END are used as HscToken too!
+	//
+#define HSC_TOKEN_INTRINSIC_TYPE_VECTORS_START HSC_TOKEN_INTRINSIC_TYPE_VEC2
+	HSC_TOKEN_INTRINSIC_TYPE_VEC2 = HSC_TYPE_BASIC_END,
+	HSC_TOKEN_INTRINSIC_TYPE_VEC3,
+	HSC_TOKEN_INTRINSIC_TYPE_VEC4,
+#define HSC_TOKEN_INTRINSIC_TYPE_VECTORS_END HSC_TOKEN_INTRINSIC_TYPE_MAT2X2
+#define HSC_TOKEN_INTRINSIC_TYPE_MATRICES_START HSC_TOKEN_INTRINSIC_TYPE_MAT2X2
+	HSC_TOKEN_INTRINSIC_TYPE_MAT2X2,
+	HSC_TOKEN_INTRINSIC_TYPE_MAT2X3,
+	HSC_TOKEN_INTRINSIC_TYPE_MAT2X4,
+	HSC_TOKEN_INTRINSIC_TYPE_MAT3X2,
+	HSC_TOKEN_INTRINSIC_TYPE_MAT3X3,
+	HSC_TOKEN_INTRINSIC_TYPE_MAT3X4,
+	HSC_TOKEN_INTRINSIC_TYPE_MAT4X2,
+	HSC_TOKEN_INTRINSIC_TYPE_MAT4X3,
+	HSC_TOKEN_INTRINSIC_TYPE_MAT4X4,
+#define HSC_TOKEN_INTRINSIC_TYPE_MATRICES_END HSC_TOKEN_EOF
+#define HSC_TOKEN_INTRINSIC_TYPES_END HSC_TOKEN_EOF
+#define HSC_TOKEN_INTRINSIC_TYPES_COUNT (HSC_TOKEN_INTRINSIC_TYPES_END - HSC_TOKEN_INTRINSIC_TYPES_START)
+
 	HSC_TOKEN_EOF,
 	HSC_TOKEN_IDENT,
 
@@ -162,7 +313,7 @@ enum {
 	//
 	// keywords
 	//
-#define HSC_TOKEN_KEYWORDS_FIRST HSC_TOKEN_KEYWORD_RETURN
+#define HSC_TOKEN_KEYWORDS_START HSC_TOKEN_KEYWORD_RETURN
 	HSC_TOKEN_KEYWORD_RETURN,
 	HSC_TOKEN_KEYWORD_VERTEX,
 	HSC_TOKEN_KEYWORD_FRAGMENT,
@@ -179,45 +330,8 @@ enum {
 	HSC_TOKEN_KEYWORD_RW_IMAGE2D,
 	HSC_TOKEN_KEYWORD_RO_IMAGE3D,
 	HSC_TOKEN_KEYWORD_RW_IMAGE3D,
-#define HSC_TOKEN_KEYWORDS_LAST HSC_TOKEN_KEYWORD_RW_IMAGE3D
-#define HSC_TOKEN_KEYWORDS_COUNT HSC_TOKEN_KEYWORDS_LAST - HSC_TOKEN_KEYWORDS_FIRST
-
-	//
-	// intrinsic types
-	//
-#define HSC_TOKEN_INTRINSIC_TYPES_FIRST HSC_TOKEN_INTRINSIC_TYPE_U8
-	HSC_TOKEN_INTRINSIC_TYPE_U8,
-	HSC_TOKEN_INTRINSIC_TYPE_U16,
-	HSC_TOKEN_INTRINSIC_TYPE_U32,
-	HSC_TOKEN_INTRINSIC_TYPE_U64,
-	HSC_TOKEN_INTRINSIC_TYPE_F8,
-	HSC_TOKEN_INTRINSIC_TYPE_F16,
-	HSC_TOKEN_INTRINSIC_TYPE_F32,
-	HSC_TOKEN_INTRINSIC_TYPE_F64,
-#define HSC_TOKEN_INTRINSIC_TYPE_VECTORS_FIRST HSC_TOKEN_INTRINSIC_TYPE_VEC2
-	HSC_TOKEN_INTRINSIC_TYPE_VEC2,
-	HSC_TOKEN_INTRINSIC_TYPE_UVEC2,
-	HSC_TOKEN_INTRINSIC_TYPE_SVEC2,
-	HSC_TOKEN_INTRINSIC_TYPE_VEC3,
-	HSC_TOKEN_INTRINSIC_TYPE_UVEC3,
-	HSC_TOKEN_INTRINSIC_TYPE_SVEC3,
-	HSC_TOKEN_INTRINSIC_TYPE_VEC4,
-	HSC_TOKEN_INTRINSIC_TYPE_UVEC4,
-	HSC_TOKEN_INTRINSIC_TYPE_SVEC4,
-#define HSC_TOKEN_INTRINSIC_TYPE_VECTORS_LAST HSC_TOKEN_INTRINSIC_TYPE_SVEC4
-#define HSC_TOKEN_INTRINSIC_TYPE_MATRICES_FIRST HSC_TOKEN_INTRINSIC_TYPE_MAT2X2
-	HSC_TOKEN_INTRINSIC_TYPE_MAT2X2,
-	HSC_TOKEN_INTRINSIC_TYPE_MAT2X3,
-	HSC_TOKEN_INTRINSIC_TYPE_MAT2X4,
-	HSC_TOKEN_INTRINSIC_TYPE_MAT3X2,
-	HSC_TOKEN_INTRINSIC_TYPE_MAT3X3,
-	HSC_TOKEN_INTRINSIC_TYPE_MAT3X4,
-	HSC_TOKEN_INTRINSIC_TYPE_MAT4X2,
-	HSC_TOKEN_INTRINSIC_TYPE_MAT4X3,
-	HSC_TOKEN_INTRINSIC_TYPE_MAT4X4,
-#define HSC_TOKEN_INTRINSIC_TYPE_MATRICES_LAST HSC_TOKEN_INTRINSIC_TYPE_MAT4X4
-#define HSC_TOKEN_INTRINSIC_TYPES_LAST HSC_TOKEN_INTRINSIC_TYPE_MAT4X4
-#define HSC_TOKEN_INTRINSIC_TYPES_COUNT HSC_TOKEN_INTRINSIC_TYPES_LAST - HSC_TOKEN_INTRINSIC_TYPES_FIRST
+#define HSC_TOKEN_KEYWORDS_END HSC_TOKEN_COUNT
+#define HSC_TOKEN_KEYWORDS_COUNT (HSC_TOKEN_KEYWORDS_END - HSC_TOKEN_KEYWORDS_START)
 
 	HSC_TOKEN_COUNT,
 };
@@ -225,11 +339,11 @@ enum {
 enum {
 	HSC_STRING_ID_NULL = 0,
 
-	HSC_STRING_ID_KEYWORDS_FIRST,
-	HSC_STRING_ID_KEYWORDS_LAST = HSC_STRING_ID_KEYWORDS_FIRST + HSC_TOKEN_KEYWORDS_COUNT,
+	HSC_STRING_ID_KEYWORDS_START,
+#define HSC_STRING_ID_KEYWORDS_END HSC_STRING_ID_INTRINSIC_TYPES_START
 
-	HSC_STRING_ID_INTRINSIC_TYPES_FIRST,
-	HSC_STRING_ID_INTRINSIC_TYPES_LAST = HSC_STRING_ID_INTRINSIC_TYPES_FIRST + HSC_TOKEN_INTRINSIC_TYPES_COUNT,
+	HSC_STRING_ID_INTRINSIC_TYPES_START = HSC_STRING_ID_KEYWORDS_START + HSC_TOKEN_KEYWORDS_COUNT,
+	HSC_STRING_ID_INTRINSIC_TYPES_END = HSC_STRING_ID_INTRINSIC_TYPES_START + HSC_TOKEN_INTRINSIC_TYPES_COUNT,
 };
 
 typedef union HscTokenValue HscTokenValue;
@@ -264,8 +378,8 @@ struct HscStringTable {
 	uint32_t        entries_cap;
 };
 
-typedef struct HscSynGen HscSynGen;
-struct HscSynGen {
+typedef struct HscAstGen HscAstGen;
+struct HscAstGen {
 	HscToken* tokens;
 	HscLocation* token_locations;
 	HscTokenValue* token_values;
@@ -290,22 +404,14 @@ void hsc_string_table_init(HscStringTable* string_table, uint32_t data_cap, uint
 HscStringId hsc_string_table_deduplicate(HscStringTable* string_table, char* string, uint32_t string_size);
 HscString hsc_string_table_get(HscStringTable* string_table, HscStringId id);
 
-void hsc_syngen_init(HscSynGen* syngen, uint32_t tokens_cap, U32 lines_cap);
-void hsc_syngen_token_error_1(HscSynGen* syngen, const char* fmt, ...);
-void hsc_syngen_token_error_2(HscSynGen* syngen, HscLocation* other_location, const char* fmt, ...);
-void hsc_syngen_add_token(HscSynGen* syngen, HscToken token);
-void hsc_syngen_add_token_value(HscSynGen* syngen, HscTokenValue value);
-void hsc_syngen_tokenize(HscSynGen* syngen);
-HscToken hsc_token_peek(HscSynGen* syngen);
-HscToken hsc_token_next(HscSynGen* syngen);
-
-// ===========================================
-//
-//
-// Semantic Generator
-//
-//
-// ===========================================
+void hsc_astgen_init(HscAstGen* astgen, uint32_t tokens_cap, U32 lines_cap);
+void hsc_astgen_token_error_1(HscAstGen* astgen, const char* fmt, ...);
+void hsc_astgen_token_error_2(HscAstGen* astgen, HscLocation* other_location, const char* fmt, ...);
+void hsc_astgen_add_token(HscAstGen* astgen, HscToken token);
+void hsc_astgen_add_token_value(HscAstGen* astgen, HscTokenValue value);
+void hsc_astgen_tokenize(HscAstGen* astgen);
+HscToken hsc_token_peek(HscAstGen* astgen);
+HscToken hsc_token_next(HscAstGen* astgen);
 
 // ===========================================
 //
@@ -317,7 +423,7 @@ HscToken hsc_token_next(HscSynGen* syngen);
 
 typedef struct HscCompiler HscCompiler;
 struct HscCompiler {
-	HscSynGen syngen;
+	HscAstGen astgen;
 
 };
 
