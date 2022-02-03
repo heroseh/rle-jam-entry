@@ -38,7 +38,7 @@
 #endif
 
 #ifndef HSC_DEBUG_ASSERTIONS
-#define HSC_DEBUG_ASSERTIONS 0
+#define HSC_DEBUG_ASSERTIONS 1
 #endif
 
 #define HSC_ASSERT_ARRAY_BOUNDS(idx, count) HSC_ASSERT((idx) < (count), "idx '%zu' is out of bounds for an array of count '%zu'", (idx), (count));
@@ -111,7 +111,9 @@ HSC_DEFINE_ID(HscFileId);
 HSC_DEFINE_ID(HscStringId);
 HSC_DEFINE_ID(HscCompoundTypeId);
 HSC_DEFINE_ID(HscArrayTypeId);
-HSC_DEFINE_ID(HscFnTypeId);
+HSC_DEFINE_ID(HscFunctionId);
+HSC_DEFINE_ID(HscFunctionTypeId);
+HSC_DEFINE_ID(HscExprId);
 
 typedef struct HscLocation HscLocation;
 struct HscLocation {
@@ -124,16 +126,18 @@ struct HscLocation {
 	uint32_t column_end;
 };
 
-typedef uint8_t  U8;
-typedef uint16_t U16;
-typedef uint32_t U32;
-typedef uint64_t U64;
-typedef uint8_t  S8;
-typedef uint16_t S16;
-typedef uint32_t S32;
-typedef uint64_t S64;
-typedef float    F32;
-typedef double   F64;
+typedef uint8_t   U8;
+typedef uint16_t  U16;
+typedef uint32_t  U32;
+typedef uint64_t  U64;
+typedef uintptr_t Uptr;
+typedef int8_t    S8;
+typedef int16_t   S16;
+typedef int32_t   S32;
+typedef int64_t   S64;
+typedef intptr_t  Sptr;
+typedef float     F32;
+typedef double    F64;
 
 #define U8_MAX  UINT8_MAX
 #define U16_MAX UINT16_MAX
@@ -156,6 +160,8 @@ typedef double   F64;
 //
 // ===========================================
 
+#define HscHashTable(Key, Value) HscHashTable
+
 typedef struct HscHashTable HscHashTable;
 struct HscHashTable {
 	U32* keys;
@@ -165,7 +171,7 @@ struct HscHashTable {
 };
 
 void hsc_hash_table_init(HscHashTable* hash_table);
-bool hsc_hash_table_find(HscHashTable* hash_table, U32 key, U32** value_ptr_out);
+bool hsc_hash_table_find(HscHashTable* hash_table, U32 key, U32* value_out);
 bool hsc_hash_table_find_or_insert(HscHashTable* hash_table, U32 key, U32** value_ptr_out);
 
 // ===========================================
@@ -176,95 +182,106 @@ bool hsc_hash_table_find_or_insert(HscHashTable* hash_table, U32 key, U32** valu
 //
 // ===========================================
 
-typedef U32 HscType;
+typedef U32 HscDataType;
 enum {
-#define HSC_TYPE_BASIC_START HSC_TYPE_VOID
-	HSC_TYPE_VOID,
-	HSC_TYPE_BOOL,
-	HSC_TYPE_U8,
-	HSC_TYPE_U16,
-	HSC_TYPE_U32,
-	HSC_TYPE_U64,
-	HSC_TYPE_S8,
-	HSC_TYPE_S16,
-	HSC_TYPE_S32,
-	HSC_TYPE_S64,
-	HSC_TYPE_F8,
-	HSC_TYPE_F16,
-	HSC_TYPE_F32,
-	HSC_TYPE_F64,
-#define HSC_TYPE_BASIC_END (HSC_TYPE_F64 + 1)
-#define HSC_TYPE_BASIC_COUNT (HSC_TYPE_BASIC_END - HSC_TYPE_BASIC_START)
+#define HSC_DATA_TYPE_BASIC_START HSC_DATA_TYPE_VOID
+	HSC_DATA_TYPE_VOID,
+	HSC_DATA_TYPE_BOOL,
+	HSC_DATA_TYPE_U8,
+	HSC_DATA_TYPE_U16,
+	HSC_DATA_TYPE_U32,
+	HSC_DATA_TYPE_U64,
+	HSC_DATA_TYPE_S8,
+	HSC_DATA_TYPE_S16,
+	HSC_DATA_TYPE_S32,
+	HSC_DATA_TYPE_S64,
+	HSC_DATA_TYPE_F8,
+	HSC_DATA_TYPE_F16,
+	HSC_DATA_TYPE_F32,
+	HSC_DATA_TYPE_F64,
+#define HSC_DATA_TYPE_BASIC_END (HSC_DATA_TYPE_F64 + 1)
+#define HSC_DATA_TYPE_BASIC_COUNT (HSC_DATA_TYPE_BASIC_END - HSC_DATA_TYPE_BASIC_START)
 
-#define HSC_TYPE_VECTOR_START HSC_TYPE_VEC2_START
-	HSC_TYPE_VEC2_START = 16,
-	HSC_TYPE_VEC3_START = HSC_TYPE_VEC2_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_VEC4_START = HSC_TYPE_VEC3_START + HSC_TYPE_VEC2_START,
-#define HSC_TYPE_VECTOR_END HSC_TYPE_MAT2x2_START
-#define HSC_TYPE_MATRIX_START HSC_TYPE_MAT2x2_START
-	HSC_TYPE_MAT2x2_START = HSC_TYPE_VEC4_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_MAT2x3_START = HSC_TYPE_MAT2x2_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_MAT2x4_START = HSC_TYPE_MAT2x3_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_MAT3x2_START = HSC_TYPE_MAT2x4_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_MAT3x3_START = HSC_TYPE_MAT3x2_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_MAT3x4_START = HSC_TYPE_MAT3x3_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_MAT4x2_START = HSC_TYPE_MAT3x4_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_MAT4x3_START = HSC_TYPE_MAT4x2_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_MAT4x4_START = HSC_TYPE_MAT4x3_START + HSC_TYPE_VEC2_START,
-#define HSC_TYPE_MATRIX_END HSC_TYPE_STRUCT_FLAG
-	HSC_TYPE_STRUCT_FLAG = HSC_TYPE_MAT4x4_START + HSC_TYPE_VEC2_START,
-	HSC_TYPE_UNION_FLAG,
-	HSC_TYPE_ARRAY_FLAG,
-	HSC_TYPE_COUNT,
+#define HSC_DATA_TYPE_VECTOR_START HSC_DATA_TYPE_VEC2_START
+	HSC_DATA_TYPE_VEC2_START = 16,
+#define HSC_DATA_TYPE_VEC2_END HSC_DATA_TYPE_VEC3_START
+	HSC_DATA_TYPE_VEC3_START = HSC_DATA_TYPE_VEC2_START + HSC_DATA_TYPE_VEC2_START,
+#define HSC_DATA_TYPE_VEC3_END HSC_DATA_TYPE_VEC4_START
+	HSC_DATA_TYPE_VEC4_START = HSC_DATA_TYPE_VEC3_START + HSC_DATA_TYPE_VEC2_START,
+#define HSC_DATA_TYPE_VEC4_END HSC_DATA_TYPE_MAT2x2_START
+#define HSC_DATA_TYPE_VECTOR_END HSC_DATA_TYPE_MAT2x2_START
+#define HSC_DATA_TYPE_MATRIX_START HSC_DATA_TYPE_MAT2x2_START
+	HSC_DATA_TYPE_MAT2x2_START = HSC_DATA_TYPE_VEC4_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_MAT2x3_START = HSC_DATA_TYPE_MAT2x2_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_MAT2x4_START = HSC_DATA_TYPE_MAT2x3_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_MAT3x2_START = HSC_DATA_TYPE_MAT2x4_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_MAT3x3_START = HSC_DATA_TYPE_MAT3x2_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_MAT3x4_START = HSC_DATA_TYPE_MAT3x3_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_MAT4x2_START = HSC_DATA_TYPE_MAT3x4_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_MAT4x3_START = HSC_DATA_TYPE_MAT4x2_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_MAT4x4_START = HSC_DATA_TYPE_MAT4x3_START + HSC_DATA_TYPE_VEC2_START,
+#define HSC_DATA_TYPE_MATRIX_END HSC_DATA_TYPE_STRUCT
+	HSC_DATA_TYPE_STRUCT = HSC_DATA_TYPE_MAT4x4_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_UNION,
+	HSC_DATA_TYPE_ARRAY,
+
+	HSC_DATA_TYPE_GENERIC_SCALAR,
+	HSC_DATA_TYPE_GENERIC_VEC2,
+	HSC_DATA_TYPE_GENERIC_VEC3,
+	HSC_DATA_TYPE_GENERIC_VEC4,
+
+	HSC_DATA_TYPE_COUNT,
 };
 
-#define HSC_TYPE_SCALAR(type)            ((type) & (HSC_TYPE_VEC2_START - 1))
-#define HSC_TYPE_IS_BASIC(type)          ((type) >= HSC_TYPE_VEC2_START && (type) <= HSC_TYPE_MAT2x2_START)
-#define HSC_TYPE_IS_VECTOR(type)         ((type) >= HSC_TYPE_VECTOR_START && (type) < HSC_TYPE_VECTOR_END)
-#define HSC_TYPE_IS_MATRIX(type)         ((type) >= HSC_TYPE_MATRIX_START && (type) < HSC_TYPE_MATRIX_END)
-#define HSC_TYPE_IS_STRUCT(type)         ((type) & HSC_TYPE_STRUCT_FLAG)
-#define HSC_TYPE_IS_UNION(type)          ((type) & HSC_TYPE_UNION_FLAG)
-#define HSC_TYPE_IS_COMPOUND_TYPE(type)  ((type) & (HSC_TYPE_STRUCT_FLAG | HSC_TYPE_UNION_FLAG))
-#define HSC_TYPE_IS_ARRAY(type)          ((type) & HSC_TYPE_ARRAY_FLAG)
-#define HSC_TYPE_VECTOR_COMPONENTS(type) ((type) / HSC_TYPE_VEC2_START)
-#define HSC_TYPE_MATRX_COLUMNS(type)     (((type) + 32) / 48)
-#define HSC_TYPE_MATRX_ROWS(type)        (((((type) - 64) / 16) + 1) & 3) + 2)
-#define HSC_TYPE_COMPOUND_TYPE_ID(type)  ((HscCompoundTypeId) { .idx_plus_one = (type) >> 8 })
-#define HSC_TYPE_ARRAY_TYPE_ID(type)     ((HscArrayId) { .idx_plus_one = (type) >> 8 })
+#define HSC_DATA_TYPE_SCALAR(type)            ((type) & (HSC_DATA_TYPE_VEC2_START - 1))
+#define HSC_DATA_TYPE_IS_BASIC(type)          ((type) >= HSC_DATA_TYPE_VEC2_START && (type) <= HSC_DATA_TYPE_MAT2x2_START)
+#define HSC_DATA_TYPE_IS_VECTOR(type)         ((type) >= HSC_DATA_TYPE_VECTOR_START && (type) < HSC_DATA_TYPE_VECTOR_END)
+#define HSC_DATA_TYPE_IS_MATRIX(type)         ((type) >= HSC_DATA_TYPE_MATRIX_START && (type) < HSC_DATA_TYPE_MATRIX_END)
+#define HSC_DATA_TYPE_IS_STRUCT(type)         (((type) & 0xff) == HSC_DATA_TYPE_STRUCT)
+#define HSC_DATA_TYPE_IS_UNION(type)          (((type) & 0xff) == HSC_DATA_TYPE_UNION)
+#define HSC_DATA_TYPE_IS_COMPOUND_TYPE(type)  (HSC_DATA_TYPE_IS_STRUCT(type) || HSC_DATA_TYPE_IS_UNION(type))
+#define HSC_DATA_TYPE_IS_ARRAY(type)          (((type) & 0xff) == HSC_DATA_TYPE_ARRAY)
+#define HSC_DATA_TYPE_VECTOR_COMPONENTS(type) ((type) / HSC_DATA_TYPE_VEC2_START)
+#define HSC_DATA_TYPE_MATRX_COLUMNS(type)     (((type) + 32) / 48)
+#define HSC_DATA_TYPE_MATRX_ROWS(type)        (((((type) - 64) / 16) + 1) & 3) + 2)
+#define HSC_DATA_TYPE_COMPOUND_TYPE_ID(type)  ((HscCompoundTypeId) { .idx_plus_one = (type) >> 8 })
+#define HSC_DATA_TYPE_ARRAY_TYPE_ID(type)     ((HscArrayId) { .idx_plus_one = (type) >> 8 })
 
 //
-// 'basic_type' must be HSC_TYPE_IS_BASIC(basic_type) == true
-#define HSC_TYPE_VEC2(basic_type)   (HSC_TYPE_VEC2_START + (basic_type))
-#define HSC_TYPE_VEC3(basic_type)   (HSC_TYPE_VEC3_START + (basic_type))
-#define HSC_TYPE_VEC4(basic_type)   (HSC_TYPE_VEC4_START + (basic_type))
-#define HSC_TYPE_MAT2x2(basic_type) (HSC_TYPE_MAT2x2_START + (basic_type))
-#define HSC_TYPE_MAT2x3(basic_type) (HSC_TYPE_MAT2x3_START + (basic_type))
-#define HSC_TYPE_MAT2x4(basic_type) (HSC_TYPE_MAT2x4_START + (basic_type))
-#define HSC_TYPE_MAT3x2(basic_type) (HSC_TYPE_MAT3x2_START + (basic_type))
-#define HSC_TYPE_MAT3x3(basic_type) (HSC_TYPE_MAT3x3_START + (basic_type))
-#define HSC_TYPE_MAT3x4(basic_type) (HSC_TYPE_MAT3x4_START + (basic_type))
-#define HSC_TYPE_MAT4x2(basic_type) (HSC_TYPE_MAT4x2_START + (basic_type))
-#define HSC_TYPE_MAT4x3(basic_type) (HSC_TYPE_MAT4x3_START + (basic_type))
-#define HSC_TYPE_MAT4x4(basic_type) (HSC_TYPE_MAT4x4_START + (basic_type))
+// 'basic_type' must be HSC_DATA_TYPE_IS_BASIC(basic_type) == true
+#define HSC_DATA_TYPE_VEC2(basic_type)   (HSC_DATA_TYPE_VEC2_START + (basic_type))
+#define HSC_DATA_TYPE_VEC3(basic_type)   (HSC_DATA_TYPE_VEC3_START + (basic_type))
+#define HSC_DATA_TYPE_VEC4(basic_type)   (HSC_DATA_TYPE_VEC4_START + (basic_type))
+#define HSC_DATA_TYPE_MAT2x2(basic_type) (HSC_DATA_TYPE_MAT2x2_START + (basic_type))
+#define HSC_DATA_TYPE_MAT2x3(basic_type) (HSC_DATA_TYPE_MAT2x3_START + (basic_type))
+#define HSC_DATA_TYPE_MAT2x4(basic_type) (HSC_DATA_TYPE_MAT2x4_START + (basic_type))
+#define HSC_DATA_TYPE_MAT3x2(basic_type) (HSC_DATA_TYPE_MAT3x2_START + (basic_type))
+#define HSC_DATA_TYPE_MAT3x3(basic_type) (HSC_DATA_TYPE_MAT3x3_START + (basic_type))
+#define HSC_DATA_TYPE_MAT3x4(basic_type) (HSC_DATA_TYPE_MAT3x4_START + (basic_type))
+#define HSC_DATA_TYPE_MAT4x2(basic_type) (HSC_DATA_TYPE_MAT4x2_START + (basic_type))
+#define HSC_DATA_TYPE_MAT4x3(basic_type) (HSC_DATA_TYPE_MAT4x3_START + (basic_type))
+#define HSC_DATA_TYPE_MAT4x4(basic_type) (HSC_DATA_TYPE_MAT4x4_START + (basic_type))
 
 //
-// inherits HscType
+// inherits HscDataType
 typedef U32 HscDecl;
 enum {
-	HSC_DECL_FN_FLAG = HSC_TYPE_COUNT,
+	HSC_DECL_FUNCTION = HSC_DATA_TYPE_COUNT,
 };
-#define HSC_DECL_IS_FN(type) ((type) & HSC_DECL_FN_FLAG)
-#define HSC_DECL_FN_ID(type) ((HscFnId) { .idx_plus_one = (type) >> 8 })
+#define HSC_DECL_IS_FUNCTION(type) (((type) & 0xff) & HSC_DECL_FUNCTION)
+#define HSC_DECL_FUNCTION(function_id) (((function_id).idx_plus_one << 8) | HSC_DECL_FUNCTION)
+#define HSC_DECL_FUNCTION_RAW(function_id) (((function_id) << 8) | HSC_DECL_FUNCTION)
+#define HSC_DECL_FUNCTION_ID(type) ((HscFunctionId) { .idx_plus_one = (type) >> 8 })
 
 typedef U8 HscToken;
 enum {
-#define HSC_TOKEN_INTRINSIC_TYPES_START HSC_TYPE_BASIC_START
+#define HSC_TOKEN_INTRINSIC_TYPES_START HSC_DATA_TYPE_BASIC_START
 	//
 	// INFO:
-	// HSC_TYPE_BASIC_START - HSC_TYPE_BASIC_END are used as HscToken too!
+	// HSC_DATA_TYPE_BASIC_START - HSC_DATA_TYPE_BASIC_END are used as HscToken too!
 	//
 #define HSC_TOKEN_INTRINSIC_TYPE_VECTORS_START HSC_TOKEN_INTRINSIC_TYPE_VEC2
-	HSC_TOKEN_INTRINSIC_TYPE_VEC2 = HSC_TYPE_BASIC_END,
+	HSC_TOKEN_INTRINSIC_TYPE_VEC2 = HSC_DATA_TYPE_BASIC_END,
 	HSC_TOKEN_INTRINSIC_TYPE_VEC3,
 	HSC_TOKEN_INTRINSIC_TYPE_VEC4,
 #define HSC_TOKEN_INTRINSIC_TYPE_VECTORS_END HSC_TOKEN_INTRINSIC_TYPE_MAT2X2
@@ -336,8 +353,22 @@ enum {
 	HSC_TOKEN_COUNT,
 };
 
+#define HSC_TOKEN_IS_BASIC_TYPE(token) ((token) < HSC_DATA_TYPE_BASIC_END)
+
 enum {
 	HSC_STRING_ID_NULL = 0,
+
+#define HSC_STRING_ID_INTRINSIC_PARAM_NAMES_START HSC_STRING_ID_GENERIC_SCALAR
+	HSC_STRING_ID_GENERIC_SCALAR,
+	HSC_STRING_ID_GENERIC_VEC2,
+	HSC_STRING_ID_GENERIC_VEC3,
+	HSC_STRING_ID_GENERIC_VEC4,
+	HSC_STRING_ID_SCALAR,
+	HSC_STRING_ID_X,
+	HSC_STRING_ID_Y,
+	HSC_STRING_ID_Z,
+	HSC_STRING_ID_W,
+#define HSC_STRING_ID_INTRINSIC_PARAM_NAMES_END HSC_STRING_ID_KEYWORDS_START
 
 	HSC_STRING_ID_KEYWORDS_START,
 #define HSC_STRING_ID_KEYWORDS_END HSC_STRING_ID_INTRINSIC_TYPES_START
@@ -345,6 +376,8 @@ enum {
 	HSC_STRING_ID_INTRINSIC_TYPES_START = HSC_STRING_ID_KEYWORDS_START + HSC_TOKEN_KEYWORDS_COUNT,
 	HSC_STRING_ID_INTRINSIC_TYPES_END = HSC_STRING_ID_INTRINSIC_TYPES_START + HSC_TOKEN_INTRINSIC_TYPES_COUNT,
 };
+
+extern char* hsc_string_intrinsic_param_names[HSC_STRING_ID_INTRINSIC_PARAM_NAMES_END];
 
 typedef union HscTokenValue HscTokenValue;
 union HscTokenValue {
@@ -378,8 +411,190 @@ struct HscStringTable {
 	uint32_t        entries_cap;
 };
 
+typedef struct HscFunctionParam HscFunctionParam;
+struct HscFunctionParam {
+	HscStringId identifier_string_id;
+	HscDataType data_type;
+	U32         identifier_token_idx;
+};
+
+typedef U8 HscFunctionShaderStage;
+enum {
+	HSC_FUNCTION_SHADER_STAGE_NONE,
+	HSC_FUNCTION_SHADER_STAGE_VERTEX,
+	HSC_FUNCTION_SHADER_STAGE_FRAGMENT,
+	HSC_FUNCTION_SHADER_STAGE_GEOMETRY,
+	HSC_FUNCTION_SHADER_STAGE_TESSELLATION,
+	HSC_FUNCTION_SHADER_STAGE_COMPUTE,
+	HSC_FUNCTION_SHADER_STAGE_MESHTASK,
+
+	HSC_FUNCTION_SHADER_STAGE_COUNT,
+};
+extern char* hsc_function_shader_stage_strings[HSC_FUNCTION_SHADER_STAGE_COUNT];
+
+typedef struct HscFunction HscFunction;
+struct HscFunction {
+	HscLocation            location;
+	HscStringId            identifier_string_id;
+	HscDataType            return_data_type;
+	U32                    params_start_idx;
+	U8                     params_count;
+	HscFunctionShaderStage shader_stage;
+	HscExprId              block_expr_id;
+};
+
+enum {
+	HSC_FUNCTION_ID_NULL,
+	HSC_FUNCTION_ID_VEC2_SINGLE,
+	HSC_FUNCTION_ID_VEC2_MULTI,
+	HSC_FUNCTION_ID_VEC3_SINGLE,
+	HSC_FUNCTION_ID_VEC3_MULTI,
+	HSC_FUNCTION_ID_VEC4_SINGLE,
+	HSC_FUNCTION_ID_VEC4_MULTI,
+	HSC_FUNCTION_ID_MAT2x2,
+	HSC_FUNCTION_ID_MAT2x3,
+	HSC_FUNCTION_ID_MAT2x4,
+	HSC_FUNCTION_ID_MAT3x2,
+	HSC_FUNCTION_ID_MAT3x3,
+	HSC_FUNCTION_ID_MAT3x4,
+	HSC_FUNCTION_ID_MAT4x2,
+	HSC_FUNCTION_ID_MAT4x3,
+	HSC_FUNCTION_ID_MAT4x4,
+
+#define HSC_FUNCTION_ID_INTRINSIC_END HSC_FUNCTION_ID_USER_START
+	HSC_FUNCTION_ID_USER_START,
+};
+
+typedef struct HscIntrinsicFunction HscIntrinsicFunction;
+struct HscIntrinsicFunction {
+	char* name;
+	HscDataType return_data_type;
+	U32 params_count;
+	HscFunctionParam params[16];
+};
+
+extern U32 hsc_intrinsic_function_overloads_count[HSC_FUNCTION_ID_INTRINSIC_END];
+extern HscIntrinsicFunction hsc_intrinsic_functions[HSC_FUNCTION_ID_INTRINSIC_END];
+
+enum {
+	HSC_INTRINSIC_FUNCTION_ID_USER_START,
+};
+
+typedef U8 HscExprType;
+enum {
+	HSC_EXPR_TYPE_NONE,
+	//
+	// binary ops
+	HSC_EXPR_TYPE_CALL,
+	HSC_EXPR_TYPE_BASIC_LIT,
+	HSC_EXPR_TYPE_FUNCTION,
+	HSC_EXPR_TYPE_CALL_ARG_LIST,
+
+	//
+	// unary ops
+	HSC_EXPR_TYPE_STMT_RETURN,
+	HSC_EXPR_TYPE_STMT_BLOCK,
+};
+
+typedef struct HscExpr HscExpr;
+struct HscExpr {
+	union {
+		struct {
+			U32 type: 5; // HscExprType
+			U32 is_stmt_block_entry: 1;
+		};
+		struct {
+			U32 type: 5; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 id: 26; // HscFunctionId
+		} function;
+		struct {
+			U32 type: 5; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 expr_idx: 26;
+		} unary;
+		struct {
+			U32 type: 5; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 left_expr_rel_idx: 13;
+			U32 right_expr_rel_idx: 13;
+		} binary;
+		struct {
+			U32 type: 5; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 token_value_idx: 26; // if HSC_BASIC_LIT_TYPE_BOOL then this is a bool value
+		} basic_lit;
+		struct {
+			U32 type: 5; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 stmts_count: 9;
+			U32 first_expr_rel_idx: 16;
+		} stmt_block;
+	};
+
+	union {
+		struct { // if is_stmt_block_entry
+			U16 prev_expr_rel_idx;
+			U16 next_expr_rel_idx;
+		};
+		HscDataType data_type;
+	};
+};
+
+HSC_STATIC_ASSERT(sizeof(HscExpr) == sizeof(U64), "HscExpr must be 8 bytes");
+
+/*
+typedef U32 HscExpr;
+#define HSC_EXPR_TYPE(expr) ((HscExprType)((expr) & 0x3f))
+
+#define HSC_EXPR_STMT_BLOCK() ((HscExpr)(HSC_EXPR_TYPE_STMT_BLOCK)
+
+// HSC_EXPR_TYPE_FUNCTION
+#define HSC_EXPR_FUNCTION(function_id) ((HscExpr)((function_id.idx_plus_one << 6)) | HSC_EXPR_TYPE_FUNCTION)
+#define HSC_EXPR_FUNCTION_ID(expr) ((HSC_EXPR_FUNCTION_ID) { .idx_plus_one = ((expr) >> 6) })
+
+// HSC_EXPR_TYPE_BASIC_LIT
+#define HSC_EXPR_BASIC_LIT(basic_lit_type, token_value_idx) ((HscExpr)(((token_value_idx) << 9) | (((basic_lit_type) & 0x7) << 6) | HSC_EXPR_TYPE_BASIC_LIT)
+#define HSC_EXPR_BASIC_LIT_TYPE(expr) (((expr) >> 6) & 0x7)
+#define HSC_EXPR_TOKEN_VALUE_IDX(expr) ((expr) >> 9)
+
+// HSC_EXPR_TYPE_STMT_HEADER
+#define HSC_EXPR_STMT_HEADER() ((HscExpr)HSC_EXPR_TYPE_STMT_HEADER)
+#define HSC_EXPR_PREV_EXPR_REL_IDX(expr) (((expr) >> 6) & 0x1fff)
+#define HSC_EXPR_NEXT_EXPR_REL_IDX(expr) (((expr) >> 19) & 0x1fff)
+
+#define HSC_EXPR_SET_PREV_EXPR_REL_IDX(expr_ptr, prev_rel_idx) (*(expr_ptr) = ((prev_rel_idx) & 0x1fff) << 6)
+#define HSC_EXPR_SET_NEXT_EXPR_REL_IDX(expr_ptr, next_rel_idx) (*(expr_ptr) = ((next_rel_idx) & 0x1fff) << 19)
+
+#define HSC_EXPR_BINARY_EXPR(expr_type, right_expr_idx) (((right_expr_idx << 6)) | expr_type)
+#define HSC_EXPR_RIGHT_EXPR_IDX(expr) ((expr) >> 6)
+
+#define HSC_EXPR_UNARY_EXPR(expr_type) (expr_type)
+*/
+
 typedef struct HscAstGen HscAstGen;
 struct HscAstGen {
+	HscFunctionParam* function_params;
+	HscFunction*      functions;
+	HscExpr*          exprs;
+	HscLocation*      expr_locations;
+	U32 function_params_count;
+	U32 function_params_cap;
+	U32 functions_count;
+	U32 functions_cap;
+	U32 exprs_count;
+	U32 exprs_cap;
+
+	HscStringId* variable_stack_strings;
+	U32*         variable_stack_var_indices;
+	U32          variable_stack_count;
+	U32          variable_stack_cap;
+	U32          next_var_idx;
+
+	HscHashTable(HscStringId, HscDecl) global_declarations;
+
+	char* error_info;
+
 	HscToken* tokens;
 	HscLocation* token_locations;
 	HscTokenValue* token_values;
@@ -400,18 +615,38 @@ struct HscAstGen {
 	bool print_color;
 };
 
+HscString hsc_data_type_string(HscAstGen* astgen, HscDataType data_type);
+
 void hsc_string_table_init(HscStringTable* string_table, uint32_t data_cap, uint32_t entries_cap);
+#define hsc_string_table_deduplicate_lit(string_table, string_lit) hsc_string_table_deduplicate(string_table, string_lit, sizeof(string_lit) - 1)
 HscStringId hsc_string_table_deduplicate(HscStringTable* string_table, char* string, uint32_t string_size);
 HscString hsc_string_table_get(HscStringTable* string_table, HscStringId id);
 
-void hsc_astgen_init(HscAstGen* astgen, uint32_t tokens_cap, U32 lines_cap);
-void hsc_astgen_token_error_1(HscAstGen* astgen, const char* fmt, ...);
-void hsc_astgen_token_error_2(HscAstGen* astgen, HscLocation* other_location, const char* fmt, ...);
+typedef struct HscCompilerSetup HscCompilerSetup;
+void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup);
+HSC_NORETURN void hsc_astgen_error_1(HscAstGen* astgen, const char* fmt, ...);
+HSC_NORETURN void hsc_astgen_error_2(HscAstGen* astgen, HscLocation* other_location, const char* fmt, ...);
+HSC_NORETURN void hsc_astgen_token_error_1(HscAstGen* astgen, const char* fmt, ...);
+HSC_NORETURN void hsc_astgen_token_error_2(HscAstGen* astgen, HscLocation* other_location, const char* fmt, ...);
 void hsc_astgen_add_token(HscAstGen* astgen, HscToken token);
 void hsc_astgen_add_token_value(HscAstGen* astgen, HscTokenValue value);
 void hsc_astgen_tokenize(HscAstGen* astgen);
 HscToken hsc_token_peek(HscAstGen* astgen);
+HscToken hsc_token_peek_ahead(HscAstGen* astgen, U32 by);
+void hsc_token_consume(HscAstGen* astgen, U32 amount);
 HscToken hsc_token_next(HscAstGen* astgen);
+HscTokenValue hsc_token_value_next(HscAstGen* astgen);
+
+
+
+HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence);
+HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen);
+void hsc_astgen_generate(HscAstGen* astgen);
+
+void hsc_astgen_variable_stack_open(HscAstGen* astgen);
+void hsc_astgen_variable_stack_close(HscAstGen* astgen);
+void hsc_astgen_variable_stack_add(HscAstGen* astgen, HscStringId string_id);
+U32 hsc_astgen_variable_stack_find(HscAstGen* astgen, HscStringId string_id);
 
 // ===========================================
 //
@@ -427,10 +662,13 @@ struct HscCompiler {
 
 };
 
-typedef struct HscCompilerSetup HscCompilerSetup;
 struct HscCompilerSetup {
 	uint32_t tokens_cap;
 	uint32_t lines_cap;
+	uint32_t functions_cap;
+	uint32_t function_params_cap;
+	uint32_t exprs_cap;
+	uint32_t variable_stack_cap;
 	uint32_t string_table_data_cap;
 	uint32_t string_table_entries_cap;
 };
