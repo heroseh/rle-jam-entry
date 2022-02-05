@@ -1,6 +1,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
 #include <math.h>
 #include <ctype.h>
 
@@ -90,9 +91,9 @@ HSC_NORETURN void _hsc_abort(const char* file, int line, const char* message, ..
 #define HSC_PTR_SUB(ptr, by) (void*)((Uptr)(ptr) - (Uptr)(by))
 #define HSC_PTR_DIFF(to, from) ((char*)(to) - (char*)(from))
 // align must be a power of 2
-#define HSC_PTR_ROUND_UP_ALIGN(ptr, align) ((void*)HSC_INT_ROUND_UP_ALIGN((Uptr)ptr, align))
+#define HSC_PTR_ROUND_UP_ALIGN(ptr, align) ((void*)HSC_INT_ROUND_UP_ALIGN((Uptr)(ptr), align))
 // align must be a power of 2
-#define HSC_PTR_ROUND_DOWN_ALIGN(ptr, align) ((void*)HSC_INT_ROUND_DOWN_ALIGN((Uptr)ptr, align))
+#define HSC_PTR_ROUND_DOWN_ALIGN(ptr, align) ((void*)HSC_INT_ROUND_DOWN_ALIGN((Uptr)(ptr), align))
 #define HSC_ZERO_ELMT(ptr) memset(ptr, 0, sizeof(*(ptr)))
 #define HSC_ONE_ELMT(ptr) memset(ptr, 0xff, sizeof(*(ptr)))
 #define HSC_ZERO_ELMT_MANY(ptr, elmts_count) memset(ptr, 0, sizeof(*(ptr)) * (elmts_count))
@@ -106,9 +107,12 @@ HSC_NORETURN void _hsc_abort(const char* file, int line, const char* message, ..
 #define HSC_CMP_ELMT(a, b) (memcmp(a, b, sizeof(*(a))) == 0)
 #define HSC_CMP_ELMT_MANY(a, b, elmts_count) (memcmp(a, b, elmts_count * sizeof(*(a))) == 0)
 
+#define HSC_DIV_ROUND_UP(a, b) (((a) / (b)) + ((a) % (b) != 0))
+
 #define HSC_DEFINE_ID(Name) typedef struct Name { uint32_t idx_plus_one; } Name;
 HSC_DEFINE_ID(HscFileId);
 HSC_DEFINE_ID(HscStringId);
+HSC_DEFINE_ID(HscConstantId);
 HSC_DEFINE_ID(HscCompoundTypeId);
 HSC_DEFINE_ID(HscArrayTypeId);
 HSC_DEFINE_ID(HscFunctionId);
@@ -225,25 +229,28 @@ enum {
 	HSC_DATA_TYPE_UNION,
 	HSC_DATA_TYPE_ARRAY,
 
+#define HSC_DATA_TYPE_GENERIC_START HSC_DATA_TYPE_GENERIC_SCALAR
 	HSC_DATA_TYPE_GENERIC_SCALAR,
 	HSC_DATA_TYPE_GENERIC_VEC2,
 	HSC_DATA_TYPE_GENERIC_VEC3,
 	HSC_DATA_TYPE_GENERIC_VEC4,
+#define HSC_DATA_TYPE_GENERIC_END (HSC_DATA_TYPE_GENERIC_VEC4 + 1)
 
 	HSC_DATA_TYPE_COUNT,
 };
 
 #define HSC_DATA_TYPE_SCALAR(type)            ((type) & (HSC_DATA_TYPE_VEC2_START - 1))
-#define HSC_DATA_TYPE_IS_BASIC(type)          ((type) >= HSC_DATA_TYPE_VEC2_START && (type) <= HSC_DATA_TYPE_MAT2x2_START)
+#define HSC_DATA_TYPE_IS_BASIC(type)          ((type) < HSC_DATA_TYPE_BASIC_END)
 #define HSC_DATA_TYPE_IS_VECTOR(type)         ((type) >= HSC_DATA_TYPE_VECTOR_START && (type) < HSC_DATA_TYPE_VECTOR_END)
 #define HSC_DATA_TYPE_IS_MATRIX(type)         ((type) >= HSC_DATA_TYPE_MATRIX_START && (type) < HSC_DATA_TYPE_MATRIX_END)
 #define HSC_DATA_TYPE_IS_STRUCT(type)         (((type) & 0xff) == HSC_DATA_TYPE_STRUCT)
 #define HSC_DATA_TYPE_IS_UNION(type)          (((type) & 0xff) == HSC_DATA_TYPE_UNION)
 #define HSC_DATA_TYPE_IS_COMPOUND_TYPE(type)  (HSC_DATA_TYPE_IS_STRUCT(type) || HSC_DATA_TYPE_IS_UNION(type))
 #define HSC_DATA_TYPE_IS_ARRAY(type)          (((type) & 0xff) == HSC_DATA_TYPE_ARRAY)
-#define HSC_DATA_TYPE_VECTOR_COMPONENTS(type) ((type) / HSC_DATA_TYPE_VEC2_START)
+#define HSC_DATA_TYPE_IS_GENERIC(type)        ((type) >= HSC_DATA_TYPE_GENERIC_START && (type) < HSC_DATA_TYPE_GENERIC_END)
+#define HSC_DATA_TYPE_VECTOR_COMPONENTS(type) (((type) / HSC_DATA_TYPE_VEC2_START) + 1)
 #define HSC_DATA_TYPE_MATRX_COLUMNS(type)     (((type) + 32) / 48)
-#define HSC_DATA_TYPE_MATRX_ROWS(type)        (((((type) - 64) / 16) + 1) & 3) + 2)
+#define HSC_DATA_TYPE_MATRX_ROWS(type)        ((((((type) - 64) / 16) + 1) & 3) + 2)
 #define HSC_DATA_TYPE_COMPOUND_TYPE_ID(type)  ((HscCompoundTypeId) { .idx_plus_one = (type) >> 8 })
 #define HSC_DATA_TYPE_ARRAY_TYPE_ID(type)     ((HscArrayId) { .idx_plus_one = (type) >> 8 })
 
@@ -381,9 +388,7 @@ extern char* hsc_string_intrinsic_param_names[HSC_STRING_ID_INTRINSIC_PARAM_NAME
 
 typedef union HscTokenValue HscTokenValue;
 union HscTokenValue {
-	uint64_t    u64;
-	int64_t     s64;
-	double      f64;
+	HscConstantId constant_id;
 	HscStringId string_id;
 };
 
@@ -409,6 +414,35 @@ struct HscStringTable {
 	uint32_t        data_cap;
 	uint32_t        entries_count;
 	uint32_t        entries_cap;
+};
+
+typedef struct HscConstant HscConstant;
+struct HscConstant {
+	void* data;
+	uint32_t size;
+	HscDataType data_type;
+};
+
+typedef struct HscConstantEntry HscConstantEntry;
+struct HscConstantEntry {
+	uint32_t start_idx;
+	uint32_t size;
+	HscDataType data_type;
+};
+
+typedef struct HscConstantTable HscConstantTable;
+struct HscConstantTable {
+	void*             data;
+	HscConstantEntry* entries;
+	uint32_t          data_used_size;
+	uint32_t          data_cap;
+	uint32_t          entries_count;
+	uint32_t          entries_cap;
+
+	HscDataType       data_type;
+	U32               size;
+	U32               data_size;
+	void*             data_write_ptr;
 };
 
 typedef struct HscFunctionParam HscFunctionParam;
@@ -486,7 +520,7 @@ enum {
 	//
 	// binary ops
 	HSC_EXPR_TYPE_CALL,
-	HSC_EXPR_TYPE_BASIC_LIT,
+	HSC_EXPR_TYPE_CONSTANT,
 	HSC_EXPR_TYPE_FUNCTION,
 	HSC_EXPR_TYPE_CALL_ARG_LIST,
 
@@ -522,8 +556,8 @@ struct HscExpr {
 		struct {
 			U32 type: 5; // HscExprType
 			U32 is_stmt_block_entry: 1;
-			U32 token_value_idx: 26; // if HSC_BASIC_LIT_TYPE_BOOL then this is a bool value
-		} basic_lit;
+			U32 id: 26;
+		} constant;
 		struct {
 			U32 type: 5; // HscExprType
 			U32 is_stmt_block_entry: 1;
@@ -543,34 +577,25 @@ struct HscExpr {
 
 HSC_STATIC_ASSERT(sizeof(HscExpr) == sizeof(U64), "HscExpr must be 8 bytes");
 
-/*
-typedef U32 HscExpr;
-#define HSC_EXPR_TYPE(expr) ((HscExprType)((expr) & 0x3f))
+typedef U16 HscOpt;
+enum {
+	HSC_OPT_CONSTANT_FOLDING,
 
-#define HSC_EXPR_STMT_BLOCK() ((HscExpr)(HSC_EXPR_TYPE_STMT_BLOCK)
+	HSC_OPT_COUNT,
+};
 
-// HSC_EXPR_TYPE_FUNCTION
-#define HSC_EXPR_FUNCTION(function_id) ((HscExpr)((function_id.idx_plus_one << 6)) | HSC_EXPR_TYPE_FUNCTION)
-#define HSC_EXPR_FUNCTION_ID(expr) ((HSC_EXPR_FUNCTION_ID) { .idx_plus_one = ((expr) >> 6) })
+typedef struct HscOpts HscOpts;
+struct HscOpts {
+	U64 bitset[HSC_DIV_ROUND_UP(HSC_OPT_COUNT, 8)];
+};
 
-// HSC_EXPR_TYPE_BASIC_LIT
-#define HSC_EXPR_BASIC_LIT(basic_lit_type, token_value_idx) ((HscExpr)(((token_value_idx) << 9) | (((basic_lit_type) & 0x7) << 6) | HSC_EXPR_TYPE_BASIC_LIT)
-#define HSC_EXPR_BASIC_LIT_TYPE(expr) (((expr) >> 6) & 0x7)
-#define HSC_EXPR_TOKEN_VALUE_IDX(expr) ((expr) >> 9)
-
-// HSC_EXPR_TYPE_STMT_HEADER
-#define HSC_EXPR_STMT_HEADER() ((HscExpr)HSC_EXPR_TYPE_STMT_HEADER)
-#define HSC_EXPR_PREV_EXPR_REL_IDX(expr) (((expr) >> 6) & 0x1fff)
-#define HSC_EXPR_NEXT_EXPR_REL_IDX(expr) (((expr) >> 19) & 0x1fff)
-
-#define HSC_EXPR_SET_PREV_EXPR_REL_IDX(expr_ptr, prev_rel_idx) (*(expr_ptr) = ((prev_rel_idx) & 0x1fff) << 6)
-#define HSC_EXPR_SET_NEXT_EXPR_REL_IDX(expr_ptr, next_rel_idx) (*(expr_ptr) = ((next_rel_idx) & 0x1fff) << 19)
-
-#define HSC_EXPR_BINARY_EXPR(expr_type, right_expr_idx) (((right_expr_idx << 6)) | expr_type)
-#define HSC_EXPR_RIGHT_EXPR_IDX(expr) ((expr) >> 6)
-
-#define HSC_EXPR_UNARY_EXPR(expr_type) (expr_type)
-*/
+typedef struct HscGenericDataTypeState HscGenericDataTypeState;
+struct HscGenericDataTypeState {
+	HscDataType scalar;
+	HscDataType vec2;
+	HscDataType vec3;
+	HscDataType vec4;
+};
 
 typedef struct HscAstGen HscAstGen;
 struct HscAstGen {
@@ -584,6 +609,10 @@ struct HscAstGen {
 	U32 functions_cap;
 	U32 exprs_count;
 	U32 exprs_cap;
+
+	HscGenericDataTypeState generic_data_type_state;
+
+	HscOpts opts;
 
 	HscStringId* variable_stack_strings;
 	U32*         variable_stack_var_indices;
@@ -600,6 +629,9 @@ struct HscAstGen {
 	HscTokenValue* token_values;
 	U32* line_code_start_indices;
 	HscStringTable string_table;
+	HscConstantTable constant_table;
+	HscConstantId false_constant_id;
+	HscConstantId true_constant_id;
 	uint32_t token_read_idx;
 	uint32_t token_value_read_idx;
 	uint32_t tokens_count;
@@ -615,12 +647,26 @@ struct HscAstGen {
 	bool print_color;
 };
 
+bool hsc_opt_is_enabled(HscOpts* opts, HscOpt opt);
+void hsc_opt_set_enabled(HscOpts* opts, HscOpt opt);
+
 HscString hsc_data_type_string(HscAstGen* astgen, HscDataType data_type);
+void hsc_data_type_size_align(HscAstGen* astgen, HscDataType data_type, Uptr* size_out, Uptr* align_out);
+HscDataType hsc_data_type_resolve_generic(HscAstGen* astgen, HscDataType data_type);
+void hsc_data_type_print(HscAstGen* astgen, HscDataType data_type, void* data, FILE* f);
 
 void hsc_string_table_init(HscStringTable* string_table, uint32_t data_cap, uint32_t entries_cap);
 #define hsc_string_table_deduplicate_lit(string_table, string_lit) hsc_string_table_deduplicate(string_table, string_lit, sizeof(string_lit) - 1)
 HscStringId hsc_string_table_deduplicate(HscStringTable* string_table, char* string, uint32_t string_size);
 HscString hsc_string_table_get(HscStringTable* string_table, HscStringId id);
+
+void hsc_constant_table_init(HscConstantTable* constant_table, uint32_t data_cap, uint32_t entries_cap);
+HscConstantId hsc_constant_table_deduplicate(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type, void* data);
+void hsc_constant_table_deduplicate_start(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type);
+void hsc_constant_table_deduplicate_add_data(HscConstantTable* constant_table, void* data, U32 size);
+void hsc_constant_table_deduplicate_add_constant(HscConstantTable* constant_table, HscConstantId constant_id);
+HscConstantId hsc_constant_table_deduplicate_end(HscConstantTable* constant_table);
+HscConstant hsc_constant_table_get(HscConstantTable* constant_table, HscConstantId id);
 
 typedef struct HscCompilerSetup HscCompilerSetup;
 void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup);
@@ -635,9 +681,8 @@ HscToken hsc_token_peek(HscAstGen* astgen);
 HscToken hsc_token_peek_ahead(HscAstGen* astgen, U32 by);
 void hsc_token_consume(HscAstGen* astgen, U32 amount);
 HscToken hsc_token_next(HscAstGen* astgen);
+void hsc_token_value_consume(HscAstGen* astgen, U32 amount);
 HscTokenValue hsc_token_value_next(HscAstGen* astgen);
-
-
 
 HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence);
 HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen);
@@ -651,6 +696,101 @@ U32 hsc_astgen_variable_stack_find(HscAstGen* astgen, HscStringId string_id);
 // ===========================================
 //
 //
+// IR
+//
+//
+// ===========================================
+
+typedef U8 HscIROpCode;
+enum {
+	HSC_IR_OP_CODE_LOAD,
+	HSC_IR_OP_CODE_STORE,
+	HSC_IR_OP_CODE_COMPOSITE_INIT,
+	HSC_IR_OP_CODE_ACCESS_CHAIN,
+	HSC_IR_OP_CODE_FUNCTION_CALL,
+	HSC_IR_OP_CODE_FUNCTION_RETURN,
+};
+
+typedef struct HscIRConst HscIRConst;
+struct HscIRConst {
+	HscDataType data_type;
+	U32 values_offset;
+};
+
+typedef struct HscIRValue HscIRValue;
+struct HscIRValue {
+	HscDataType data_type;
+	U16 defined_instruction_idx;
+	U16 last_used_instruction_idx;
+};
+
+typedef struct HscIRInstr HscIRInstr;
+struct HscIRInstr {
+	U16 operands_start_idx;
+	U8 operands_count;
+	U8 op_code;
+};
+
+typedef struct HscIRBasicBlock HscIRBasicBlock;
+struct HscIRBasicBlock {
+	U16 instructions_start_idx;
+	U16 instructions_count;
+};
+
+typedef union HscIROperand HscIROperand;
+union HscIROperand {
+	HscDataType data_type;
+	U32 value_idx;
+	U32 const_value_idx;
+};
+
+typedef struct HscIRFunction HscIRFunction;
+struct HscIRFunction {
+	U32 basic_blocks_start_idx;
+	U32 instructions_start_idx;
+	U32 values_start_idx;
+	U32 operands_start_idx;
+	U16 basic_blocks_count;
+	U16 instructions_count;
+	U16 values_count;
+	U16 operands_count;
+};
+
+typedef struct HscIR HscIR;
+struct HscIR {
+	U8* constant_values;
+	U32 constant_values_size;
+	U32 constant_values_size_cap;
+
+	HscIRFunction* functions;
+	U32 functions_count;
+	U32 functions_cap;
+
+	HscIRBasicBlock* basic_blocks;
+	U32 basic_blocks_count;
+	U32 basic_blocks_cap;
+
+	HscIRValue* values;
+	U32 values_count;
+	U32 values_cap;
+
+	HscIRInstr* instructions;
+	U32 instructions_count;
+	U32 instructions_cap;
+
+	HscIROperand* operands;
+	U32 operands_count;
+	U32 operands_cap;
+
+	U16 last_value_idx;
+};
+
+void hsc_ir_init(HscIR* ir);
+void hsc_ir_generate(HscIR* ir, HscAstGen* astgen);
+
+// ===========================================
+//
+//
 // Compiler
 //
 //
@@ -659,7 +799,7 @@ U32 hsc_astgen_variable_stack_find(HscAstGen* astgen, HscStringId string_id);
 typedef struct HscCompiler HscCompiler;
 struct HscCompiler {
 	HscAstGen astgen;
-
+	HscIR ir;
 };
 
 struct HscCompilerSetup {

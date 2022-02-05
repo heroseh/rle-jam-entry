@@ -263,6 +263,16 @@ HscIntrinsicFunction hsc_intrinsic_functions[HSC_FUNCTION_ID_INTRINSIC_END] = {
 	},
 };
 
+bool hsc_opt_is_enabled(HscOpts* opts, HscOpt opt) {
+	U64 bit = ((U64)1 << (opt % 64));
+	return (opts->bitset[opt / 64] & bit) == bit;
+}
+
+void hsc_opt_set_enabled(HscOpts* opts, HscOpt opt) {
+	U64 bit = (U64)1 << (opt % 64);
+	opts->bitset[opt / 64] |= bit;
+}
+
 HscString hsc_data_type_string(HscAstGen* astgen, HscDataType data_type) {
 	HscStringId string_id;
 	if (data_type < HSC_DATA_TYPE_BASIC_END) {
@@ -282,6 +292,166 @@ HscString hsc_data_type_string(HscAstGen* astgen, HscDataType data_type) {
 	return hsc_string_table_get(&astgen->string_table, string_id);
 }
 
+void hsc_data_type_size_align(HscAstGen* astgen, HscDataType data_type, Uptr* size_out, Uptr* align_out) {
+	if (data_type < HSC_DATA_TYPE_MATRIX_END) {
+		switch (HSC_DATA_TYPE_SCALAR(data_type)) {
+			case HSC_DATA_TYPE_VOID:
+				*size_out = 0;
+				*align_out = 0;
+				break;
+			case HSC_DATA_TYPE_BOOL:
+			case HSC_DATA_TYPE_U8:
+			case HSC_DATA_TYPE_S8:
+			case HSC_DATA_TYPE_F8:
+				*size_out = 1;
+				*align_out = 1;
+				break;
+			case HSC_DATA_TYPE_U16:
+			case HSC_DATA_TYPE_S16:
+			case HSC_DATA_TYPE_F16:
+				*size_out = 2;
+				*align_out = 2;
+				break;
+			case HSC_DATA_TYPE_U32:
+			case HSC_DATA_TYPE_S32:
+			case HSC_DATA_TYPE_F32:
+				*size_out = 4;
+				*align_out = 4;
+				break;
+			case HSC_DATA_TYPE_U64:
+			case HSC_DATA_TYPE_S64:
+			case HSC_DATA_TYPE_F64:
+				*size_out = 8;
+				*align_out = 8;
+				break;
+		}
+
+		if (data_type >= HSC_DATA_TYPE_VECTOR_START) {
+			if (data_type < HSC_DATA_TYPE_VECTOR_END) {
+				U32 componments_count = HSC_DATA_TYPE_VECTOR_COMPONENTS(data_type);
+				*size_out *= componments_count;
+				*align_out *= componments_count;
+			} else {
+				U32 rows_count = HSC_DATA_TYPE_MATRX_ROWS(data_type);
+				U32 columns_count = HSC_DATA_TYPE_MATRX_COLUMNS(data_type);
+				*size_out *= rows_count * columns_count;
+				*align_out *= rows_count * columns_count;
+			}
+		}
+	} else {
+		HSC_ABORT("unhandle type '%u'", data_type);
+	}
+}
+
+HscDataType hsc_data_type_resolve_generic(HscAstGen* astgen, HscDataType data_type) {
+	switch (data_type) {
+		case HSC_DATA_TYPE_GENERIC_SCALAR:
+			HSC_DEBUG_ASSERT(astgen->generic_data_type_state.scalar, "internal error: cannot resolve scalar generic when a scalar type has not been found");
+			return astgen->generic_data_type_state.scalar;
+		case HSC_DATA_TYPE_GENERIC_VEC2:
+			HSC_DEBUG_ASSERT(astgen->generic_data_type_state.vec2 || astgen->generic_data_type_state.scalar, "internal error: cannot resolve vec2 generic when a vec2 or scalar type has not been found");
+			if (astgen->generic_data_type_state.vec2) {
+				return astgen->generic_data_type_state.vec2;
+			}
+			return HSC_DATA_TYPE_VEC2(astgen->generic_data_type_state.scalar);
+		case HSC_DATA_TYPE_GENERIC_VEC3:
+			HSC_DEBUG_ASSERT(astgen->generic_data_type_state.vec3 || astgen->generic_data_type_state.scalar, "internal error: cannot resolve vec3 generic when a vec3 or scalar type has not been found");
+			if (astgen->generic_data_type_state.vec3) {
+				return astgen->generic_data_type_state.vec3;
+			}
+			return HSC_DATA_TYPE_VEC3(astgen->generic_data_type_state.scalar);
+		case HSC_DATA_TYPE_GENERIC_VEC4:
+			HSC_DEBUG_ASSERT(astgen->generic_data_type_state.vec4 || astgen->generic_data_type_state.scalar, "internal error: cannot resolve vec4 generic when a vec4 or scalar type has not been found");
+			if (astgen->generic_data_type_state.vec4) {
+				return astgen->generic_data_type_state.vec4;
+			}
+			return HSC_DATA_TYPE_VEC4(astgen->generic_data_type_state.scalar);
+	}
+
+	return data_type;
+}
+
+void hsc_data_type_print(HscAstGen* astgen, HscDataType data_type, void* data, FILE* f) {
+	if (data_type < HSC_DATA_TYPE_BASIC_END) {
+		U64 uint;
+		S64 sint;
+		F64 float_;
+		switch (data_type) {
+			case HSC_DATA_TYPE_VOID:
+				fprintf(f, "void");
+				break;
+			case HSC_DATA_TYPE_BOOL:
+				fprintf(f, *(U8*)data ? "true" : "false");
+				break;
+			case HSC_DATA_TYPE_U8: uint = *(U8*)data; goto UINT;
+			case HSC_DATA_TYPE_U16: uint = *(U16*)data; goto UINT;
+			case HSC_DATA_TYPE_U32: uint = *(U32*)data; goto UINT;
+			case HSC_DATA_TYPE_U64: uint = *(U64*)data; goto UINT;
+UINT:
+				fprintf(f, "%zu", uint);
+			case HSC_DATA_TYPE_S8: sint = *(S8*)data; goto SINT;
+			case HSC_DATA_TYPE_S16: sint = *(S16*)data; goto SINT;
+			case HSC_DATA_TYPE_S32: sint = *(S32*)data; goto SINT;
+			case HSC_DATA_TYPE_S64: sint = *(S64*)data; goto SINT;
+SINT:
+				fprintf(f, "%zd", sint);
+			case HSC_DATA_TYPE_F8:
+			case HSC_DATA_TYPE_F16: HSC_ABORT("TODO");
+			case HSC_DATA_TYPE_F32: float_ = *(F32*)data; goto FLOAT;
+			case HSC_DATA_TYPE_F64: float_ = *(F64*)data; goto FLOAT;
+FLOAT:
+				fprintf(f, "%f", float_);
+				break;
+		}
+	} else if (HSC_DATA_TYPE_VECTOR_START <= data_type && data_type < HSC_DATA_TYPE_MATRIX_END) {
+		U32 componment_size;
+		switch (HSC_DATA_TYPE_SCALAR(data_type)) {
+			case HSC_DATA_TYPE_VOID:
+				componment_size = 0;
+				break;
+			case HSC_DATA_TYPE_BOOL:
+			case HSC_DATA_TYPE_U8:
+			case HSC_DATA_TYPE_S8:
+			case HSC_DATA_TYPE_F8:
+				componment_size = 1;
+				break;
+			case HSC_DATA_TYPE_U16:
+			case HSC_DATA_TYPE_S16:
+			case HSC_DATA_TYPE_F16:
+				componment_size = 2;
+				break;
+			case HSC_DATA_TYPE_U32:
+			case HSC_DATA_TYPE_S32:
+			case HSC_DATA_TYPE_F32:
+				componment_size = 4;
+				break;
+			case HSC_DATA_TYPE_U64:
+			case HSC_DATA_TYPE_S64:
+			case HSC_DATA_TYPE_F64:
+				componment_size = 8;
+				break;
+		}
+
+		U32 componments_count;
+		if (data_type < HSC_DATA_TYPE_VECTOR_END) {
+			componments_count = HSC_DATA_TYPE_VECTOR_COMPONENTS(data_type);
+			fprintf(f, "Vec%u(", componments_count);
+		} else {
+			U32 rows_count = HSC_DATA_TYPE_MATRX_ROWS(data_type);
+			U32 columns_count = HSC_DATA_TYPE_MATRX_COLUMNS(data_type);
+			componments_count = rows_count * columns_count;
+			fprintf(f, "Mat%u%u(", rows_count, columns_count);
+		}
+		for (U32 i = 0; i < componments_count; i += 1) {
+			hsc_data_type_print(astgen, HSC_DATA_TYPE_SCALAR(data_type), data, f);
+			fprintf(f, i + 1 < componments_count ? ", " : ")");
+			data = HSC_PTR_ADD(data, componment_size);
+		}
+	} else {
+		HSC_ABORT("unhandle type '%u'", data_type);
+	}
+}
+
 void hsc_string_table_init(HscStringTable* string_table, uint32_t data_cap, uint32_t entries_cap) {
 	string_table->data = HSC_ALLOC_ARRAY(char, data_cap);
 	HSC_ASSERT(string_table->data, "out of memory");
@@ -297,7 +467,7 @@ HscStringId hsc_string_table_deduplicate(HscStringTable* string_table, char* str
 	for (uint32_t entry_idx = 0; entry_idx < string_table->entries_count; entry_idx += 1) {
 		HscStringEntry* entry = &string_table->entries[entry_idx];
 
-		if (string_size == entry->size && strncmp(string_table->data + entry->start_idx, string, string_size) == 0) {
+		if (string_size == entry->size && memcmp(string_table->data + entry->start_idx, string, string_size) == 0) {
 			return (HscStringId) { .idx_plus_one = entry_idx + 1 };
 		}
 	}
@@ -332,6 +502,95 @@ HscString hsc_string_table_get(HscStringTable* string_table, HscStringId id) {
 	string.data = string_table->data + entry->start_idx;
 	string.size = entry->size;
 	return string;
+}
+
+void hsc_constant_table_init(HscConstantTable* constant_table, uint32_t data_cap, uint32_t entries_cap) {
+	constant_table->data = HSC_ALLOC_ARRAY(char, data_cap);
+	HSC_ASSERT(constant_table->data, "out of memory");
+	constant_table->entries = HSC_ALLOC_ARRAY(HscConstantEntry, entries_cap);
+	HSC_ASSERT(constant_table->entries, "out of memory");
+	constant_table->data_cap = data_cap;
+	constant_table->entries_cap = entries_cap;
+}
+
+HscConstantId hsc_constant_table_deduplicate(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type, void* data) {
+	hsc_constant_table_deduplicate_start(constant_table, astgen, data_type);
+	hsc_constant_table_deduplicate_add_data(constant_table, data, constant_table->data_size);
+	return hsc_constant_table_deduplicate_end(constant_table);
+}
+
+void hsc_constant_table_deduplicate_start(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type) {
+	HSC_DEBUG_ASSERT(constant_table->size == 0, "internal error: starting to deduplicate a constant before ending another");
+
+	Uptr size;
+	Uptr align;
+	hsc_data_type_size_align(astgen, data_type, &size, &align);
+	HSC_DEBUG_ASSERT(size, "internal error: cannot add a constant with zero size");
+	constant_table->data_type = data_type;
+	constant_table->size = 0;
+	constant_table->data_size = size;
+	constant_table->data_write_ptr = HSC_PTR_ROUND_UP_ALIGN(constant_table->data + constant_table->data_used_size, align);
+}
+
+void hsc_constant_table_deduplicate_add_data(HscConstantTable* constant_table, void* data, uint32_t size) {
+	HSC_DEBUG_ASSERT(constant_table->data_size, "internal error: cannot add data when deduplication of constant has not started");
+	HSC_DEBUG_ASSERT(constant_table->size + size <= constant_table->data_size, "internal error: the expected constant data size '%u' has been exceeded", constant_table->data_size);
+
+	memcpy(HSC_PTR_ADD(constant_table->data_write_ptr, constant_table->size), data, size);
+	constant_table->size += size;
+}
+
+void hsc_constant_table_deduplicate_add_constant(HscConstantTable* constant_table, HscConstantId constant_id) {
+	HscConstant constant = hsc_constant_table_get(constant_table, constant_id);
+	hsc_constant_table_deduplicate_add_data(constant_table, constant.data, constant.size);
+}
+
+HscConstantId hsc_constant_table_deduplicate_end(HscConstantTable* constant_table) {
+	U32 data_size = constant_table->data_size;
+	HSC_DEBUG_ASSERT(constant_table->size == constant_table->data_size, "internal error: the constant for deduplication is incomplete, expected to be a size of '%u' but got '%u'", constant_table->data_size, constant_table->size);
+	constant_table->size = 0;
+	constant_table->data_size = 0;
+
+	//
+	// TODO: make this a hash table look up
+	for (uint32_t entry_idx = 0; entry_idx < constant_table->entries_count; entry_idx += 1) {
+		HscConstantEntry* entry = &constant_table->entries[entry_idx];
+
+		if (entry->data_type == constant_table->data_type && data_size == entry->size && memcmp(constant_table->data + entry->start_idx, constant_table->data_write_ptr, data_size) == 0) {
+			return (HscConstantId) { .idx_plus_one = entry_idx + 1 };
+		}
+	}
+
+	if (constant_table->entries_count >= constant_table->entries_cap) {
+		HSC_ABORT("constant tables entries capacity exceeded TODO make this error message proper");
+	}
+
+	if (constant_table->data_used_size + data_size >= constant_table->data_cap) {
+		HSC_ABORT("constant tables entries capacity exceeded TODO make this error message proper");
+	}
+
+	uint32_t new_entry_idx = constant_table->entries_count;
+	constant_table->entries_count += 1;
+	HscConstantEntry* entry = &constant_table->entries[new_entry_idx];
+	entry->start_idx = constant_table->data_write_ptr - constant_table->data;
+	entry->size = data_size;
+	entry->data_type = constant_table->data_type;
+
+	constant_table->data_used_size += constant_table->data_write_ptr - constant_table->data + data_size;
+
+	return (HscConstantId) { .idx_plus_one = new_entry_idx + 1 };
+}
+
+HscConstant hsc_constant_table_get(HscConstantTable* constant_table, HscConstantId id) {
+	HSC_DEBUG_ASSERT(id.idx_plus_one, "constant id is null");
+
+	HscConstantEntry* entry = &constant_table->entries[id.idx_plus_one - 1];
+
+	HscConstant constant;
+	constant.data_type = entry->data_type;
+	constant.data = constant_table->data + entry->start_idx;
+	constant.size = entry->size;
+	return constant;
 }
 
 void hsc_add_intrinsic_function(HscAstGen* astgen, U32 function_id) {
@@ -662,7 +921,7 @@ bool hsc_i64_checked_mul(uint64_t a, uint64_t b, uint64_t* out) {
 	return true;
 }
 
-uint32_t hsc_parse_num(HscAstGen* astgen, HscToken* token_out, HscTokenValue* token_value_out) {
+uint32_t hsc_parse_num(HscAstGen* astgen, HscToken* token_out) {
 	char* num_string = (char*)&astgen->bytes[astgen->location.code_end_idx];
 	uint32_t remaining_size = astgen->bytes_count - astgen->location.code_end_idx;
 	uint32_t token_size = 0;
@@ -689,7 +948,9 @@ uint32_t hsc_parse_num(HscAstGen* astgen, HscToken* token_out, HscTokenValue* to
 		}
 	}
 
-	HscTokenValue token_value = {0};
+	U64 u64 = 0;
+	S64 s64 = 0;
+	F64 f64 = 0.0;
 	F64 pow_10 = 10.0;
 	while (token_size < remaining_size) {
 		uint8_t digit = num_string[token_size];
@@ -709,16 +970,16 @@ uint32_t hsc_parse_num(HscAstGen* astgen, HscToken* token_out, HscTokenValue* to
 					case HSC_TOKEN_LIT_S32:
 					case HSC_TOKEN_LIT_S64:
 						if (
-							!hsc_i64_checked_mul(token_value.u64, radix, &token_value.u64)        ||
-							!hsc_u64_checked_add(token_value.u64, int_digit, &token_value.u64)
+							!hsc_i64_checked_mul(u64, radix, &u64)        ||
+							!hsc_u64_checked_add(u64, int_digit, &u64)
 						) {
 							hsc_astgen_token_error_1(astgen, "integer literal is too large and will overflow a U64 integer");
 						}
 						break;
 					case HSC_TOKEN_LIT_F32:
 					case HSC_TOKEN_LIT_F64:
-						token_value.f64 += (F64)(int_digit) / pow_10;
-						if (isinf(token_value.f64)) {
+						f64 += (F64)(int_digit) / pow_10;
+						if (isinf(f64)) {
 							hsc_astgen_token_error_1(astgen, "float literal is too large and will overflow a f64");
 						}
 						pow_10 *= 10.0;
@@ -767,11 +1028,10 @@ uint32_t hsc_parse_num(HscAstGen* astgen, HscToken* token_out, HscTokenValue* to
 				}
 
 				token = HSC_TOKEN_LIT_F64;
-				F64 f64 = (F64)token_value.u64;
-				if ((U64)f64 != token_value.u64) {
+				f64 = (F64)u64;
+				if ((U64)f64 != u64) {
 					hsc_astgen_token_error_1(astgen, "float literal is too large and will overflow a f64");
 				}
-				token_value.f64 = f64;
 				break;
 			default: {
 				if (radix == 16 && ((digit >= 'a' && digit <= 'f') || (digit >= 'A' && digit <= 'F'))) {
@@ -782,8 +1042,8 @@ uint32_t hsc_parse_num(HscAstGen* astgen, HscToken* token_out, HscTokenValue* to
 						case HSC_TOKEN_LIT_S32:
 						case HSC_TOKEN_LIT_S64:
 							if (
-								!hsc_i64_checked_mul(token_value.u64, radix, &token_value.u64)        ||
-								!hsc_u64_checked_add(token_value.u64, int_digit, &token_value.u64)
+								!hsc_i64_checked_mul(u64, radix, &u64)        ||
+								!hsc_u64_checked_add(u64, int_digit, &u64)
 							) {
 								hsc_astgen_token_error_1(astgen, "integer literal is too large and will overflow a U64 integer");
 							}
@@ -820,34 +1080,34 @@ NUM_END:
 			case HSC_TOKEN_LIT_S32:
 			case HSC_TOKEN_LIT_S64:
 			{
-				if (token_value.u64 > (U64)S64_MAX + 1) {
+				if (u64 > (U64)S64_MAX + 1) {
 					hsc_astgen_token_error_1(astgen, "integer literal is too large and will overflow a S64 integer");
 				}
-				token_value.s64 = -token_value.u64;
+				s64 = -u64;
 				break;
 			};
 			case HSC_TOKEN_LIT_F32:
 			case HSC_TOKEN_LIT_F64:
-				token_value.f64 = -token_value.f64;
+				f64 = -f64;
 				break;
 		}
 	}
 
 	switch (token) {
 		case HSC_TOKEN_LIT_U32:
-			if (token_value.u64 > U32_MAX) {
+			if (u64 > U32_MAX) {
 				token = HSC_TOKEN_LIT_U64;
 			}
 			break;
 		case HSC_TOKEN_LIT_S32:
 			if (is_negative) {
-				if (token_value.s64 > S32_MAX || token_value.s64 < S32_MIN) {
+				if (s64 > S32_MAX || s64 < S32_MIN) {
 					token = HSC_TOKEN_LIT_S64;
 				}
-			} else if (token_value.u64 > S32_MAX) {
-				if (radix != 10 && token_value.u64 <= U32_MAX) {
+			} else if (u64 > S32_MAX) {
+				if (radix != 10 && u64 <= U32_MAX) {
 					token = HSC_TOKEN_LIT_U32;
-				} else if (token_value.u64 <= S64_MAX) {
+				} else if (u64 <= S64_MAX) {
 					token = HSC_TOKEN_LIT_S64;
 				} else if (radix != 10) {
 					token = HSC_TOKEN_LIT_U64;
@@ -858,8 +1118,25 @@ NUM_END:
 			break;
 	}
 
+	U32 u32;
+	S32 s32;
+	F32 f32;
+	HscDataType data_type;
+	void* data;
+	switch (token) {
+		case HSC_TOKEN_LIT_U32: data = &u32; u32 = u64; data_type = HSC_DATA_TYPE_U32; break;
+		case HSC_TOKEN_LIT_U64: data = &u64; data_type = HSC_DATA_TYPE_U64; break;
+		case HSC_TOKEN_LIT_S32: data = &s32; s32 = s64; data_type = HSC_DATA_TYPE_S32; break;
+		case HSC_TOKEN_LIT_S64: data = &s64; data_type = HSC_DATA_TYPE_S64; break;
+		case HSC_TOKEN_LIT_F32: data = &f32; f32 = f64; data_type = HSC_DATA_TYPE_F32; break;
+		case HSC_TOKEN_LIT_F64: data = &f64; data_type = HSC_DATA_TYPE_F64; break;
+	}
+
+	HscTokenValue token_value;
+	token_value.constant_id = hsc_constant_table_deduplicate(&astgen->constant_table, astgen, data_type, data);
+	hsc_astgen_add_token_value(astgen, token_value);
+
 	*token_out = token;
-	*token_value_out = token_value;
 	return token_size;
 }
 
@@ -913,9 +1190,7 @@ void hsc_astgen_tokenize(HscAstGen* astgen) {
 			case '+': token = HSC_TOKEN_PLUS; break;
 			case '-':
 				if (isdigit(astgen->bytes[astgen->location.code_end_idx + 1])) {
-					HscTokenValue token_value;
-					token_size = hsc_parse_num(astgen, &token, &token_value);
-					hsc_astgen_add_token_value(astgen, token_value);
+					token_size = hsc_parse_num(astgen, &token);
 				} else {
 					token = HSC_TOKEN_MINUS;
 				}
@@ -1005,9 +1280,7 @@ CLOSE_BRACKETS:
 
 			default: {
 				if ('0' <= byte && byte <= '9') {
-					HscTokenValue token_value;
-					token_size = hsc_parse_num(astgen, &token, &token_value);
-					hsc_astgen_add_token_value(astgen, token_value);
+					token_size = hsc_parse_num(astgen, &token);
 					break;
 				}
 
@@ -1102,6 +1375,10 @@ void hsc_token_consume(HscAstGen* astgen, U32 amount) {
 	astgen->token_read_idx += amount;
 }
 
+void hsc_token_value_consume(HscAstGen* astgen, U32 amount) {
+	astgen->token_value_read_idx += amount;
+}
+
 HscTokenValue hsc_token_value_next(HscAstGen* astgen) {
 	HscTokenValue value = astgen->token_values[HSC_MIN(astgen->token_value_read_idx, astgen->token_values_count - 1)];
 	astgen->token_value_read_idx += 1;
@@ -1174,14 +1451,17 @@ HscExpr* hsc_astgen_generate_unary_expr(HscAstGen* astgen) {
 		case HSC_TOKEN_LIT_U64:
 		case HSC_TOKEN_LIT_F32:
 		case HSC_TOKEN_LIT_F64: {
-			U32 token_value_idx = astgen->token_value_read_idx;
 			HscDataType data_type;
-			hsc_token_value_next(astgen);
+			HscConstantId constant_id;
+			HscTokenValue value;
 			switch (token) {
 				case HSC_TOKEN_LIT_TRUE:
+					data_type = HSC_DATA_TYPE_BOOL;
+					constant_id = astgen->true_constant_id;
+					break;
 				case HSC_TOKEN_LIT_FALSE:
 					data_type = HSC_DATA_TYPE_BOOL;
-					token_value_idx = token == HSC_TOKEN_LIT_TRUE;
+					constant_id = astgen->false_constant_id;
 					break;
 				case HSC_TOKEN_LIT_U32: data_type = HSC_DATA_TYPE_U32; break;
 				case HSC_TOKEN_LIT_U64: data_type = HSC_DATA_TYPE_U64; break;
@@ -1190,9 +1470,12 @@ HscExpr* hsc_astgen_generate_unary_expr(HscAstGen* astgen) {
 				case HSC_TOKEN_LIT_F32: data_type = HSC_DATA_TYPE_F32; break;
 				case HSC_TOKEN_LIT_F64: data_type = HSC_DATA_TYPE_F64; break;
 			}
+			if (data_type != HSC_DATA_TYPE_BOOL) {
+				constant_id = hsc_token_value_next(astgen).constant_id;
+			}
 
-			HscExpr* expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_BASIC_LIT);
-			expr->basic_lit.token_value_idx = token_value_idx;
+			HscExpr* expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_CONSTANT);
+			expr->constant.id = constant_id.idx_plus_one;
 			expr->data_type = data_type;
 			hsc_token_consume(astgen, 1);
 			return expr;
@@ -1262,22 +1545,14 @@ void hsc_astgen_generate_binary_op(HscAstGen* astgen, HscExprType* binary_op_typ
 	}
 }
 
-typedef struct HscGenericDataTypeState HscGenericDataTypeState;
-struct HscGenericDataTypeState {
-	HscDataType scalar;
-	HscDataType vec2;
-	HscDataType vec3;
-	HscDataType vec4;
-};
-
-bool hsc_data_type_check_compatible(HscAstGen* astgen, HscDataType target_data_type, HscDataType source_data_type, HscGenericDataTypeState* generic_data_type_state) {
+bool hsc_data_type_check_compatible(HscAstGen* astgen, HscDataType target_data_type, HscDataType source_data_type) {
 	if (target_data_type == source_data_type) {
 		return true;
 	}
 
 	switch (target_data_type) {
 		case HSC_DATA_TYPE_GENERIC_SCALAR:
-			if (generic_data_type_state->scalar != HSC_DATA_TYPE_VOID && generic_data_type_state->scalar != source_data_type) {
+			if (astgen->generic_data_type_state.scalar != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.scalar != source_data_type) {
 				return false;
 			}
 			if (
@@ -1285,34 +1560,34 @@ bool hsc_data_type_check_compatible(HscAstGen* astgen, HscDataType target_data_t
 				HSC_DATA_TYPE_BASIC_START <= source_data_type &&
 				source_data_type < HSC_DATA_TYPE_BASIC_END
 			) {
-				generic_data_type_state->scalar = source_data_type;
+				astgen->generic_data_type_state.scalar = source_data_type;
 				return true;
 			}
 			break;
 		case HSC_DATA_TYPE_GENERIC_VEC2:
-			if (generic_data_type_state->vec2 != HSC_DATA_TYPE_VOID && generic_data_type_state->vec2 != source_data_type) {
+			if (astgen->generic_data_type_state.vec2 != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.vec2 != source_data_type) {
 				return false;
 			}
 			if (HSC_DATA_TYPE_VEC2_START <= source_data_type && source_data_type < HSC_DATA_TYPE_VEC2_END) {
-				generic_data_type_state->vec2 = source_data_type;
+				astgen->generic_data_type_state.vec2 = source_data_type;
 				return true;
 			}
 			break;
 		case HSC_DATA_TYPE_GENERIC_VEC3:
-			if (generic_data_type_state->vec3 != HSC_DATA_TYPE_VOID && generic_data_type_state->vec3 != source_data_type) {
+			if (astgen->generic_data_type_state.vec3 != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.vec3 != source_data_type) {
 				return false;
 			}
 			if (HSC_DATA_TYPE_VEC3_START <= source_data_type && source_data_type < HSC_DATA_TYPE_VEC3_END) {
-				generic_data_type_state->vec3 = source_data_type;
+				astgen->generic_data_type_state.vec3 = source_data_type;
 				return true;
 			}
 			break;
 		case HSC_DATA_TYPE_GENERIC_VEC4:
-			if (generic_data_type_state->vec4 != HSC_DATA_TYPE_VOID && generic_data_type_state->vec4 != source_data_type) {
+			if (astgen->generic_data_type_state.vec4 != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.vec4 != source_data_type) {
 				return false;
 			}
 			if (HSC_DATA_TYPE_VEC4_START <= source_data_type && source_data_type < HSC_DATA_TYPE_VEC4_END) {
-				generic_data_type_state->vec4 = source_data_type;
+				astgen->generic_data_type_state.vec4 = source_data_type;
 				return true;
 			}
 			break;
@@ -1327,7 +1602,7 @@ void hsc_astgen_error_data_type_mismatch(HscAstGen* astgen, HscLocation* other_l
 }
 
 void hsc_data_type_ensure_compatible(HscAstGen* astgen, HscLocation* other_location, HscDataType target_data_type, HscDataType source_data_type) {
-	if (!hsc_data_type_check_compatible(astgen, target_data_type, source_data_type, NULL)) {
+	if (!hsc_data_type_check_compatible(astgen, target_data_type, source_data_type)) {
 		hsc_astgen_error_data_type_mismatch(astgen, other_location, target_data_type, source_data_type);
 	}
 }
@@ -1350,12 +1625,12 @@ bool hsc_astgen_check_function_args(HscAstGen* astgen, HscFunction* function, Hs
 		U8* next_arg_expr_rel_indices = &((U8*)call_args_expr)[2];
 		HscExpr* arg_expr = call_args_expr;
 		bool result = true;
-		HscGenericDataTypeState generic_data_type_state = {0};
+		astgen->generic_data_type_state = (HscGenericDataTypeState){0};
 		for (U32 i = 0; i < args_count; i += 1) {
 			arg_expr = &arg_expr[next_arg_expr_rel_indices[i]];
 			HscFunctionParam* param = &params[i];
 
-			if (!hsc_data_type_check_compatible(astgen, param->data_type, arg_expr->data_type, &generic_data_type_state)) {
+			if (!hsc_data_type_check_compatible(astgen, param->data_type, arg_expr->data_type)) {
 				if (report_errors) {
 					hsc_astgen_error_data_type_mismatch(astgen, &function->location, arg_expr->data_type, param->data_type);
 					result = false;
@@ -1441,14 +1716,16 @@ bool hsc_astgen_check_function_args_and_resolve_intrinsic_overload(HscAstGen* as
 	}
 }
 
-HscExpr* hsc_astgen_generate_call_args(HscAstGen* astgen, HscFunctionId* function_id_mut) {
+HscExpr* hsc_astgen_generate_call_expr(HscAstGen* astgen, HscExpr* function_expr) {
 	U32 args_count = 0;
 	HscExpr* call_args_expr = NULL;
+
+	HscFunctionId function_id = { .idx_plus_one = function_expr->function.id };
 
 	HscToken token = hsc_token_peek(astgen);
 	U32 intrinsic_function_token_idx = astgen->token_read_idx - 2;
 	if (token == HSC_TOKEN_PARENTHESIS_CLOSE) {
-		hsc_astgen_check_function_args_and_resolve_intrinsic_overload(astgen, function_id_mut, call_args_expr, args_count, intrinsic_function_token_idx);
+		hsc_astgen_check_function_args_and_resolve_intrinsic_overload(astgen, &function_id, call_args_expr, args_count, intrinsic_function_token_idx);
 		return NULL;
 	}
 
@@ -1492,10 +1769,12 @@ END_ARG_COUNT: {}
 
 	U32 arg_idx = 0;
 	token = hsc_token_peek(astgen);
+	bool is_constant = true;
 	while (1) {
 		HscExpr* arg_expr = hsc_astgen_generate_expr(astgen, 0);
 		next_arg_expr_rel_indices[arg_idx] = arg_expr - prev_arg_expr;
 		arg_idx += 1;
+		is_constant &= arg_expr->type == HSC_EXPR_TYPE_CONSTANT;
 
 		token = hsc_token_peek(astgen);
 		if (token != HSC_TOKEN_COMMA) {
@@ -1509,10 +1788,55 @@ END_ARG_COUNT: {}
 		prev_arg_expr = arg_expr;
 	}
 
-	hsc_astgen_check_function_args_and_resolve_intrinsic_overload(astgen, function_id_mut, call_args_expr, args_count, intrinsic_function_token_idx);
-
+	hsc_astgen_check_function_args_and_resolve_intrinsic_overload(astgen, &function_id, call_args_expr, args_count, intrinsic_function_token_idx);
 	hsc_token_next(astgen);
-	return call_args_expr;
+
+	HscDataType return_data_type = astgen->functions[function_id.idx_plus_one - 1].return_data_type;
+	return_data_type = hsc_data_type_resolve_generic(astgen, return_data_type);
+
+	if (hsc_opt_is_enabled(&astgen->opts, HSC_OPT_CONSTANT_FOLDING) && is_constant) {
+		bool is_single = false;
+		U32 componments_count = 0;
+		switch (function_id.idx_plus_one) {
+			case HSC_FUNCTION_ID_VEC2_SINGLE: is_single = true; componments_count = 2; break;
+			case HSC_FUNCTION_ID_VEC2_MULTI: is_single = false; componments_count = 2; break;
+			case HSC_FUNCTION_ID_VEC3_SINGLE: is_single = true; componments_count = 3; break;
+			case HSC_FUNCTION_ID_VEC3_MULTI: is_single = false; componments_count = 3; break;
+			case HSC_FUNCTION_ID_VEC4_SINGLE: is_single = true; componments_count = 4; break;
+			case HSC_FUNCTION_ID_VEC4_MULTI: is_single = false; componments_count = 4; break;
+				break;
+		}
+		if (componments_count) {
+			hsc_constant_table_deduplicate_start(&astgen->constant_table, astgen, return_data_type);
+			HscExpr* arg_expr = call_args_expr;
+			U32 args_count = ((U8*)call_args_expr)[1];
+			U8* next_arg_expr_rel_indices = &((U8*)call_args_expr)[2];
+			for (U32 i = 0; i < args_count; i += 1) {
+				arg_expr = &arg_expr[next_arg_expr_rel_indices[i]];
+				HscConstantId constant_id = { .idx_plus_one = arg_expr->constant.id };
+				U32 repeat_count = is_single ? componments_count : 1;
+				for (U32 j = 0; j < repeat_count; j += 1) {
+					hsc_constant_table_deduplicate_add_constant(&astgen->constant_table, constant_id);
+				}
+			}
+			HscConstantId constant_id = hsc_constant_table_deduplicate_end(&astgen->constant_table);
+
+			//
+			// recycle the function expression and change it into a constant
+			function_expr->type = HSC_EXPR_TYPE_CONSTANT;
+			function_expr->constant.id = constant_id.idx_plus_one;
+			function_expr->data_type = return_data_type;
+			return function_expr;
+		}
+	}
+
+	function_expr->function.id = function_id.idx_plus_one;
+
+	HscExpr* expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_CALL);
+	expr->binary.left_expr_rel_idx = expr - function_expr;
+	expr->binary.right_expr_rel_idx = expr - call_args_expr;
+	expr->data_type = return_data_type;
+	return expr;
 }
 
 HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
@@ -1529,29 +1853,36 @@ HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 		}
 		hsc_token_next(astgen);
 
-		HscExpr* right_expr;
-		HscDataType data_type;
 		if (binary_op_type == HSC_EXPR_TYPE_CALL) {
 			if (left_expr->type != HSC_EXPR_TYPE_FUNCTION) {
 				HscLocation* other_location = &astgen->token_locations[callee_token_idx];
 				hsc_astgen_error_2(astgen, other_location, "unexpected '(', this can only be used when the callee is a function");
 			}
 
-			HscFunctionId function_id = { .idx_plus_one = left_expr->function.id };
-			right_expr = hsc_astgen_generate_call_args(astgen, &function_id);
-			left_expr->function.id = function_id.idx_plus_one;
-			data_type = astgen->functions[function_id.idx_plus_one - 1].return_data_type;
+			left_expr = hsc_astgen_generate_call_expr(astgen, left_expr);
 		} else {
-			right_expr = hsc_astgen_generate_expr(astgen, precedence);
-			data_type = 0; // TODO implicit conversions
+			HscExpr* right_expr = hsc_astgen_generate_expr(astgen, precedence);
+			HscDataType data_type = 0; // TODO implicit conversions
+
+			if (
+				hsc_opt_is_enabled(&astgen->opts, HSC_OPT_CONSTANT_FOLDING) &&
+				left_expr->type == HSC_EXPR_TYPE_CONSTANT &&
+				right_expr->type == HSC_EXPR_TYPE_CONSTANT
+			) {
+				HscConstantId left_constant_id = { .idx_plus_one = left_expr->constant.id };
+				HscConstantId right_constant_id = { .idx_plus_one = right_expr->constant.id };
+				HSC_ABORT("TODO CONSTANT FOLDING");
+				//
+				// combine left_expr and right_expr and store them in the left_expr
+				//
+			} else {
+				HscExpr* expr = hsc_astgen_alloc_expr(astgen, binary_op_type);
+				expr->binary.left_expr_rel_idx = expr - left_expr;
+				expr->binary.right_expr_rel_idx = right_expr ? expr - right_expr : 0;
+				expr->data_type = data_type;
+				left_expr = expr;
+			}
 		}
-
-		HscExpr* expr = hsc_astgen_alloc_expr(astgen, binary_op_type);
-		expr->binary.left_expr_rel_idx = expr - left_expr;
-		expr->binary.right_expr_rel_idx = right_expr ? expr - right_expr : 0;
-		expr->data_type = data_type;
-
-		left_expr = expr;
 	}
 }
 
@@ -1765,26 +2096,11 @@ void hsc_astgen_print_expr(HscAstGen* astgen, HscExpr* expr, U32 indent, bool is
 	}
 	const char* expr_name;
 	switch (expr->type) {
-		case HSC_EXPR_TYPE_BASIC_LIT: {
-			fprintf(f, "EXPR_BASIC_LIT ");
-			HscTokenValue* value = &astgen->token_values[expr->basic_lit.token_value_idx];
-			switch (expr->data_type) {
-				case HSC_DATA_TYPE_BOOL:
-					fprintf(f, "%s", expr->basic_lit.token_value_idx ? "true" : "false");
-					break;
-				case HSC_DATA_TYPE_U32:
-				case HSC_DATA_TYPE_U64:
-					fprintf(f, "%zu", value->u64);
-					break;
-				case HSC_DATA_TYPE_S32:
-				case HSC_DATA_TYPE_S64:
-					fprintf(f, "%zd", value->s64);
-					break;
-				case HSC_DATA_TYPE_F32:
-				case HSC_DATA_TYPE_F64:
-					fprintf(f, "%f", value->f64);
-					break;
-			}
+		case HSC_EXPR_TYPE_CONSTANT: {
+			fprintf(f, "EXPR_CONSTANT ");
+			HscConstantId constant_id = { .idx_plus_one = expr->constant.id };
+			HscConstant constant = hsc_constant_table_get(&astgen->constant_table, constant_id);
+			hsc_data_type_print(astgen, expr->data_type, constant.data, f);
 			break;
 		};
 		case HSC_EXPR_TYPE_STMT_BLOCK: {
@@ -1879,12 +2195,175 @@ void hsc_astgen_print_ast(HscAstGen* astgen, FILE* f) {
 // ===========================================
 //
 //
+// IR
+//
+//
+// ===========================================
+
+void hsc_ir_init(HscIR* ir) {
+	ir->constant_values = HSC_ALLOC_ARRAY(U8, 8192);
+	HSC_ASSERT(ir->constant_values, "out of memory");
+	ir->functions = HSC_ALLOC_ARRAY(HscIRFunction, 8192);
+	HSC_ASSERT(ir->functions, "out of memory");
+	ir->basic_blocks = HSC_ALLOC_ARRAY(HscIRBasicBlock, 8192);
+	HSC_ASSERT(ir->basic_blocks, "out of memory");
+	ir->values = HSC_ALLOC_ARRAY(HscIRValue, 8192);
+	HSC_ASSERT(ir->values, "out of memory");
+	ir->instructions = HSC_ALLOC_ARRAY(HscIRInstr, 8192);
+	HSC_ASSERT(ir->instructions, "out of memory");
+	ir->operands = HSC_ALLOC_ARRAY(HscIROperand, 8192);
+	HSC_ASSERT(ir->operands, "out of memory");
+	ir->constant_values_size_cap = 8192;
+	ir->functions_cap = 8192;
+	ir->basic_blocks_cap = 8192;
+	ir->values_cap = 8192;
+	ir->instructions_cap = 8192;
+	ir->operands_cap = 8192;
+}
+
+HscIRBasicBlock* hsc_ir_add_basic_block(HscIR* ir, HscIRFunction* ir_function) {
+	HscIRBasicBlock* basic_block = &ir->basic_blocks[ir_function->basic_blocks_start_idx + (U32)ir_function->basic_blocks_count];
+	ir->basic_blocks_count += 1;
+	ir_function->basic_blocks_count += 1;
+	return basic_block;
+}
+
+U16 hsc_ir_add_value(HscIR* ir, HscIRFunction* ir_function, HscDataType data_type) {
+	HscIRValue* value = &ir->values[ir_function->values_start_idx + (U32)ir_function->values_count];
+	value->data_type = data_type;
+	value->defined_instruction_idx = ir_function->instructions_count - 1;
+	value->last_used_instruction_idx = ir_function->instructions_count - 1;
+	ir->values_count += 1;
+	U16 value_idx = ir_function->values_count;
+	ir_function->values_count += 1;
+	return value_idx;
+}
+
+void hsc_ir_add_instrunction(HscIR* ir, HscIRFunction* ir_function, HscIROpCode op_code, HscIROperand* operands, U32 operands_count) {
+	HscIRInstr* instruction = &ir->instructions[ir_function->instructions_start_idx + (U32)ir_function->instructions_count];
+	instruction->op_code = op_code;
+	instruction->operands_start_idx = (operands - ir->operands) - ir_function->operands_start_idx;
+	instruction->operands_count = operands_count;
+	ir->instructions_count += 1;
+	ir_function->instructions_count += 1;
+#if HSC_DEBUG_ASSERTIONS
+	//
+	// TODO validation
+	switch (instruction->op_code) {
+		default:break;
+	}
+#endif // HSC_DEBUG_ASSERTIONS
+}
+
+HscIROperand* hsc_ir_add_operands_many(HscIR* ir, HscIRFunction* ir_function, U32 amount) {
+	HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)ir_function->operands_count];
+	ir->operands_count += amount;
+	ir_function->operands_count += amount;
+	return operands;
+}
+
+HscIRBasicBlock* hsc_ir_generate_instructions_from_intrinsic_function(HscIR* ir, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr) {
+
+	return basic_block;
+}
+
+HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr) {
+	switch (expr->type) {
+		case HSC_EXPR_TYPE_STMT_BLOCK: {
+			if (!basic_block) {
+				basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			}
+
+			U32 stmts_count = expr->stmt_block.stmts_count;
+			HscExpr* stmt = &expr[expr->stmt_block.first_expr_rel_idx];
+			for (U32 i = 0; i < stmts_count; i += 1) {
+				basic_block = hsc_ir_generate_instructions(ir, ir_function, basic_block, stmt);
+				stmt = &stmt[stmt->next_expr_rel_idx];
+			}
+
+			break;
+		};
+		case HSC_EXPR_TYPE_STMT_RETURN: {
+			HscExpr* unary_expr = &expr[expr->unary.expr_idx];
+			basic_block = hsc_ir_generate_instructions(ir, ir_function, basic_block, unary_expr);
+			U32 value_idx = ir->last_value_idx;
+
+			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+			operands[0].value_idx = value_idx;
+			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_FUNCTION_RETURN, operands, 1);
+			break;
+		};
+		case HSC_EXPR_TYPE_CALL: {
+			HscExpr* left_expr = expr - expr->binary.left_expr_rel_idx;
+			HscExpr* right_expr = expr - expr->binary.right_expr_rel_idx;
+			HSC_DEBUG_ASSERT(left_expr->type == HSC_EXPR_TYPE_FUNCTION, "expected an function expression");
+			HSC_DEBUG_ASSERT(right_expr->type == HSC_EXPR_TYPE_CALL_ARG_LIST, "expected call argument list expression");
+			if (left_expr->function.id < HSC_FUNCTION_ID_USER_START) {
+				basic_block = hsc_ir_generate_instructions_from_intrinsic_function(ir, ir_function, basic_block, expr);
+			} else {
+				HscExpr* arg_expr = right_expr;
+				U32 args_count = ((U8*)right_expr)[1];
+				U8* next_arg_expr_rel_indices = &((U8*)right_expr)[2];
+				HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, args_count);
+				for (U32 i = 0; i < args_count; i += 1) {
+					arg_expr = &arg_expr[next_arg_expr_rel_indices[i]];
+					basic_block = hsc_ir_generate_instructions(ir, ir_function, basic_block, arg_expr);
+					operands[i].value_idx = ir->last_value_idx;
+				}
+
+				hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_FUNCTION_CALL, operands, args_count);
+			}
+
+			break;
+		};
+		default:
+			HSC_ABORT("unhandle expr type %u\n", expr->type);
+	}
+
+	return basic_block;
+}
+
+void hsc_ir_generate_function(HscIR* ir, HscAstGen* astgen, U32 function_idx) {
+	HscFunction* function = &astgen->functions[function_idx];
+	HscIRFunction* ir_function = &ir->functions[function_idx];
+	ir_function->basic_blocks_start_idx = ir->basic_blocks_count;
+	ir_function->basic_blocks_count = 0;
+	ir_function->instructions_start_idx = ir->instructions_count;
+	ir_function->instructions_count = 0;
+	ir_function->values_start_idx = ir->values_count;
+	ir_function->values_count = 0;
+	ir_function->operands_start_idx = ir->operands_count;
+	ir_function->operands_count = 0;
+
+	HSC_DEBUG_ASSERT(function->block_expr_id.idx_plus_one, "expected to have a function body");
+
+	HscExpr* expr = &astgen->exprs[function->block_expr_id.idx_plus_one - 1];
+	hsc_ir_generate_instructions(ir, ir_function, NULL, expr);
+}
+
+void hsc_ir_generate(HscIR* ir, HscAstGen* astgen) {
+	for (U32 function_idx = HSC_FUNCTION_ID_USER_START; function_idx < astgen->functions_count; function_idx += 1) {
+
+	}
+}
+
+// ===========================================
+//
+//
 // Compiler
 //
 //
 // ===========================================
 
 void hsc_compiler_init(HscCompiler* compiler, HscCompilerSetup* setup) {
+	hsc_constant_table_init(&compiler->astgen.constant_table, setup->string_table_data_cap, setup->string_table_entries_cap);
+	{
+		U8 value = false;
+		compiler->astgen.false_constant_id = hsc_constant_table_deduplicate(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_BOOL, &value);
+		value = true;
+		compiler->astgen.true_constant_id = hsc_constant_table_deduplicate(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_BOOL, &value);
+	}
+
 	hsc_string_table_init(&compiler->astgen.string_table, setup->string_table_data_cap, setup->string_table_entries_cap);
 	{
 		for (U32 expected_string_id = HSC_STRING_ID_INTRINSIC_PARAM_NAMES_START; expected_string_id < HSC_STRING_ID_INTRINSIC_PARAM_NAMES_END; expected_string_id += 1) {
@@ -1908,7 +2387,10 @@ void hsc_compiler_init(HscCompiler* compiler, HscCompilerSetup* setup) {
 		}
 	}
 
+	hsc_opt_set_enabled(&compiler->astgen.opts, HSC_OPT_CONSTANT_FOLDING);
+
 	hsc_astgen_init(&compiler->astgen, setup);
+	hsc_ir_init(&compiler->ir);
 }
 
 void hsc_compiler_compile(HscCompiler* compiler, const char* file_path) {
