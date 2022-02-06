@@ -737,12 +737,19 @@ struct HscIRBasicBlock {
 	U16 instructions_count;
 };
 
-typedef union HscIROperand HscIROperand;
-union HscIROperand {
-	HscDataType data_type;
-	U32 value_idx;
-	U32 const_value_idx;
+//
+// inherits HscDataType
+typedef U32 HscIROperand;
+enum {
+	HSC_IR_OPERAND_VALUE = HSC_DATA_TYPE_COUNT,
+	HSC_IR_OPERAND_CONSTANT,
 };
+#define HSC_IR_OPERAND_VALUE_INIT(value_idx) (((value_idx) << 8) | HSC_IR_OPERAND_VALUE)
+#define HSC_IR_OPERAND_IS_VALUE(operand) (((operand) & 0xff) == HSC_IR_OPERAND_VALUE)
+#define HSC_IR_OPERAND_VALUE_IDX(operand) ((operand) >> 8)
+#define HSC_IR_OPERAND_CONSTANT_INIT(constant_id) (((constant_id) << 8) | HSC_IR_OPERAND_CONSTANT)
+#define HSC_IR_OPERAND_IS_CONSTANT(operand) (((operand) & 0xff) == HSC_IR_OPERAND_CONSTANT)
+#define HSC_IR_OPERAND_CONSTANT_ID(operand) ((HscConstantId) { .idx_plus_one = ((operand) >> 8) })
 
 typedef struct HscIRFunction HscIRFunction;
 struct HscIRFunction {
@@ -758,10 +765,6 @@ struct HscIRFunction {
 
 typedef struct HscIR HscIR;
 struct HscIR {
-	U8* constant_values;
-	U32 constant_values_size;
-	U32 constant_values_size_cap;
-
 	HscIRFunction* functions;
 	U32 functions_count;
 	U32 functions_cap;
@@ -782,7 +785,7 @@ struct HscIR {
 	U32 operands_count;
 	U32 operands_cap;
 
-	U16 last_value_idx;
+	HscIROperand last_operand;
 };
 
 void hsc_ir_init(HscIR* ir);

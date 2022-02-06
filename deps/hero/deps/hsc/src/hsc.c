@@ -2079,6 +2079,40 @@ U32 hsc_astgen_variable_stack_find(HscAstGen* astgen, HscStringId string_id) {
 	return 0;
 }
 
+void hsc_tokens_print(HscAstGen* astgen, FILE* f) {
+	uint32_t token_value_idx = 0;
+	for (uint32_t i = 0; i < astgen->tokens_count; i += 1) {
+		HscToken token = astgen->tokens[i];
+		HscTokenValue value;
+		HscString string;
+		HscDataType data_type;
+		switch (token) {
+			case HSC_TOKEN_IDENT:
+				value = astgen->token_values[token_value_idx];
+				token_value_idx += 1;
+				string = hsc_string_table_get(&astgen->string_table, value.string_id);
+				fprintf(f, "%s -> %.*s\n", hsc_token_strings[token], (int)string.size, string.data);
+				break;
+			case HSC_TOKEN_LIT_U32: data_type = HSC_DATA_TYPE_U32; goto PRINT_LIT;
+			case HSC_TOKEN_LIT_U64: data_type = HSC_DATA_TYPE_U64; goto PRINT_LIT;
+			case HSC_TOKEN_LIT_S32: data_type = HSC_DATA_TYPE_S32; goto PRINT_LIT;
+			case HSC_TOKEN_LIT_S64: data_type = HSC_DATA_TYPE_S64; goto PRINT_LIT;
+			case HSC_TOKEN_LIT_F32: data_type = HSC_DATA_TYPE_F32; goto PRINT_LIT;
+			case HSC_TOKEN_LIT_F64: data_type = HSC_DATA_TYPE_F64; goto PRINT_LIT;
+PRINT_LIT:
+				value = astgen->token_values[token_value_idx];
+				HscConstant constant = hsc_constant_table_get(&astgen->constant_table, value.constant_id);
+				hsc_data_type_print(astgen, data_type, constant.data, stdout);
+				fprintf(f, "\n");
+				token_value_idx += 1;
+				break;
+			default:
+				fprintf(f, "%s\n", hsc_token_strings[token]);
+				break;
+		}
+	}
+}
+
 void hsc_astgen_print_expr(HscAstGen* astgen, HscExpr* expr, U32 indent, bool is_stmt, FILE* f) {
 	static char* indent_chars = "\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
 	fprintf(f, "%.*s", indent, indent_chars);
@@ -2201,8 +2235,6 @@ void hsc_astgen_print_ast(HscAstGen* astgen, FILE* f) {
 // ===========================================
 
 void hsc_ir_init(HscIR* ir) {
-	ir->constant_values = HSC_ALLOC_ARRAY(U8, 8192);
-	HSC_ASSERT(ir->constant_values, "out of memory");
 	ir->functions = HSC_ALLOC_ARRAY(HscIRFunction, 8192);
 	HSC_ASSERT(ir->functions, "out of memory");
 	ir->basic_blocks = HSC_ALLOC_ARRAY(HscIRBasicBlock, 8192);
@@ -2213,7 +2245,6 @@ void hsc_ir_init(HscIR* ir) {
 	HSC_ASSERT(ir->instructions, "out of memory");
 	ir->operands = HSC_ALLOC_ARRAY(HscIROperand, 8192);
 	HSC_ASSERT(ir->operands, "out of memory");
-	ir->constant_values_size_cap = 8192;
 	ir->functions_cap = 8192;
 	ir->basic_blocks_cap = 8192;
 	ir->values_cap = 8192;
@@ -2262,12 +2293,30 @@ HscIROperand* hsc_ir_add_operands_many(HscIR* ir, HscIRFunction* ir_function, U3
 	return operands;
 }
 
-HscIRBasicBlock* hsc_ir_generate_instructions_from_intrinsic_function(HscIR* ir, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr) {
+HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr);
 
+HscIRBasicBlock* hsc_ir_generate_instructions_from_intrinsic_function(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscFunction* function, U32 function_id, HscExpr* call_args_expr) {
+	U32 args_count = ((U8*)call_args_expr)[1];
+	U8* next_arg_expr_rel_indices = &((U8*)call_args_expr)[2];
+	HscExpr* arg_expr = call_args_expr;
+
+	HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, args_count + 1);
+	U16 return_value_idx = hsc_ir_add_value(ir, ir_function, function->return_data_type);
+	operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+
+	for (U32 idx = 0; idx < args_count; idx += 1) {
+		arg_expr = &arg_expr[next_arg_expr_rel_indices[idx]];
+		basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, arg_expr);
+		operands[idx + 1] = ir->last_operand;
+	}
+
+	hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_COMPOSITE_INIT, operands, args_count + 1);
+
+	ir->last_operand = operands[0];
 	return basic_block;
 }
 
-HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr) {
+HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr) {
 	switch (expr->type) {
 		case HSC_EXPR_TYPE_STMT_BLOCK: {
 			if (!basic_block) {
@@ -2277,7 +2326,7 @@ HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscIRFunction* ir_funct
 			U32 stmts_count = expr->stmt_block.stmts_count;
 			HscExpr* stmt = &expr[expr->stmt_block.first_expr_rel_idx];
 			for (U32 i = 0; i < stmts_count; i += 1) {
-				basic_block = hsc_ir_generate_instructions(ir, ir_function, basic_block, stmt);
+				basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, stmt);
 				stmt = &stmt[stmt->next_expr_rel_idx];
 			}
 
@@ -2285,35 +2334,44 @@ HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscIRFunction* ir_funct
 		};
 		case HSC_EXPR_TYPE_STMT_RETURN: {
 			HscExpr* unary_expr = &expr[expr->unary.expr_idx];
-			basic_block = hsc_ir_generate_instructions(ir, ir_function, basic_block, unary_expr);
-			U32 value_idx = ir->last_value_idx;
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, unary_expr);
 
 			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 1);
-			operands[0].value_idx = value_idx;
+			operands[0] = ir->last_operand;
 			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_FUNCTION_RETURN, operands, 1);
 			break;
 		};
 		case HSC_EXPR_TYPE_CALL: {
-			HscExpr* left_expr = expr - expr->binary.left_expr_rel_idx;
-			HscExpr* right_expr = expr - expr->binary.right_expr_rel_idx;
-			HSC_DEBUG_ASSERT(left_expr->type == HSC_EXPR_TYPE_FUNCTION, "expected an function expression");
-			HSC_DEBUG_ASSERT(right_expr->type == HSC_EXPR_TYPE_CALL_ARG_LIST, "expected call argument list expression");
-			if (left_expr->function.id < HSC_FUNCTION_ID_USER_START) {
-				basic_block = hsc_ir_generate_instructions_from_intrinsic_function(ir, ir_function, basic_block, expr);
+			HscExpr* function_expr = expr - expr->binary.left_expr_rel_idx;
+			HscExpr* call_args_expr = expr - expr->binary.right_expr_rel_idx;
+			HSC_DEBUG_ASSERT(function_expr->type == HSC_EXPR_TYPE_FUNCTION, "expected an function expression");
+			HSC_DEBUG_ASSERT(call_args_expr->type == HSC_EXPR_TYPE_CALL_ARG_LIST, "expected call argument list expression");
+			HscFunction* function = &astgen->functions[function_expr->function.id - 1];
+			if (function_expr->function.id < HSC_FUNCTION_ID_USER_START) {
+				basic_block = hsc_ir_generate_instructions_from_intrinsic_function(ir, astgen, ir_function, basic_block, function, function_expr->function.id, call_args_expr);
 			} else {
-				HscExpr* arg_expr = right_expr;
-				U32 args_count = ((U8*)right_expr)[1];
-				U8* next_arg_expr_rel_indices = &((U8*)right_expr)[2];
-				HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, args_count);
+				HscExpr* arg_expr = call_args_expr;
+				U32 args_count = ((U8*)call_args_expr)[1];
+				U8* next_arg_expr_rel_indices = &((U8*)call_args_expr)[2];
+
+				HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, args_count + 1);
+				U16 return_value_idx = hsc_ir_add_value(ir, ir_function, function->return_data_type);
+				operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+
 				for (U32 i = 0; i < args_count; i += 1) {
 					arg_expr = &arg_expr[next_arg_expr_rel_indices[i]];
-					basic_block = hsc_ir_generate_instructions(ir, ir_function, basic_block, arg_expr);
-					operands[i].value_idx = ir->last_value_idx;
+					basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, arg_expr);
+					operands[i + 1] = ir->last_operand;
 				}
 
 				hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_FUNCTION_CALL, operands, args_count);
+				ir->last_operand = operands[0];
 			}
 
+			break;
+		};
+		case HSC_EXPR_TYPE_CONSTANT: {
+			ir->last_operand = HSC_IR_OPERAND_CONSTANT_INIT(expr->constant.id);
 			break;
 		};
 		default:
@@ -2338,12 +2396,87 @@ void hsc_ir_generate_function(HscIR* ir, HscAstGen* astgen, U32 function_idx) {
 	HSC_DEBUG_ASSERT(function->block_expr_id.idx_plus_one, "expected to have a function body");
 
 	HscExpr* expr = &astgen->exprs[function->block_expr_id.idx_plus_one - 1];
-	hsc_ir_generate_instructions(ir, ir_function, NULL, expr);
+	hsc_ir_generate_instructions(ir, astgen, ir_function, NULL, expr);
 }
 
 void hsc_ir_generate(HscIR* ir, HscAstGen* astgen) {
 	for (U32 function_idx = HSC_FUNCTION_ID_USER_START; function_idx < astgen->functions_count; function_idx += 1) {
+		hsc_ir_generate_function(ir, astgen, function_idx);
+	}
+}
 
+void hsc_ir_print_operand(HscIR* ir, HscAstGen* astgen, HscIROperand operand, FILE* f) {
+	switch (operand & 0xff) {
+		case HSC_IR_OPERAND_VALUE:
+			fprintf(f, "v%u", HSC_IR_OPERAND_VALUE_IDX(operand));
+			break;
+		case HSC_IR_OPERAND_CONSTANT:
+			fprintf(f, "c%u", HSC_IR_OPERAND_CONSTANT_ID(operand).idx_plus_one - 1);
+			break;
+		default: {
+			HscString data_type_name = hsc_data_type_string(astgen, operand);
+			fprintf(f, "%.*s", (int)data_type_name.size, data_type_name.data);
+			break;
+		};
+	}
+}
+
+void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
+	HscConstantTable* constant_table = &astgen->constant_table;
+	for (U32 idx = 0; idx < constant_table->entries_count; idx += 1) {
+		HscConstantEntry* entry = &constant_table->entries[idx];
+		fprintf(f, "Constant(c%u): ", idx);
+		hsc_data_type_print(astgen, entry->data_type, HSC_PTR_ADD(constant_table->data, entry->start_idx), f);
+		fprintf(f, "\n");
+	}
+
+	for (U32 function_idx = HSC_FUNCTION_ID_USER_START; function_idx < astgen->functions_count; function_idx += 1) {
+		HscFunction* function = &astgen->functions[function_idx];
+		HscIRFunction* ir_function = &ir->functions[function_idx];
+		char buf[1024];
+		hsc_function_to_string(astgen, function, buf, sizeof(buf), false);
+		fprintf(f, "Function(#%u): %s\n", function_idx, buf);
+		for (U32 basic_block_idx = ir_function->basic_blocks_start_idx; basic_block_idx < ir_function->basic_blocks_start_idx + (U32)ir_function->basic_blocks_count; basic_block_idx += 1) {
+			HscIRBasicBlock* basic_block = &ir->basic_blocks[basic_block_idx];
+			fprintf(f, "\tBASIC_BLOCK(#%u):\n", basic_block_idx - ir_function->basic_blocks_start_idx);
+			for (U32 instruction_idx = ir_function->instructions_start_idx; instruction_idx < ir_function->instructions_start_idx + (U32)ir_function->instructions_count; instruction_idx += 1) {
+				HscIRInstr* instruction = &ir->instructions[instruction_idx];
+				switch (instruction->op_code) {
+#if 0
+					case HSC_IR_OP_CODE_LOAD:
+						break;
+					case HSC_IR_OP_CODE_STORE:
+						break;
+					case HSC_IR_OP_CODE_ACCESS_CHAIN:
+						break;
+					case HSC_IR_OP_CODE_FUNCTION_CALL:
+						break;
+#endif
+					case HSC_IR_OP_CODE_COMPOSITE_INIT: {
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						fprintf(f, "\t\t");
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, " = OP_COMPOSITE_INIT: ");
+						for (U32 idx = 1; idx < instruction->operands_count; idx += 1) {
+							hsc_ir_print_operand(ir, astgen, operands[idx], f);
+							if (idx + 1 < instruction->operands_count) {
+								fprintf(f, ", ");
+							}
+						}
+						fprintf(f, "\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_FUNCTION_RETURN:
+						fprintf(f, "\t\tOP_FUNCTION_RETURN: ");
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, "\n");
+						break;
+					default:
+						HSC_ABORT("unhandled instruction '%u'", instruction->op_code);
+				}
+			}
+		}
 	}
 }
 
@@ -2387,7 +2520,7 @@ void hsc_compiler_init(HscCompiler* compiler, HscCompilerSetup* setup) {
 		}
 	}
 
-	hsc_opt_set_enabled(&compiler->astgen.opts, HSC_OPT_CONSTANT_FOLDING);
+	//hsc_opt_set_enabled(&compiler->astgen.opts, HSC_OPT_CONSTANT_FOLDING);
 
 	hsc_astgen_init(&compiler->astgen, setup);
 	hsc_ir_init(&compiler->ir);
@@ -2415,6 +2548,10 @@ void hsc_compiler_compile(HscCompiler* compiler, const char* file_path) {
 	hsc_astgen_tokenize(&compiler->astgen);
 
 	hsc_astgen_generate(&compiler->astgen);
+	hsc_ir_generate(&compiler->ir, &compiler->astgen);
+
+	hsc_tokens_print(&compiler->astgen, stdout);
 	hsc_astgen_print_ast(&compiler->astgen, stdout);
+	hsc_ir_print(&compiler->ir, &compiler->astgen, stdout);
 }
 
