@@ -77,6 +77,10 @@
 #define HSC_MIN(a, b) (((a) < (b)) ? (a) : (b))
 #define HSC_MAX(a, b) (((a) > (b)) ? (a) : (b))
 
+#ifndef alignof
+#define alignof _Alignof
+#endif
+
 void _hsc_assert_failed(const char* cond, const char* file, int line, const char* message, ...);
 HSC_NORETURN void _hsc_abort(const char* file, int line, const char* message, ...);
 
@@ -156,6 +160,8 @@ typedef double    F64;
 #define S64_MIN INT64_MIN
 #define S64_MAX INT64_MAX
 
+typedef struct HscCompiler HscCompiler;
+
 // ===========================================
 //
 //
@@ -199,7 +205,6 @@ enum {
 	HSC_DATA_TYPE_S16,
 	HSC_DATA_TYPE_S32,
 	HSC_DATA_TYPE_S64,
-	HSC_DATA_TYPE_F8,
 	HSC_DATA_TYPE_F16,
 	HSC_DATA_TYPE_F32,
 	HSC_DATA_TYPE_F64,
@@ -440,9 +445,9 @@ struct HscConstantTable {
 	uint32_t          entries_cap;
 
 	HscDataType       data_type;
-	U32               size;
-	U32               data_size;
-	void*             data_write_ptr;
+	U32               fields_count;
+	U32               fields_cap;
+	HscConstantId*    data_write_ptr;
 };
 
 typedef struct HscFunctionParam HscFunctionParam;
@@ -653,7 +658,7 @@ void hsc_opt_set_enabled(HscOpts* opts, HscOpt opt);
 HscString hsc_data_type_string(HscAstGen* astgen, HscDataType data_type);
 void hsc_data_type_size_align(HscAstGen* astgen, HscDataType data_type, Uptr* size_out, Uptr* align_out);
 HscDataType hsc_data_type_resolve_generic(HscAstGen* astgen, HscDataType data_type);
-void hsc_data_type_print(HscAstGen* astgen, HscDataType data_type, void* data, FILE* f);
+void hsc_data_type_print_basic(HscAstGen* astgen, HscDataType data_type, void* data, FILE* f);
 
 void hsc_string_table_init(HscStringTable* string_table, uint32_t data_cap, uint32_t entries_cap);
 #define hsc_string_table_deduplicate_lit(string_table, string_lit) hsc_string_table_deduplicate(string_table, string_lit, sizeof(string_lit) - 1)
@@ -661,11 +666,10 @@ HscStringId hsc_string_table_deduplicate(HscStringTable* string_table, char* str
 HscString hsc_string_table_get(HscStringTable* string_table, HscStringId id);
 
 void hsc_constant_table_init(HscConstantTable* constant_table, uint32_t data_cap, uint32_t entries_cap);
-HscConstantId hsc_constant_table_deduplicate(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type, void* data);
-void hsc_constant_table_deduplicate_start(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type);
-void hsc_constant_table_deduplicate_add_data(HscConstantTable* constant_table, void* data, U32 size);
-void hsc_constant_table_deduplicate_add_constant(HscConstantTable* constant_table, HscConstantId constant_id);
-HscConstantId hsc_constant_table_deduplicate_end(HscConstantTable* constant_table);
+HscConstantId hsc_constant_table_deduplicate_basic(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type, void* data);
+void hsc_constant_table_deduplicate_composite_start(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type);
+void hsc_constant_table_deduplicate_composite_add(HscConstantTable* constant_table, HscConstantId constant_id);
+HscConstantId hsc_constant_table_deduplicate_composite_end(HscConstantTable* constant_table);
 HscConstant hsc_constant_table_get(HscConstantTable* constant_table, HscConstantId id);
 
 typedef struct HscCompilerSetup HscCompilerSetup;
@@ -794,15 +798,157 @@ void hsc_ir_generate(HscIR* ir, HscAstGen* astgen);
 // ===========================================
 //
 //
+// SPIR-V
+//
+//
+// ===========================================
+
+typedef U16 HscSpirvOp;
+enum {
+	HSC_SPIRV_OP_NO_OP = 0,
+	HSC_SPIRV_OP_MEMORY_MODEL = 14,
+	HSC_SPIRV_OP_ENTRY_POINT = 15,
+	HSC_SPIRV_OP_EXECUTION_MODE = 16,
+	HSC_SPIRV_OP_CAPABILITY = 17,
+	HSC_SPIRV_OP_TYPE_VOID = 19,
+	HSC_SPIRV_OP_TYPE_BOOL = 20,
+	HSC_SPIRV_OP_TYPE_INT = 21,
+	HSC_SPIRV_OP_TYPE_FLOAT = 22,
+	HSC_SPIRV_OP_TYPE_VECTOR = 23,
+	HSC_SPIRV_OP_TYPE_POINTER = 32,
+	HSC_SPIRV_OP_TYPE_FUNCTION = 33,
+
+	HSC_SPIRV_OP_CONSTANT_TRUE = 41,
+	HSC_SPIRV_OP_CONSTANT_FALSE = 42,
+	HSC_SPIRV_OP_CONSTANT = 43,
+	HSC_SPIRV_OP_CONSTANT_COMPOSITE = 44,
+
+	HSC_SPIRV_OP_FUNCTION = 54,
+	HSC_SPIRV_OP_FUNCTION_PARAMETER = 55,
+	HSC_SPIRV_OP_FUNCTION_END = 56,
+	HSC_SPIRV_OP_VARIABLE = 59,
+	HSC_SPIRV_OP_STORE = 62,
+	HSC_SPIRV_OP_DECORATE = 71,
+	HSC_SPIRV_OP_COMPOSITE_CONSTRUCT = 80,
+	HSC_SPIRV_OP_LABEL = 248,
+	HSC_SPIRV_OP_RETURN = 253,
+	HSC_SPIRV_OP_RETURN_VALUE = 254,
+};
+
+enum {
+	HSC_SPIRV_ADDRESS_MODEL_LOGICAL = 0,
+};
+
+enum {
+	HSC_SPIRV_MEMORY_MODEL_GLSL450 = 1,
+	HSC_SPIRV_MEMORY_MODEL_VULKAN = 3,
+};
+
+enum {
+	HSC_SPIRV_EXECUTION_MODE_ORIGIN_LOWER_LEFT = 8,
+};
+
+enum {
+	HSC_SPIRV_CAPABILITY_SHADER = 1,
+	HSC_SPIRV_CAPABILITY_VULKAN_MEMORY_MODEL = 5345,
+};
+
+enum {
+	HSC_SPIRV_STORAGE_CLASS_INPUT = 1,
+	HSC_SPIRV_STORAGE_CLASS_UNIFORM = 2,
+	HSC_SPIRV_STORAGE_CLASS_OUTPUT = 3,
+};
+
+enum {
+	HSC_SPIRV_EXECUTION_MODEL_VERTEX                  = 0,
+	HSC_SPIRV_EXECUTION_MODEL_TESSELLATION_CONTROL    = 1,
+	HSC_SPIRV_EXECUTION_MODEL_TESSELLATION_EVALUATION = 2,
+	HSC_SPIRV_EXECUTION_MODEL_GEOMETRY                = 3,
+	HSC_SPIRV_EXECUTION_MODEL_FRAGMENT                = 4,
+	HSC_SPIRV_EXECUTION_MODEL_GL_COMPUTE              = 5,
+};
+
+enum {
+	HSC_SPRIV_DECORATION_LOCATION = 30,
+};
+
+#define HSC_SPIRV_INSTR_OPERANDS_CAP 24
+
+typedef struct HscSpirvFunctionTypeEntry HscSpirvFunctionTypeEntry;
+struct HscSpirvFunctionTypeEntry {
+	U32 data_types_start_idx;
+	U32 spirv_id: 24;
+	U32 data_types_count: 8;
+};
+
+typedef struct HscSpirvFunctionTypeTable HscSpirvFunctionTypeTable;
+struct HscSpirvFunctionTypeTable {
+	HscDataType* data_types;
+	HscSpirvFunctionTypeEntry* entries;
+	U32 data_types_count;
+	U32 data_types_cap;
+	U32 entries_count;
+	U32 entries_cap;
+};
+
+typedef struct HscSpirv HscSpirv;
+struct HscSpirv {
+	HscSpirvFunctionTypeTable function_type_table;
+
+	U32* out_capabilities;
+	U32 out_capabilities_count;
+	U32 out_capabilities_cap;
+
+	U32* out_entry_points;
+	U32 out_entry_points_count;
+	U32 out_entry_points_cap;
+
+	U32* out_debug_info;
+	U32 out_debug_info_count;
+	U32 out_debug_info_cap;
+
+	U32* out_annotations;
+	U32 out_annotations_count;
+	U32 out_annotations_cap;
+
+	U32* out_types_variables_constants;
+	U32 out_types_variables_constants_count;
+	U32 out_types_variables_constants_cap;
+
+	U32* out_functions;
+	U32 out_functions_count;
+	U32 out_functions_cap;
+
+	U32 shader_stage_function_type_spirv_id;
+
+	U32 pointer_type_inputs_base_id;
+	U32 pointer_type_outputs_base_id;
+	U64 pointer_type_inputs_made_bitset[4];
+	U64 pointer_type_outputs_made_bitset[4];
+
+	U32 constant_base_id;
+	U32 next_id;
+	HscSpirvOp instr_op;
+	U16 instr_operands_count;
+	U32 instr_operands[HSC_SPIRV_INSTR_OPERANDS_CAP];
+};
+
+void hsc_spirv_init(HscCompiler* c);
+void hsc_spirv_generate(HscCompiler* c);
+
+// ===========================================
+//
+//
 // Compiler
 //
 //
 // ===========================================
 
-typedef struct HscCompiler HscCompiler;
 struct HscCompiler {
 	HscAstGen astgen;
 	HscIR ir;
+	HscSpirv spirv;
+	U16 available_basic_types;
 };
 
 struct HscCompilerSetup {

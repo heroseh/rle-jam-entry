@@ -107,7 +107,6 @@ char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_DATA_TYPE_S16] = "S16",
 	[HSC_DATA_TYPE_S32] = "S32",
 	[HSC_DATA_TYPE_S64] = "S64",
-	[HSC_DATA_TYPE_F8] = "F8",
 	[HSC_DATA_TYPE_F16] = "F16",
 	[HSC_DATA_TYPE_F32] = "F32",
 	[HSC_DATA_TYPE_F64] = "F64",
@@ -302,7 +301,6 @@ void hsc_data_type_size_align(HscAstGen* astgen, HscDataType data_type, Uptr* si
 			case HSC_DATA_TYPE_BOOL:
 			case HSC_DATA_TYPE_U8:
 			case HSC_DATA_TYPE_S8:
-			case HSC_DATA_TYPE_F8:
 				*size_out = 1;
 				*align_out = 1;
 				break;
@@ -371,48 +369,55 @@ HscDataType hsc_data_type_resolve_generic(HscAstGen* astgen, HscDataType data_ty
 	return data_type;
 }
 
-void hsc_data_type_print(HscAstGen* astgen, HscDataType data_type, void* data, FILE* f) {
-	if (data_type < HSC_DATA_TYPE_BASIC_END) {
-		U64 uint;
-		S64 sint;
-		F64 float_;
-		switch (data_type) {
-			case HSC_DATA_TYPE_VOID:
-				fprintf(f, "void");
-				break;
-			case HSC_DATA_TYPE_BOOL:
-				fprintf(f, *(U8*)data ? "true" : "false");
-				break;
-			case HSC_DATA_TYPE_U8: uint = *(U8*)data; goto UINT;
-			case HSC_DATA_TYPE_U16: uint = *(U16*)data; goto UINT;
-			case HSC_DATA_TYPE_U32: uint = *(U32*)data; goto UINT;
-			case HSC_DATA_TYPE_U64: uint = *(U64*)data; goto UINT;
+void hsc_data_type_print_basic(HscAstGen* astgen, HscDataType data_type, void* data, FILE* f) {
+	HSC_DEBUG_ASSERT(data_type < HSC_DATA_TYPE_BASIC_END, "internal error: expected a basic data type but got '%s'", hsc_data_type_string(astgen, data_type));
+
+	U64 uint;
+	S64 sint;
+	F64 float_;
+	switch (data_type) {
+		case HSC_DATA_TYPE_VOID:
+			fprintf(f, "void");
+			break;
+		case HSC_DATA_TYPE_BOOL:
+			fprintf(f, *(U8*)data ? "true" : "false");
+			break;
+		case HSC_DATA_TYPE_U8: uint = *(U8*)data; goto UINT;
+		case HSC_DATA_TYPE_U16: uint = *(U16*)data; goto UINT;
+		case HSC_DATA_TYPE_U32: uint = *(U32*)data; goto UINT;
+		case HSC_DATA_TYPE_U64: uint = *(U64*)data; goto UINT;
 UINT:
-				fprintf(f, "%zu", uint);
-			case HSC_DATA_TYPE_S8: sint = *(S8*)data; goto SINT;
-			case HSC_DATA_TYPE_S16: sint = *(S16*)data; goto SINT;
-			case HSC_DATA_TYPE_S32: sint = *(S32*)data; goto SINT;
-			case HSC_DATA_TYPE_S64: sint = *(S64*)data; goto SINT;
+			fprintf(f, "%zu", uint);
+			break;
+		case HSC_DATA_TYPE_S8: sint = *(S8*)data; goto SINT;
+		case HSC_DATA_TYPE_S16: sint = *(S16*)data; goto SINT;
+		case HSC_DATA_TYPE_S32: sint = *(S32*)data; goto SINT;
+		case HSC_DATA_TYPE_S64: sint = *(S64*)data; goto SINT;
 SINT:
-				fprintf(f, "%zd", sint);
-			case HSC_DATA_TYPE_F8:
-			case HSC_DATA_TYPE_F16: HSC_ABORT("TODO");
-			case HSC_DATA_TYPE_F32: float_ = *(F32*)data; goto FLOAT;
-			case HSC_DATA_TYPE_F64: float_ = *(F64*)data; goto FLOAT;
+			fprintf(f, "%zd", sint);
+			break;
+		case HSC_DATA_TYPE_F16: HSC_ABORT("TODO");
+		case HSC_DATA_TYPE_F32: float_ = *(F32*)data; goto FLOAT;
+		case HSC_DATA_TYPE_F64: float_ = *(F64*)data; goto FLOAT;
 FLOAT:
-				fprintf(f, "%f", float_);
-				break;
-		}
-	} else if (HSC_DATA_TYPE_VECTOR_START <= data_type && data_type < HSC_DATA_TYPE_MATRIX_END) {
+			fprintf(f, "%f", float_);
+			break;
+	}
+}
+
+void hsc_constant_print(HscAstGen* astgen, HscConstantId constant_id, FILE* f) {
+	HscConstant constant = hsc_constant_table_get(&astgen->constant_table, constant_id);
+	if (constant.data_type < HSC_DATA_TYPE_BASIC_END) {
+		hsc_data_type_print_basic(astgen, constant.data_type, constant.data, f);
+	} else if (HSC_DATA_TYPE_VECTOR_START <= constant.data_type && constant.data_type < HSC_DATA_TYPE_MATRIX_END) {
 		U32 componment_size;
-		switch (HSC_DATA_TYPE_SCALAR(data_type)) {
+		switch (HSC_DATA_TYPE_SCALAR(constant.data_type)) {
 			case HSC_DATA_TYPE_VOID:
 				componment_size = 0;
 				break;
 			case HSC_DATA_TYPE_BOOL:
 			case HSC_DATA_TYPE_U8:
 			case HSC_DATA_TYPE_S8:
-			case HSC_DATA_TYPE_F8:
 				componment_size = 1;
 				break;
 			case HSC_DATA_TYPE_U16:
@@ -433,22 +438,41 @@ FLOAT:
 		}
 
 		U32 componments_count;
+		if (constant.data_type < HSC_DATA_TYPE_VECTOR_END) {
+			componments_count = HSC_DATA_TYPE_VECTOR_COMPONENTS(constant.data_type);
+			fprintf(f, "Vec%u(", componments_count);
+		} else {
+			U32 rows_count = HSC_DATA_TYPE_MATRX_ROWS(constant.data_type);
+			U32 columns_count = HSC_DATA_TYPE_MATRX_COLUMNS(constant.data_type);
+			componments_count = rows_count * columns_count;
+			fprintf(f, "Mat%u%u(", rows_count, columns_count);
+		}
+
+		HscConstantId* constants = constant.data;
+		for (U32 i = 0; i < componments_count; i += 1) {
+			hsc_constant_print(astgen, constants[i], f);
+			fprintf(f, i + 1 < componments_count ? ", " : ")");
+		}
+	} else {
+		HSC_ABORT("unhandle type '%u'", constant.data_type);
+	}
+}
+
+U32 hsc_data_type_composite_fields_count(HscAstGen* astgen, HscDataType data_type) {
+	HSC_DEBUG_ASSERT(!HSC_DATA_TYPE_IS_BASIC(data_type), "internal error: expected a composite type but got '%s'", hsc_data_type_string(astgen, data_type));
+
+	if (HSC_DATA_TYPE_VECTOR_START <= data_type && data_type < HSC_DATA_TYPE_MATRIX_END) {
+		U32 componments_count;
 		if (data_type < HSC_DATA_TYPE_VECTOR_END) {
 			componments_count = HSC_DATA_TYPE_VECTOR_COMPONENTS(data_type);
-			fprintf(f, "Vec%u(", componments_count);
 		} else {
 			U32 rows_count = HSC_DATA_TYPE_MATRX_ROWS(data_type);
 			U32 columns_count = HSC_DATA_TYPE_MATRX_COLUMNS(data_type);
 			componments_count = rows_count * columns_count;
-			fprintf(f, "Mat%u%u(", rows_count, columns_count);
 		}
-		for (U32 i = 0; i < componments_count; i += 1) {
-			hsc_data_type_print(astgen, HSC_DATA_TYPE_SCALAR(data_type), data, f);
-			fprintf(f, i + 1 < componments_count ? ", " : ")");
-			data = HSC_PTR_ADD(data, componment_size);
-		}
+		return  componments_count;
 	} else {
-		HSC_ABORT("unhandle type '%u'", data_type);
+		HSC_ABORT("unhandled data type '%u'", data_type);
 	}
 }
 
@@ -513,50 +537,53 @@ void hsc_constant_table_init(HscConstantTable* constant_table, uint32_t data_cap
 	constant_table->entries_cap = entries_cap;
 }
 
-HscConstantId hsc_constant_table_deduplicate(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type, void* data) {
-	hsc_constant_table_deduplicate_start(constant_table, astgen, data_type);
-	hsc_constant_table_deduplicate_add_data(constant_table, data, constant_table->data_size);
-	return hsc_constant_table_deduplicate_end(constant_table);
-}
+HscConstantId _hsc_constant_table_deduplicate_end(HscConstantTable* constant_table, HscDataType data_type, void* data, U32 data_size, U32 data_align);
 
-void hsc_constant_table_deduplicate_start(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type) {
-	HSC_DEBUG_ASSERT(constant_table->size == 0, "internal error: starting to deduplicate a constant before ending another");
+HscConstantId hsc_constant_table_deduplicate_basic(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type, void* data) {
+	HSC_DEBUG_ASSERT(HSC_DATA_TYPE_IS_BASIC(data_type), "internal error: expected a basic type but got '%s'", hsc_data_type_string(astgen, data_type));
+	HSC_DEBUG_ASSERT(constant_table->fields_cap == 0, "internal error: starting to deduplicate a constant before ending another");
 
 	Uptr size;
 	Uptr align;
 	hsc_data_type_size_align(astgen, data_type, &size, &align);
-	HSC_DEBUG_ASSERT(size, "internal error: cannot add a constant with zero size");
+
+	return _hsc_constant_table_deduplicate_end(constant_table, data_type, data, size, align);
+}
+
+void hsc_constant_table_deduplicate_composite_start(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type) {
+	HSC_DEBUG_ASSERT(!HSC_DATA_TYPE_IS_BASIC(data_type), "internal error: expected a non basic type but got '%s'", hsc_data_type_string(astgen, data_type));
+	HSC_DEBUG_ASSERT(constant_table->fields_cap == 0, "internal error: starting to deduplicate a constant before ending another");
+
+	U32 fields_count;
+	fields_count = hsc_data_type_composite_fields_count(astgen, data_type);
+
 	constant_table->data_type = data_type;
-	constant_table->size = 0;
-	constant_table->data_size = size;
-	constant_table->data_write_ptr = HSC_PTR_ROUND_UP_ALIGN(constant_table->data + constant_table->data_used_size, align);
+	constant_table->fields_count = 0;
+	constant_table->fields_cap = fields_count;
+	constant_table->data_write_ptr = HSC_PTR_ROUND_UP_ALIGN(constant_table->data + constant_table->data_used_size, alignof(HscConstantId));
 }
 
-void hsc_constant_table_deduplicate_add_data(HscConstantTable* constant_table, void* data, uint32_t size) {
-	HSC_DEBUG_ASSERT(constant_table->data_size, "internal error: cannot add data when deduplication of constant has not started");
-	HSC_DEBUG_ASSERT(constant_table->size + size <= constant_table->data_size, "internal error: the expected constant data size '%u' has been exceeded", constant_table->data_size);
+void hsc_constant_table_deduplicate_composite_add(HscConstantTable* constant_table, HscConstantId constant_id) {
+	HSC_DEBUG_ASSERT(constant_table->fields_cap, "internal error: cannot add data when deduplication of constant has not started");
+	HSC_DEBUG_ASSERT(constant_table->fields_count < constant_table->fields_cap, "internal error: the expected constant with '%u' fields has been exceeded", constant_table->fields_cap);
 
-	memcpy(HSC_PTR_ADD(constant_table->data_write_ptr, constant_table->size), data, size);
-	constant_table->size += size;
+	constant_table->data_write_ptr[constant_table->fields_count] = constant_id;
+	constant_table->fields_count += 1;
 }
 
-void hsc_constant_table_deduplicate_add_constant(HscConstantTable* constant_table, HscConstantId constant_id) {
-	HscConstant constant = hsc_constant_table_get(constant_table, constant_id);
-	hsc_constant_table_deduplicate_add_data(constant_table, constant.data, constant.size);
+HscConstantId hsc_constant_table_deduplicate_composite_end(HscConstantTable* constant_table) {
+	HSC_DEBUG_ASSERT(constant_table->fields_count == constant_table->fields_cap, "internal error: the composite constant for deduplication is incomplete, expected to be '%u' fields but got '%u'", constant_table->fields_count, constant_table->fields_cap);
+	constant_table->fields_cap = 0;
+
+	return _hsc_constant_table_deduplicate_end(constant_table, constant_table->data_type, constant_table->data_write_ptr, constant_table->fields_count * sizeof(HscConstantId), alignof(HscConstantId));
 }
 
-HscConstantId hsc_constant_table_deduplicate_end(HscConstantTable* constant_table) {
-	U32 data_size = constant_table->data_size;
-	HSC_DEBUG_ASSERT(constant_table->size == constant_table->data_size, "internal error: the constant for deduplication is incomplete, expected to be a size of '%u' but got '%u'", constant_table->data_size, constant_table->size);
-	constant_table->size = 0;
-	constant_table->data_size = 0;
-
+HscConstantId _hsc_constant_table_deduplicate_end(HscConstantTable* constant_table, HscDataType data_type, void* data, U32 data_size, U32 data_align) {
 	//
 	// TODO: make this a hash table look up
 	for (uint32_t entry_idx = 0; entry_idx < constant_table->entries_count; entry_idx += 1) {
 		HscConstantEntry* entry = &constant_table->entries[entry_idx];
-
-		if (entry->data_type == constant_table->data_type && data_size == entry->size && memcmp(constant_table->data + entry->start_idx, constant_table->data_write_ptr, data_size) == 0) {
+		if (entry->data_type == data_type && data_size == entry->size && memcmp(constant_table->data + entry->start_idx, data, data_size) == 0) {
 			return (HscConstantId) { .idx_plus_one = entry_idx + 1 };
 		}
 	}
@@ -569,14 +596,21 @@ HscConstantId hsc_constant_table_deduplicate_end(HscConstantTable* constant_tabl
 		HSC_ABORT("constant tables entries capacity exceeded TODO make this error message proper");
 	}
 
+	constant_table->data_used_size = HSC_INT_ROUND_UP_ALIGN(constant_table->data_used_size, data_align);
+
 	uint32_t new_entry_idx = constant_table->entries_count;
 	constant_table->entries_count += 1;
 	HscConstantEntry* entry = &constant_table->entries[new_entry_idx];
-	entry->start_idx = constant_table->data_write_ptr - constant_table->data;
+	entry->start_idx = constant_table->data_used_size;
 	entry->size = data_size;
-	entry->data_type = constant_table->data_type;
+	entry->data_type = data_type;
 
-	constant_table->data_used_size += constant_table->data_write_ptr - constant_table->data + data_size;
+	constant_table->data_used_size += data_size;
+
+	if (constant_table->data_write_ptr != data) {
+		memcpy(HSC_PTR_ADD(constant_table->data, entry->start_idx), data, data_size);
+		F32 v = *(F32*)HSC_PTR_ADD(constant_table->data, entry->start_idx);
+	}
 
 	return (HscConstantId) { .idx_plus_one = new_entry_idx + 1 };
 }
@@ -1133,7 +1167,7 @@ NUM_END:
 	}
 
 	HscTokenValue token_value;
-	token_value.constant_id = hsc_constant_table_deduplicate(&astgen->constant_table, astgen, data_type, data);
+	token_value.constant_id = hsc_constant_table_deduplicate_basic(&astgen->constant_table, astgen, data_type, data);
 	hsc_astgen_add_token_value(astgen, token_value);
 
 	*token_out = token;
@@ -1807,7 +1841,7 @@ END_ARG_COUNT: {}
 				break;
 		}
 		if (componments_count) {
-			hsc_constant_table_deduplicate_start(&astgen->constant_table, astgen, return_data_type);
+			hsc_constant_table_deduplicate_composite_start(&astgen->constant_table, astgen, return_data_type);
 			HscExpr* arg_expr = call_args_expr;
 			U32 args_count = ((U8*)call_args_expr)[1];
 			U8* next_arg_expr_rel_indices = &((U8*)call_args_expr)[2];
@@ -1816,10 +1850,10 @@ END_ARG_COUNT: {}
 				HscConstantId constant_id = { .idx_plus_one = arg_expr->constant.id };
 				U32 repeat_count = is_single ? componments_count : 1;
 				for (U32 j = 0; j < repeat_count; j += 1) {
-					hsc_constant_table_deduplicate_add_constant(&astgen->constant_table, constant_id);
+					hsc_constant_table_deduplicate_composite_add(&astgen->constant_table, constant_id);
 				}
 			}
-			HscConstantId constant_id = hsc_constant_table_deduplicate_end(&astgen->constant_table);
+			HscConstantId constant_id = hsc_constant_table_deduplicate_composite_end(&astgen->constant_table);
 
 			//
 			// recycle the function expression and change it into a constant
@@ -2101,8 +2135,7 @@ void hsc_tokens_print(HscAstGen* astgen, FILE* f) {
 			case HSC_TOKEN_LIT_F64: data_type = HSC_DATA_TYPE_F64; goto PRINT_LIT;
 PRINT_LIT:
 				value = astgen->token_values[token_value_idx];
-				HscConstant constant = hsc_constant_table_get(&astgen->constant_table, value.constant_id);
-				hsc_data_type_print(astgen, data_type, constant.data, stdout);
+				hsc_constant_print(astgen, value.constant_id, stdout);
 				fprintf(f, "\n");
 				token_value_idx += 1;
 				break;
@@ -2133,8 +2166,7 @@ void hsc_astgen_print_expr(HscAstGen* astgen, HscExpr* expr, U32 indent, bool is
 		case HSC_EXPR_TYPE_CONSTANT: {
 			fprintf(f, "EXPR_CONSTANT ");
 			HscConstantId constant_id = { .idx_plus_one = expr->constant.id };
-			HscConstant constant = hsc_constant_table_get(&astgen->constant_table, constant_id);
-			hsc_data_type_print(astgen, expr->data_type, constant.data, f);
+			hsc_constant_print(astgen, constant_id, stdout);
 			break;
 		};
 		case HSC_EXPR_TYPE_STMT_BLOCK: {
@@ -2426,7 +2458,8 @@ void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 	for (U32 idx = 0; idx < constant_table->entries_count; idx += 1) {
 		HscConstantEntry* entry = &constant_table->entries[idx];
 		fprintf(f, "Constant(c%u): ", idx);
-		hsc_data_type_print(astgen, entry->data_type, HSC_PTR_ADD(constant_table->data, entry->start_idx), f);
+		HscConstantId constant_id = { .idx_plus_one = idx + 1 };
+		hsc_constant_print(astgen, constant_id, stdout);
 		fprintf(f, "\n");
 	}
 
@@ -2483,6 +2516,610 @@ void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 // ===========================================
 //
 //
+// SPIR-V
+//
+//
+// ===========================================
+
+void hsc_spirv_function_type_table_init(HscSpirvFunctionTypeTable* table) {
+	U32 cap = 8192;
+	table->data_types = HSC_ALLOC_ARRAY(HscDataType, cap);
+	HSC_ASSERT(table->data_types, "out of memory");
+	table->data_types_cap = cap;
+	table->entries = HSC_ALLOC_ARRAY(HscSpirvFunctionTypeEntry, cap);
+	HSC_ASSERT(table->entries, "out of memory");
+	table->entries_cap = cap;
+}
+
+U32 hsc_spirv_function_type_table_deduplicate(HscCompiler* c, HscSpirvFunctionTypeTable* table, HscFunction* function) {
+	HSC_DEBUG_ASSERT(function->shader_stage == HSC_FUNCTION_SHADER_STAGE_NONE, "internal error: shader stage functions do not belong in the function type table");
+	//
+	// TODO make this a hash table look for speeeds
+	for (U32 i = 0; i < table->entries_count; i += 1) {
+		HscSpirvFunctionTypeEntry* entry = &table->entries[i];
+		U32 function_data_types_count = function->params_count + 1;
+		if (entry->data_types_count != function_data_types_count) {
+			continue;
+		}
+
+		HscDataType* data_types = &table->data_types[entry->data_types_start_idx];
+		if (data_types[0] != function->return_data_type) {
+			continue;
+		}
+
+		bool is_match = true;
+		HscFunctionParam* params = &c->astgen.function_params[function->params_start_idx];
+		for (U32 j = 0; j < entry->data_types_count; j += 1) {
+			if (data_types[j + 1] != params[j].data_type) {
+				is_match = false;
+				break;
+			}
+		}
+
+		if (is_match) {
+			return entry->spirv_id;
+		}
+	}
+
+	HSC_ASSERT_ARRAY_BOUNDS(table->entries_count, table->entries_cap);
+	HscSpirvFunctionTypeEntry* entry = &table->entries[table->entries_count];
+	table->entries_count += 1;
+
+	entry->data_types_start_idx = table->data_types_count;
+	entry->data_types_count = function->params_count + 1;
+	entry->spirv_id = c->spirv.next_id;
+
+	HSC_ASSERT_ARRAY_BOUNDS(table->data_types_count + function->params_count, table->data_types_cap);
+	HscDataType* data_types = &table->data_types[table->data_types_count];
+	table->data_types_count += entry->data_types_count;
+
+	data_types[0] = function->return_data_type;
+	HscFunctionParam* params = &c->astgen.function_params[function->params_start_idx];
+	for (U32 j = 0; j < entry->data_types_count; j += 1) {
+		data_types[j + 1] = params[j].data_type;
+	}
+
+	return entry->spirv_id;
+}
+
+void hsc_spirv_init(HscCompiler* c) {
+	U32 words_cap = 8192;
+
+	hsc_spirv_function_type_table_init(&c->spirv.function_type_table);
+
+	c->spirv.next_id += 1;
+
+	c->spirv.out_capabilities = HSC_ALLOC_ARRAY(U32, words_cap);
+	HSC_ASSERT(c->spirv.out_capabilities, "out of memory");
+	c->spirv.out_capabilities_cap = words_cap;
+
+	c->spirv.out_entry_points = HSC_ALLOC_ARRAY(U32, words_cap);
+	HSC_ASSERT(c->spirv.out_entry_points, "out of memory");
+	c->spirv.out_entry_points_cap = words_cap;
+
+	c->spirv.out_debug_info = HSC_ALLOC_ARRAY(U32, words_cap);
+	HSC_ASSERT(c->spirv.out_debug_info, "out of memory");
+	c->spirv.out_debug_info_cap = words_cap;
+
+	c->spirv.out_annotations = HSC_ALLOC_ARRAY(U32, words_cap);
+	HSC_ASSERT(c->spirv.out_annotations, "out of memory");
+	c->spirv.out_annotations_cap = words_cap;
+
+	c->spirv.out_types_variables_constants = HSC_ALLOC_ARRAY(U32, words_cap);
+	HSC_ASSERT(c->spirv.out_types_variables_constants, "out of memory");
+	c->spirv.out_types_variables_constants_cap = words_cap;
+
+	c->spirv.out_functions = HSC_ALLOC_ARRAY(U32, words_cap);
+	HSC_ASSERT(c->spirv.out_functions, "out of memory");
+	c->spirv.out_functions_cap = words_cap;
+}
+
+U32 hsc_spirv_resolve_type_id(HscCompiler* c, HscDataType data_type) {
+	if (data_type < HSC_DATA_TYPE_MATRIX_END) {
+		return data_type + 1;
+	} else {
+		HSC_ABORT("unhandled data type '%u'", data_type);
+	}
+}
+
+void hsc_spirv_instr_start(HscCompiler* c, HscSpirvOp op) {
+	HSC_DEBUG_ASSERT(c->spirv.instr_op == HSC_SPIRV_OP_NO_OP, "internal error: hsc_spirv_instr_end has not be called before a new instruction was started");
+	c->spirv.instr_op = op;
+	c->spirv.instr_operands_count = 0;
+}
+
+void hsc_spirv_instr_add_operand(HscCompiler* c, U32 word) {
+	HSC_DEBUG_ASSERT(c->spirv.instr_op != HSC_SPIRV_OP_NO_OP, "internal error: hsc_spirv_instr_start has not been called when making an instruction");
+	HSC_ASSERT_ARRAY_BOUNDS(c->spirv.instr_operands_count, HSC_SPIRV_INSTR_OPERANDS_CAP);
+	c->spirv.instr_operands[c->spirv.instr_operands_count] = word;
+	c->spirv.instr_operands_count += 1;
+}
+
+void hsc_spirv_instr_add_converted_operand(HscCompiler* c, HscIROperand ir_operand) {
+	U32 word;
+	switch (ir_operand & 0xff) {
+		case HSC_IR_OPERAND_VALUE:
+			HSC_ABORT("TODO\n");
+			break;
+		case HSC_IR_OPERAND_CONSTANT:
+			word = c->spirv.constant_base_id + HSC_IR_OPERAND_CONSTANT_ID(ir_operand).idx_plus_one - 1;
+			break;
+		default:
+			word = hsc_spirv_resolve_type_id(c, ir_operand);
+			break;
+	}
+
+	hsc_spirv_instr_add_operand(c, word);
+}
+
+void hsc_spirv_instr_add_result_operand(HscCompiler* c) {
+	hsc_spirv_instr_add_operand(c, c->spirv.next_id);
+	c->spirv.next_id += 1;
+}
+
+void hsc_spirv_instr_end(HscCompiler* c) {
+	HSC_DEBUG_ASSERT(c->spirv.instr_op != HSC_SPIRV_OP_NO_OP, "internal error: hsc_spirv_instr_start has not been called when making an instruction");
+
+	U32* out;
+	U32* count_ptr;
+	switch (c->spirv.instr_op) {
+		case HSC_SPIRV_OP_CAPABILITY:
+			HSC_DEBUG_ASSERT(c->spirv.out_capabilities_count < c->spirv.out_capabilities_cap, "internal error: spirv types variables constants array has been filled up");
+			out = &c->spirv.out_capabilities[c->spirv.out_capabilities_count];
+			count_ptr = &c->spirv.out_capabilities_count;
+			break;
+		case HSC_SPIRV_OP_MEMORY_MODEL:
+		case HSC_SPIRV_OP_ENTRY_POINT:
+		case HSC_SPIRV_OP_EXECUTION_MODE:
+			HSC_DEBUG_ASSERT(c->spirv.out_entry_points_count < c->spirv.out_entry_points_cap, "internal error: spirv types variables constants array has been filled up");
+			out = &c->spirv.out_entry_points[c->spirv.out_entry_points_count];
+			count_ptr = &c->spirv.out_entry_points_count;
+			break;
+		case HSC_SPIRV_OP_DECORATE:
+			HSC_DEBUG_ASSERT(c->spirv.out_debug_info_count < c->spirv.out_debug_info_cap, "internal error: spirv types variables constants array has been filled up");
+			out = &c->spirv.out_debug_info[c->spirv.out_debug_info_count];
+			count_ptr = &c->spirv.out_debug_info_count;
+			break;
+		case HSC_SPIRV_OP_TYPE_VOID:
+		case HSC_SPIRV_OP_TYPE_BOOL:
+		case HSC_SPIRV_OP_TYPE_INT:
+		case HSC_SPIRV_OP_TYPE_FLOAT:
+		case HSC_SPIRV_OP_TYPE_VECTOR:
+		case HSC_SPIRV_OP_TYPE_POINTER:
+		case HSC_SPIRV_OP_TYPE_FUNCTION:
+		case HSC_SPIRV_OP_CONSTANT_TRUE:
+		case HSC_SPIRV_OP_CONSTANT_FALSE:
+		case HSC_SPIRV_OP_CONSTANT:
+		case HSC_SPIRV_OP_CONSTANT_COMPOSITE:
+		case HSC_SPIRV_OP_VARIABLE:
+			HSC_DEBUG_ASSERT(c->spirv.out_types_variables_constants_count < c->spirv.out_types_variables_constants_cap, "internal error: spirv types variables constants array has been filled up");
+			out = &c->spirv.out_types_variables_constants[c->spirv.out_types_variables_constants_count];
+			count_ptr = &c->spirv.out_types_variables_constants_count;
+			break;
+		case HSC_SPIRV_OP_FUNCTION:
+		case HSC_SPIRV_OP_FUNCTION_PARAMETER:
+		case HSC_SPIRV_OP_FUNCTION_END:
+		case HSC_SPIRV_OP_COMPOSITE_CONSTRUCT:
+		case HSC_SPIRV_OP_LABEL:
+		case HSC_SPIRV_OP_RETURN:
+		case HSC_SPIRV_OP_RETURN_VALUE:
+		case HSC_SPIRV_OP_STORE:
+			HSC_DEBUG_ASSERT(c->spirv.out_functions_count < c->spirv.out_functions_cap, "internal error: spirv types variables constants array has been filled up");
+			out = &c->spirv.out_functions[c->spirv.out_functions_count];
+			count_ptr = &c->spirv.out_functions_count;
+			break;
+		default:
+			HSC_ABORT("unhandled spirv instruction op");
+	}
+	*count_ptr += c->spirv.instr_operands_count + 1;
+
+	out[0] = (((c->spirv.instr_operands_count + 1) & 0xffff) << 16) | (c->spirv.instr_op & 0xffff);
+	for (U32 i = 0; i < c->spirv.instr_operands_count; i += 1) {
+		out[i + 1] = c->spirv.instr_operands[i];
+	}
+
+	printf("INSTRUCTION(%u): ", c->spirv.instr_op);
+	for (U32 i = 1; i < c->spirv.instr_operands_count + 1; i += 1) {
+		printf("%u, ", out[i]);
+	}
+	printf("\n");
+
+	c->spirv.instr_op = HSC_SPIRV_OP_NO_OP;
+}
+
+void hsc_spirv_generate_pointer_type_input(HscCompiler* c, HscDataType data_type) {
+	HSC_DEBUG_ASSERT(data_type < HSC_DATA_TYPE_MATRIX_END, "internal error: expected instrinic type but got '%u'", data_type);
+	if (c->spirv.pointer_type_inputs_made_bitset[data_type / 64] & (1 << (data_type % 64))) {
+		return;
+	}
+
+	c->spirv.pointer_type_inputs_made_bitset[data_type / 64] |= (1 << (data_type % 64));
+	U32 id = c->spirv.pointer_type_inputs_base_id + data_type;
+
+	hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_POINTER);
+	hsc_spirv_instr_add_result_operand(c);
+	hsc_spirv_instr_add_operand(c, HSC_SPIRV_STORAGE_CLASS_INPUT);
+	hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, data_type));
+	hsc_spirv_instr_end(c);
+}
+
+void hsc_spirv_generate_pointer_type_output(HscCompiler* c, HscDataType data_type) {
+	HSC_DEBUG_ASSERT(data_type < HSC_DATA_TYPE_MATRIX_END, "internal error: expected instrinic type but got '%u'", data_type);
+	if (c->spirv.pointer_type_outputs_made_bitset[data_type / 64] & (1 << (data_type % 64))) {
+		return;
+	}
+
+	c->spirv.pointer_type_outputs_made_bitset[data_type / 64] |= (1 << (data_type % 64));
+	U32 id = c->spirv.pointer_type_outputs_base_id + data_type;
+
+	hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_POINTER);
+	hsc_spirv_instr_add_operand(c, id);
+	hsc_spirv_instr_add_operand(c, HSC_SPIRV_STORAGE_CLASS_OUTPUT);
+	hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, data_type));
+	hsc_spirv_instr_end(c);
+}
+
+enum {
+	HSC_SPIRV_FUNCTION_CTRL_NONE         = 0x0,
+	HSC_SPIRV_FUNCTION_CTRL_INLINE       = 0x1,
+	HSC_SPIRV_FUNCTION_CTRL_DONT_INLINE  = 0x2,
+	HSC_SPIRV_FUNCTION_CTRL_PURE         = 0x4,
+	HSC_SPIRV_FUNCTION_CTRL_CONST        = 0x8,
+};
+
+U32 hsc_spirv_generate_function_type(HscCompiler* c, HscFunction* function) {
+	if (function->shader_stage != HSC_FUNCTION_SHADER_STAGE_NONE) {
+		return c->spirv.shader_stage_function_type_spirv_id;
+	}
+
+	U32 function_type_id = hsc_spirv_function_type_table_deduplicate(c, &c->spirv.function_type_table, function);
+
+	if (function_type_id == c->spirv.next_id) {
+		hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_FUNCTION);
+		hsc_spirv_instr_add_result_operand(c);
+		hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, function->return_data_type));
+		HscFunctionParam* params = &c->astgen.function_params[function->params_start_idx];
+		for (U32 i = 0; i < function->params_count; i += 1) {
+			hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, params[i].data_type));
+		}
+		hsc_spirv_instr_end(c);
+	}
+
+	return function_type_id;
+}
+
+void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
+	HscFunction* function = &c->astgen.functions[function_idx];
+	HscIRFunction* ir_function = &c->ir.functions[function_idx];
+
+	HscDataType return_data_type = function->return_data_type;
+	switch (function->shader_stage) {
+		case HSC_FUNCTION_SHADER_STAGE_VERTEX:
+			return_data_type = HSC_DATA_TYPE_VOID;
+			break;
+		case HSC_FUNCTION_SHADER_STAGE_FRAGMENT:
+			return_data_type = HSC_DATA_TYPE_VOID;
+			break;
+		case HSC_FUNCTION_SHADER_STAGE_NONE:
+			break;
+		default: HSC_ABORT("unhandle shader stage");
+	}
+
+	U32 function_type_id = hsc_spirv_generate_function_type(c, function);
+
+	U32 function_spirv_id = c->spirv.next_id;
+	hsc_spirv_instr_start(c, HSC_SPIRV_OP_FUNCTION);
+	hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, return_data_type));
+	hsc_spirv_instr_add_result_operand(c);
+	hsc_spirv_instr_add_operand(c, HSC_SPIRV_FUNCTION_CTRL_NONE);
+	hsc_spirv_instr_add_operand(c, function_type_id);
+	hsc_spirv_instr_end(c);
+
+	U32 frag_color_spirv_id;
+	switch (function->shader_stage) {
+		case HSC_FUNCTION_SHADER_STAGE_VERTEX:
+			break;
+		case HSC_FUNCTION_SHADER_STAGE_FRAGMENT:
+			hsc_spirv_generate_pointer_type_output(c, HSC_DATA_TYPE_VEC4(HSC_DATA_TYPE_F32));
+
+			frag_color_spirv_id = c->spirv.next_id;
+			hsc_spirv_instr_start(c, HSC_SPIRV_OP_VARIABLE);
+			hsc_spirv_instr_add_operand(c, c->spirv.pointer_type_outputs_base_id + HSC_DATA_TYPE_VEC4(HSC_DATA_TYPE_F32));
+			hsc_spirv_instr_add_result_operand(c);
+			hsc_spirv_instr_add_operand(c, HSC_SPIRV_STORAGE_CLASS_OUTPUT);
+			hsc_spirv_instr_end(c);
+
+			hsc_spirv_instr_start(c, HSC_SPIRV_OP_DECORATE);
+			hsc_spirv_instr_add_operand(c, frag_color_spirv_id);
+			hsc_spirv_instr_add_operand(c, HSC_SPRIV_DECORATION_LOCATION);
+			hsc_spirv_instr_add_operand(c, 0);
+			hsc_spirv_instr_end(c);
+
+			hsc_spirv_instr_start(c, HSC_SPIRV_OP_ENTRY_POINT);
+			hsc_spirv_instr_add_operand(c, HSC_SPIRV_EXECUTION_MODEL_FRAGMENT);
+			hsc_spirv_instr_add_operand(c, function_spirv_id);
+			HscString name = hsc_string_table_get(&c->astgen.string_table, function->identifier_string_id);
+			for (U32 i = 0; i < name.size; i += 4) {
+				U32 word = 0;
+				word |= name.data[i] << 0;
+				if (i + 1 < name.size) word |= name.data[i + 1] << 8;
+				if (i + 2 < name.size) word |= name.data[i + 2] << 16;
+				if (i + 3 < name.size) word |= name.data[i + 3] << 24;
+				hsc_spirv_instr_add_operand(c, word);
+			}
+			if (name.size % 4 == 0) {
+				hsc_spirv_instr_add_operand(c, 0);
+			}
+			hsc_spirv_instr_add_operand(c, frag_color_spirv_id);
+			hsc_spirv_instr_end(c);
+
+			hsc_spirv_instr_start(c, HSC_SPIRV_OP_EXECUTION_MODE);
+			hsc_spirv_instr_add_operand(c, function_spirv_id);
+			hsc_spirv_instr_add_operand(c, HSC_SPIRV_EXECUTION_MODE_ORIGIN_LOWER_LEFT);
+			hsc_spirv_instr_end(c);
+
+			break;
+		case HSC_FUNCTION_SHADER_STAGE_NONE:
+			break;
+		default: HSC_ABORT("unhandle shader stage");
+	}
+
+	for (U32 basic_block_idx = ir_function->basic_blocks_start_idx; basic_block_idx < ir_function->basic_blocks_start_idx + (U32)ir_function->basic_blocks_count; basic_block_idx += 1) {
+		HscIRBasicBlock* basic_block = &c->ir.basic_blocks[basic_block_idx];
+
+		hsc_spirv_instr_start(c, HSC_SPIRV_OP_LABEL);
+		hsc_spirv_instr_add_result_operand(c);
+		hsc_spirv_instr_end(c);
+
+		for (U32 instruction_idx = ir_function->instructions_start_idx; instruction_idx < ir_function->instructions_start_idx + (U32)ir_function->instructions_count; instruction_idx += 1) {
+			HscIRInstr* instruction = &c->ir.instructions[instruction_idx];
+			HscIROperand* operands = &c->ir.operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+			switch (instruction->op_code) {
+				case HSC_IR_OP_CODE_COMPOSITE_INIT:
+					hsc_spirv_instr_start(c, HSC_SPIRV_OP_COMPOSITE_CONSTRUCT);
+					U32 return_value_idx = HSC_IR_OPERAND_VALUE_IDX(operands[0]);
+					HscIRValue* return_value = &c->ir.values[ir_function->values_start_idx + return_value_idx];
+
+					hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, return_value->data_type));
+					hsc_spirv_instr_add_result_operand(c);
+
+					for (U32 i = 1; i < instruction->operands_count; i += 1) {
+						hsc_spirv_instr_add_converted_operand(c, operands[i]);
+					}
+
+					hsc_spirv_instr_end(c);
+					break;
+				case HSC_IR_OP_CODE_FUNCTION_RETURN: {
+					if (function->shader_stage == HSC_FUNCTION_SHADER_STAGE_FRAGMENT) {
+						hsc_spirv_instr_start(c, HSC_SPIRV_OP_STORE);
+						hsc_spirv_instr_add_operand(c, frag_color_spirv_id);
+						hsc_spirv_instr_add_converted_operand(c, operands[0]);
+						hsc_spirv_instr_end(c);
+					}
+
+					if (return_data_type == HSC_DATA_TYPE_VOID) {
+						hsc_spirv_instr_start(c, HSC_SPIRV_OP_RETURN);
+						hsc_spirv_instr_end(c);
+					} else {
+						hsc_spirv_instr_start(c, HSC_SPIRV_OP_RETURN_VALUE);
+						hsc_spirv_instr_add_converted_operand(c, operands[0]);
+						hsc_spirv_instr_end(c);
+					}
+
+					break;
+				};
+				default:
+					HSC_ABORT("unhandled instruction '%u'", instruction->op_code);
+			}
+		}
+	}
+
+	hsc_spirv_instr_start(c, HSC_SPIRV_OP_FUNCTION_END);
+	hsc_spirv_instr_end(c);
+}
+
+void hsc_spirv_generate_basic_types(HscCompiler* c) {
+	hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_VOID);
+	hsc_spirv_instr_add_result_operand(c);
+	hsc_spirv_instr_end(c);
+
+	hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_BOOL);
+	hsc_spirv_instr_add_result_operand(c);
+	hsc_spirv_instr_end(c);
+
+	for (U32 i = 3; i < 7; i += 1) {
+		HscDataType data_type = c->spirv.next_id - 1;
+		if (!(c->available_basic_types & (1 << data_type))) {
+			c->spirv.next_id += 1;
+			continue;
+		}
+
+		hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_INT);
+		hsc_spirv_instr_add_result_operand(c);
+		hsc_spirv_instr_add_operand(c, 1 << i);
+		hsc_spirv_instr_add_operand(c, 0);
+		hsc_spirv_instr_end(c);
+	}
+
+	for (U32 i = 3; i < 7; i += 1) {
+		HscDataType data_type = c->spirv.next_id - 1;
+		if (!(c->available_basic_types & (1 << data_type))) {
+			c->spirv.next_id += 1;
+			continue;
+		}
+
+		hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_INT);
+		hsc_spirv_instr_add_result_operand(c);
+		hsc_spirv_instr_add_operand(c, 1 << i);
+		hsc_spirv_instr_add_operand(c, 1);
+		hsc_spirv_instr_end(c);
+	}
+
+	for (U32 i = 4; i < 7; i += 1) {
+		HscDataType data_type = c->spirv.next_id - 1;
+		if (!(c->available_basic_types & (1 << data_type))) {
+			c->spirv.next_id += 1;
+			continue;
+		}
+
+		hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_FLOAT);
+		hsc_spirv_instr_add_result_operand(c);
+		hsc_spirv_instr_add_operand(c, 1 << i);
+		hsc_spirv_instr_end(c);
+	}
+
+	U32 basic_type_padding = HSC_DATA_TYPE_VEC2_START - HSC_DATA_TYPE_BASIC_END;
+	for (U32 i = 0; i < basic_type_padding; i += 1) {
+		c->spirv.next_id += 1;
+	}
+
+	for (U32 j = 2; j < 5; j += 1) {
+		c->spirv.next_id += 1; // skip HSC_DATA_TYPE_VOID
+		for (U32 i = HSC_DATA_TYPE_BOOL; i < HSC_DATA_TYPE_BASIC_END; i += 1) {
+			HscDataType data_type = c->spirv.next_id - 1;
+			HscDataType scalar_data_type = HSC_DATA_TYPE_SCALAR(data_type);
+			if (!(c->available_basic_types & (1 << scalar_data_type))) {
+				c->spirv.next_id += 1;
+				continue;
+			}
+
+			hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_VECTOR);
+			hsc_spirv_instr_add_result_operand(c);
+			hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, i));
+			hsc_spirv_instr_add_operand(c, j);
+			hsc_spirv_instr_end(c);
+		}
+
+		for (U32 i = 0; i < basic_type_padding; i += 1) {
+			c->spirv.next_id += 1;
+		}
+	}
+
+	c->spirv.pointer_type_inputs_base_id = c->spirv.next_id;
+	c->spirv.next_id += HSC_DATA_TYPE_MATRIX_END;
+
+	c->spirv.pointer_type_outputs_base_id = c->spirv.next_id;
+	c->spirv.next_id += HSC_DATA_TYPE_MATRIX_END;
+}
+
+void hsc_spirv_generate_constants(HscCompiler* c) {
+	HscConstantTable* constant_table = &c->astgen.constant_table;
+	c->spirv.constant_base_id = c->spirv.next_id;
+	for (U32 idx = 0; idx < constant_table->entries_count; idx += 1) {
+		HscConstantEntry* entry = &constant_table->entries[idx];
+		if (entry->data_type == HSC_DATA_TYPE_BOOL) {
+			bool is_true = c->astgen.true_constant_id.idx_plus_one == idx + 1;
+			hsc_spirv_instr_start(c, is_true ? HSC_SPIRV_OP_CONSTANT_TRUE : HSC_SPIRV_OP_CONSTANT_FALSE);
+			hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, HSC_DATA_TYPE_BOOL));
+			hsc_spirv_instr_add_result_operand(c);
+			hsc_spirv_instr_end(c);
+		} else if (HSC_DATA_TYPE_IS_BASIC(entry->data_type)) {
+			hsc_spirv_instr_start(c, HSC_SPIRV_OP_CONSTANT);
+			hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, entry->data_type));
+			hsc_spirv_instr_add_result_operand(c);
+
+			U32* data = HSC_PTR_ADD(constant_table->data, entry->start_idx);
+			switch (entry->data_type) {
+				case HSC_DATA_TYPE_U64:
+				case HSC_DATA_TYPE_S64:
+				case HSC_DATA_TYPE_F64:
+					hsc_spirv_instr_add_operand(c, data[0]);
+					hsc_spirv_instr_add_operand(c, data[1]);
+					break;
+				default:
+					hsc_spirv_instr_add_operand(c, data[0]);
+					break;
+			}
+
+			hsc_spirv_instr_end(c);
+		} else {
+			hsc_spirv_instr_start(c, HSC_SPIRV_OP_CONSTANT_COMPOSITE);
+			hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, entry->data_type));
+			hsc_spirv_instr_add_result_operand(c);
+
+			HscConstantId* constants = HSC_PTR_ADD(constant_table->data, entry->start_idx);
+			for (U32 i = 0; i < entry->size / sizeof(HscConstantId); i += 1) {
+				hsc_spirv_instr_add_operand(c, c->spirv.constant_base_id + (constants[i].idx_plus_one - 1));
+			}
+
+			hsc_spirv_instr_end(c);
+		}
+	}
+}
+
+void hsc_spirv_write_binary_many(FILE* f, U32* words, U32 words_count, char* path) {
+	U32 size = words_count * sizeof(U32);
+	U32 written_size = fwrite(words, 1, size, f);
+	HSC_ASSERT(size == written_size, "error writing file '%s'", path);
+}
+
+void hsc_spirv_write_binary(FILE* f, U32 word, char* path) {
+	U32 written_size = fwrite(&word, 1, sizeof(U32), f);
+	HSC_ASSERT(sizeof(U32) == written_size, "error writing file '%s'", path);
+}
+
+void hsc_spirv_generate_binary(HscCompiler* c) {
+	char* path = "test.spv";
+	FILE* f = fopen(path, "wb");
+	HSC_ASSERT(f, "error opening file for write '%s'");
+
+	U32 magic_number = 0x07230203;
+	hsc_spirv_write_binary(f, magic_number, path);
+
+	U32 major_version = 1;
+	U32 minor_version = 3;
+	U32 version = (major_version << 16) | (minor_version << 8);
+	hsc_spirv_write_binary(f, version, path);
+
+	U32 generator_number = 0; // TODO: when we are feeling ballsy enough, register with the khronos folks and get a number for the lang.
+	hsc_spirv_write_binary(f, generator_number, path);
+
+	hsc_spirv_write_binary(f, c->spirv.next_id, path);
+
+	U32 reserved_instruction_schema = 0;
+	hsc_spirv_write_binary(f, reserved_instruction_schema, path);
+
+	hsc_spirv_write_binary_many(f, c->spirv.out_capabilities, c->spirv.out_capabilities_count, path);
+	hsc_spirv_write_binary_many(f, c->spirv.out_entry_points, c->spirv.out_entry_points_count, path);
+	hsc_spirv_write_binary_many(f, c->spirv.out_debug_info, c->spirv.out_debug_info_count, path);
+	hsc_spirv_write_binary_many(f, c->spirv.out_annotations, c->spirv.out_annotations_count, path);
+	hsc_spirv_write_binary_many(f, c->spirv.out_types_variables_constants, c->spirv.out_types_variables_constants_count, path);
+	hsc_spirv_write_binary_many(f, c->spirv.out_functions, c->spirv.out_functions_count, path);
+
+	fclose(f);
+}
+
+void hsc_spirv_generate(HscCompiler* c) {
+	hsc_spirv_generate_basic_types(c);
+	hsc_spirv_generate_constants(c);
+
+	{
+		c->spirv.shader_stage_function_type_spirv_id = c->spirv.next_id;
+		hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_FUNCTION);
+		hsc_spirv_instr_add_result_operand(c);
+		hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, HSC_DATA_TYPE_VOID));
+		hsc_spirv_instr_end(c);
+	}
+
+	hsc_spirv_instr_start(c, HSC_SPIRV_OP_MEMORY_MODEL);
+	hsc_spirv_instr_add_operand(c, HSC_SPIRV_ADDRESS_MODEL_LOGICAL);
+	hsc_spirv_instr_add_operand(c, HSC_SPIRV_MEMORY_MODEL_GLSL450);
+	hsc_spirv_instr_end(c);
+
+	hsc_spirv_instr_start(c, HSC_SPIRV_OP_CAPABILITY);
+	hsc_spirv_instr_add_operand(c, HSC_SPIRV_CAPABILITY_SHADER);
+	hsc_spirv_instr_end(c);
+
+	for (U32 function_idx = HSC_FUNCTION_ID_USER_START; function_idx < c->astgen.functions_count; function_idx += 1) {
+		hsc_spirv_generate_function(c, function_idx);
+	}
+
+	hsc_spirv_generate_binary(c);
+}
+
+// ===========================================
+//
+//
 // Compiler
 //
 //
@@ -2492,9 +3129,9 @@ void hsc_compiler_init(HscCompiler* compiler, HscCompilerSetup* setup) {
 	hsc_constant_table_init(&compiler->astgen.constant_table, setup->string_table_data_cap, setup->string_table_entries_cap);
 	{
 		U8 value = false;
-		compiler->astgen.false_constant_id = hsc_constant_table_deduplicate(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_BOOL, &value);
+		compiler->astgen.false_constant_id = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_BOOL, &value);
 		value = true;
-		compiler->astgen.true_constant_id = hsc_constant_table_deduplicate(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_BOOL, &value);
+		compiler->astgen.true_constant_id = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_BOOL, &value);
 	}
 
 	hsc_string_table_init(&compiler->astgen.string_table, setup->string_table_data_cap, setup->string_table_entries_cap);
@@ -2520,10 +3157,23 @@ void hsc_compiler_init(HscCompiler* compiler, HscCompilerSetup* setup) {
 		}
 	}
 
-	//hsc_opt_set_enabled(&compiler->astgen.opts, HSC_OPT_CONSTANT_FOLDING);
+	hsc_opt_set_enabled(&compiler->astgen.opts, HSC_OPT_CONSTANT_FOLDING);
 
 	hsc_astgen_init(&compiler->astgen, setup);
 	hsc_ir_init(&compiler->ir);
+	hsc_spirv_init(compiler);
+
+	compiler->available_basic_types = 0xffff;
+	compiler->available_basic_types &= ~( // remove support for these types for now, this is because they require SPIR-V capaibilities/vulkan features
+		(1 << HSC_DATA_TYPE_U8)  |
+		(1 << HSC_DATA_TYPE_S8)  |
+		(1 << HSC_DATA_TYPE_U16) |
+		(1 << HSC_DATA_TYPE_S16) |
+		(1 << HSC_DATA_TYPE_F16) |
+		(1 << HSC_DATA_TYPE_U64) |
+		(1 << HSC_DATA_TYPE_S64) |
+		(1 << HSC_DATA_TYPE_F64)
+	);
 }
 
 void hsc_compiler_compile(HscCompiler* compiler, const char* file_path) {
@@ -2549,9 +3199,12 @@ void hsc_compiler_compile(HscCompiler* compiler, const char* file_path) {
 
 	hsc_astgen_generate(&compiler->astgen);
 	hsc_ir_generate(&compiler->ir, &compiler->astgen);
+	hsc_spirv_generate(compiler);
 
+	/*
 	hsc_tokens_print(&compiler->astgen, stdout);
 	hsc_astgen_print_ast(&compiler->astgen, stdout);
 	hsc_ir_print(&compiler->ir, &compiler->astgen, stdout);
+	*/
 }
 
