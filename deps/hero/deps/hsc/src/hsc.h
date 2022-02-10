@@ -330,8 +330,6 @@ enum {
 	HSC_TOKEN_ASTERISK,
 	HSC_TOKEN_PERCENT,
 
-	HSC_TOKEN_LIT_TRUE,
-	HSC_TOKEN_LIT_FALSE,
 	HSC_TOKEN_LIT_U32,
 	HSC_TOKEN_LIT_U64,
 	HSC_TOKEN_LIT_S32,
@@ -344,6 +342,10 @@ enum {
 	//
 #define HSC_TOKEN_KEYWORDS_START HSC_TOKEN_KEYWORD_RETURN
 	HSC_TOKEN_KEYWORD_RETURN,
+	HSC_TOKEN_KEYWORD_IF,
+	HSC_TOKEN_KEYWORD_ELSE,
+	HSC_TOKEN_KEYWORD_TRUE,
+	HSC_TOKEN_KEYWORD_FALSE,
 	HSC_TOKEN_KEYWORD_VERTEX,
 	HSC_TOKEN_KEYWORD_FRAGMENT,
 	HSC_TOKEN_KEYWORD_GEOMETRY,
@@ -522,12 +524,15 @@ enum {
 typedef U8 HscExprType;
 enum {
 	HSC_EXPR_TYPE_NONE,
+
 	//
 	// binary ops
 	HSC_EXPR_TYPE_CALL,
+
 	HSC_EXPR_TYPE_CONSTANT,
 	HSC_EXPR_TYPE_FUNCTION,
 	HSC_EXPR_TYPE_CALL_ARG_LIST,
+	HSC_EXPR_TYPE_STMT_IF,
 
 	//
 	// unary ops
@@ -566,9 +571,16 @@ struct HscExpr {
 		struct {
 			U32 type: 5; // HscExprType
 			U32 is_stmt_block_entry: 1;
-			U32 stmts_count: 9;
-			U32 first_expr_rel_idx: 16;
+			U32 has_return_stmt: 1;
+			U32 stmts_count: 11;
+			U32 first_expr_rel_idx: 13;
 		} stmt_block;
+		struct {
+			U32 type: 5; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 cond_expr_rel_idx: 13;
+			U32 true_stmt_rel_idx: 13;
+		} if_;
 	};
 
 	union {
@@ -576,6 +588,11 @@ struct HscExpr {
 			U16 prev_expr_rel_idx;
 			U16 next_expr_rel_idx;
 		};
+		struct { // this is stored in the true statement of the if statement
+			U32 false_stmt_rel_idx: 16;
+			U32 true_and_false_stmts_have_return_stmt: 1;
+			U32 __unused: 15;
+		} if_aux;
 		HscDataType data_type;
 	};
 };
@@ -713,6 +730,11 @@ enum {
 	HSC_IR_OP_CODE_ACCESS_CHAIN,
 	HSC_IR_OP_CODE_FUNCTION_CALL,
 	HSC_IR_OP_CODE_FUNCTION_RETURN,
+	HSC_IR_OP_CODE_SELECTION_MERGE,
+	HSC_IR_OP_CODE_LOOP_MERGE,
+	HSC_IR_OP_CODE_BRANCH,
+	HSC_IR_OP_CODE_BRANCH_CONDITIONAL,
+	HSC_IR_OP_CODE_UNREACHBALE,
 };
 
 typedef struct HscIRConst HscIRConst;
@@ -747,13 +769,19 @@ typedef U32 HscIROperand;
 enum {
 	HSC_IR_OPERAND_VALUE = HSC_DATA_TYPE_COUNT,
 	HSC_IR_OPERAND_CONSTANT,
+	HSC_IR_OPERAND_BASIC_BLOCK,
 };
 #define HSC_IR_OPERAND_VALUE_INIT(value_idx) (((value_idx) << 8) | HSC_IR_OPERAND_VALUE)
 #define HSC_IR_OPERAND_IS_VALUE(operand) (((operand) & 0xff) == HSC_IR_OPERAND_VALUE)
 #define HSC_IR_OPERAND_VALUE_IDX(operand) ((operand) >> 8)
+
 #define HSC_IR_OPERAND_CONSTANT_INIT(constant_id) (((constant_id) << 8) | HSC_IR_OPERAND_CONSTANT)
 #define HSC_IR_OPERAND_IS_CONSTANT(operand) (((operand) & 0xff) == HSC_IR_OPERAND_CONSTANT)
 #define HSC_IR_OPERAND_CONSTANT_ID(operand) ((HscConstantId) { .idx_plus_one = ((operand) >> 8) })
+
+#define HSC_IR_OPERAND_BASIC_BLOCK_INIT(basic_block_idx) (((basic_block_idx) << 8) | HSC_IR_OPERAND_BASIC_BLOCK)
+#define HSC_IR_OPERAND_IS_BASIC_BLOCK(operand) (((operand) & 0xff) == HSC_IR_OPERAND_BASIC_BLOCK)
+#define HSC_IR_OPERAND_BASIC_BLOCK_IDX(operand) ((operand) >> 8)
 
 typedef struct HscIRFunction HscIRFunction;
 struct HscIRFunction {
@@ -830,9 +858,13 @@ enum {
 	HSC_SPIRV_OP_STORE = 62,
 	HSC_SPIRV_OP_DECORATE = 71,
 	HSC_SPIRV_OP_COMPOSITE_CONSTRUCT = 80,
+	HSC_SPIRV_OP_SELECTION_MERGE = 247,
 	HSC_SPIRV_OP_LABEL = 248,
+	HSC_SPIRV_OP_BRANCH = 249,
+	HSC_SPIRV_OP_BRANCH_CONDITIONAL = 250,
 	HSC_SPIRV_OP_RETURN = 253,
 	HSC_SPIRV_OP_RETURN_VALUE = 254,
+	HSC_SPIRV_OP_UNREACHABLE = 255,
 };
 
 enum {
@@ -866,6 +898,12 @@ enum {
 	HSC_SPIRV_EXECUTION_MODEL_GEOMETRY                = 3,
 	HSC_SPIRV_EXECUTION_MODEL_FRAGMENT                = 4,
 	HSC_SPIRV_EXECUTION_MODEL_GL_COMPUTE              = 5,
+};
+
+enum {
+	HSC_SPIRV_SELECTION_CONTROL_NONE          = 0,
+	HSC_SPIRV_SELECTION_CONTROL_FLATTERN      = 1,
+	HSC_SPIRV_SELECTION_CONTROL_DONT_FLATTERN = 2,
 };
 
 enum {
@@ -927,6 +965,7 @@ struct HscSpirv {
 	U64 pointer_type_outputs_made_bitset[4];
 
 	U32 constant_base_id;
+	U32 basic_block_base_spirv_id;
 	U32 next_id;
 	HscSpirvOp instr_op;
 	U16 instr_operands_count;

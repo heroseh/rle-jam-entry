@@ -136,8 +136,6 @@ char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_TOKEN_FORWARD_SLASH] = "/",
 	[HSC_TOKEN_ASTERISK] = "*",
 	[HSC_TOKEN_PERCENT] = "%",
-	[HSC_TOKEN_LIT_TRUE] = "true",
-	[HSC_TOKEN_LIT_FALSE] = "false",
 	[HSC_TOKEN_LIT_U32] = "U32",
 	[HSC_TOKEN_LIT_U64] = "U64",
 	[HSC_TOKEN_LIT_S32] = "S32",
@@ -145,6 +143,10 @@ char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_TOKEN_LIT_F32] = "F32",
 	[HSC_TOKEN_LIT_F64] = "F64",
 	[HSC_TOKEN_KEYWORD_RETURN] = "return",
+	[HSC_TOKEN_KEYWORD_IF] = "if",
+	[HSC_TOKEN_KEYWORD_ELSE] = "else",
+	[HSC_TOKEN_KEYWORD_TRUE] = "true",
+	[HSC_TOKEN_KEYWORD_FALSE] = "false",
 	[HSC_TOKEN_KEYWORD_VERTEX] = "vertex",
 	[HSC_TOKEN_KEYWORD_FRAGMENT] = "fragment",
 	[HSC_TOKEN_KEYWORD_GEOMETRY] = "geometry",
@@ -456,6 +458,10 @@ void hsc_constant_print(HscAstGen* astgen, HscConstantId constant_id, FILE* f) {
 	} else {
 		HSC_ABORT("unhandle type '%u'", constant.data_type);
 	}
+}
+
+bool hsc_data_type_is_condition(HscAstGen* astgen, HscDataType data_type) {
+	return HSC_DATA_TYPE_BOOL <= data_type && data_type < HSC_DATA_TYPE_BASIC_END;
 }
 
 U32 hsc_data_type_composite_fields_count(HscAstGen* astgen, HscDataType data_type) {
@@ -1138,16 +1144,19 @@ NUM_END:
 				if (s64 > S32_MAX || s64 < S32_MIN) {
 					token = HSC_TOKEN_LIT_S64;
 				}
-			} else if (u64 > S32_MAX) {
-				if (radix != 10 && u64 <= U32_MAX) {
-					token = HSC_TOKEN_LIT_U32;
-				} else if (u64 <= S64_MAX) {
-					token = HSC_TOKEN_LIT_S64;
-				} else if (radix != 10) {
-					token = HSC_TOKEN_LIT_U64;
-				} else {
-					hsc_astgen_token_error_1(astgen, "integer literal is too large and will overflow a S64 integer, consider using 'u' suffix to promote to an unsigned type. e.g. 1000u");
+			} else {
+				if (u64 > S32_MAX) {
+					if (radix != 10 && u64 <= U32_MAX) {
+						token = HSC_TOKEN_LIT_U32;
+					} else if (u64 <= S64_MAX) {
+						token = HSC_TOKEN_LIT_S64;
+					} else if (radix != 10) {
+						token = HSC_TOKEN_LIT_U64;
+					} else {
+						hsc_astgen_token_error_1(astgen, "integer literal is too large and will overflow a S64 integer, consider using 'u' suffix to promote to an unsigned type. e.g. 1000u");
+					}
 				}
+				s64 = u64;
 			}
 			break;
 	}
@@ -1479,21 +1488,23 @@ HscExpr* hsc_astgen_alloc_expr_many(HscAstGen* astgen, U32 amount) {
 HscExpr* hsc_astgen_generate_unary_expr(HscAstGen* astgen) {
 	HscToken token = hsc_token_peek(astgen);
 	switch (token) {
-		case HSC_TOKEN_LIT_TRUE:
-		case HSC_TOKEN_LIT_FALSE:
+		case HSC_TOKEN_KEYWORD_TRUE:
+		case HSC_TOKEN_KEYWORD_FALSE:
 		case HSC_TOKEN_LIT_U32:
 		case HSC_TOKEN_LIT_U64:
+		case HSC_TOKEN_LIT_S32:
+		case HSC_TOKEN_LIT_S64:
 		case HSC_TOKEN_LIT_F32:
 		case HSC_TOKEN_LIT_F64: {
 			HscDataType data_type;
 			HscConstantId constant_id;
 			HscTokenValue value;
 			switch (token) {
-				case HSC_TOKEN_LIT_TRUE:
+				case HSC_TOKEN_KEYWORD_TRUE:
 					data_type = HSC_DATA_TYPE_BOOL;
 					constant_id = astgen->true_constant_id;
 					break;
-				case HSC_TOKEN_LIT_FALSE:
+				case HSC_TOKEN_KEYWORD_FALSE:
 					data_type = HSC_DATA_TYPE_BOOL;
 					constant_id = astgen->false_constant_id;
 					break;
@@ -1541,7 +1552,7 @@ HscExpr* hsc_astgen_generate_unary_expr(HscAstGen* astgen) {
 			hsc_astgen_error_1(astgen, "undeclared identifier '%.*s'", (int)string.size, string.data);
 		};
 		default:
-			hsc_astgen_error_1(astgen, "expected an expression here");
+			hsc_astgen_error_1(astgen, "expected an expression here but got '%s'", hsc_token_strings[token]);
 	}
 }
 
@@ -1823,7 +1834,6 @@ END_ARG_COUNT: {}
 	}
 
 	hsc_astgen_check_function_args_and_resolve_intrinsic_overload(astgen, &function_id, call_args_expr, args_count, intrinsic_function_token_idx);
-	hsc_token_next(astgen);
 
 	HscDataType return_data_type = astgen->functions[function_id.idx_plus_one - 1].return_data_type;
 	return_data_type = hsc_data_type_resolve_generic(astgen, return_data_type);
@@ -1920,6 +1930,25 @@ HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 	}
 }
 
+void hsc_astgen_ensure_semicolon(HscAstGen* astgen) {
+	HscToken token = hsc_token_peek(astgen);
+	if (token != HSC_TOKEN_SEMICOLON) {
+		hsc_astgen_error_1(astgen, "missing ';' to end the statement");
+	}
+	hsc_token_next(astgen);
+}
+
+bool hsc_stmt_has_return(HscExpr* stmt) {
+	if (stmt->type == HSC_EXPR_TYPE_STMT_RETURN) {
+		return true;
+	} else if (stmt->type == HSC_EXPR_TYPE_STMT_BLOCK && stmt->stmt_block.has_return_stmt) {
+		return true;
+	} else if (stmt->type == HSC_EXPR_TYPE_STMT_IF && stmt[stmt->if_.true_stmt_rel_idx].if_aux.true_and_false_stmts_have_return_stmt) {
+		return true;
+	}
+	return false;
+}
+
 HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 	HscToken token = hsc_token_peek(astgen);
 	switch (token) {
@@ -1936,6 +1965,8 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 			while (token != HSC_TOKEN_CURLY_CLOSE) {
 				HscExpr* stmt = hsc_astgen_generate_stmt(astgen);
 				stmt->is_stmt_block_entry = true;
+				stmt_block->stmt_block.has_return_stmt |= stmt->type == HSC_EXPR_TYPE_STMT_RETURN;
+
 				U32 stmt_expr_idx = stmt - astgen->exprs;
 
 				if (prev_stmt_expr_idx != U32_MAX) {
@@ -1964,10 +1995,56 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 			hsc_token_next(astgen);
 			HscExpr* expr = hsc_astgen_generate_expr(astgen, 0);
 			stmt->unary.expr_idx = expr - stmt;
+			hsc_astgen_ensure_semicolon(astgen);
+			return stmt;
+		};
+		case HSC_TOKEN_KEYWORD_IF: {
+			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_STMT_IF);
+			token = hsc_token_next(astgen);
+			if (token != HSC_TOKEN_PARENTHESIS_OPEN) {
+				hsc_astgen_error_1(astgen, "expected a '(' for the if statement condition");
+			}
+			token = hsc_token_next(astgen);
+
+			HscExpr* cond_expr = hsc_astgen_generate_expr(astgen, 0);
+			if (!hsc_data_type_is_condition(astgen, cond_expr->data_type)) {
+				HscString data_type_name = hsc_data_type_string(astgen, cond_expr->data_type);
+				hsc_astgen_error_1(astgen, "the condition expression must be convertable to a 'bool' but got '%.*s'", (int)data_type_name.size, data_type_name.data);
+			}
+
+			token = hsc_token_peek(astgen);
+			if (token != HSC_TOKEN_PARENTHESIS_CLOSE) {
+				hsc_astgen_error_1(astgen, "expected a ')' to finish the if statement condition");
+			}
+			token = hsc_token_next(astgen);
+
+			HscExpr* true_stmt = hsc_astgen_generate_stmt(astgen);
+			true_stmt->is_stmt_block_entry = true;
+
+			token = hsc_token_peek(astgen);
+			HscExpr* false_stmt = NULL;
+			if (token == HSC_TOKEN_KEYWORD_ELSE) {
+				token = hsc_token_next(astgen);
+				if (token != HSC_TOKEN_KEYWORD_IF && token != HSC_TOKEN_CURLY_OPEN) {
+					hsc_astgen_error_1(astgen, "expected either 'if' or '{' to follow the 'else' keyword");
+				}
+				false_stmt = hsc_astgen_generate_stmt(astgen);
+				false_stmt->is_stmt_block_entry = true;
+			}
+
+			stmt->type = HSC_EXPR_TYPE_STMT_IF;
+			stmt->if_.cond_expr_rel_idx = cond_expr - stmt;
+			stmt->if_.true_stmt_rel_idx = true_stmt - stmt;
+
+			true_stmt->if_aux.false_stmt_rel_idx = false_stmt ? false_stmt - true_stmt : 0;
+			true_stmt->if_aux.true_and_false_stmts_have_return_stmt = false;
+			if (false_stmt) {
+				true_stmt->if_aux.true_and_false_stmts_have_return_stmt = hsc_stmt_has_return(true_stmt) && hsc_stmt_has_return(false_stmt);
+			}
 			return stmt;
 		};
 		default:
-			hsc_astgen_error_1(astgen, "expected an expression here");
+			hsc_astgen_error_1(astgen, "expected an statement or expression here");
 	}
 }
 
@@ -2149,18 +2226,11 @@ PRINT_LIT:
 void hsc_astgen_print_expr(HscAstGen* astgen, HscExpr* expr, U32 indent, bool is_stmt, FILE* f) {
 	static char* indent_chars = "\t\t\t\t\t\t\t\t\t\t\t\t\t\t";
 	fprintf(f, "%.*s", indent, indent_chars);
-	switch (expr->type) {
-		case HSC_EXPR_TYPE_FUNCTION:
-		case HSC_EXPR_TYPE_CALL_ARG_LIST:
-			break;
-		default: {
-			if (!is_stmt) {
-				HscString data_type_name = hsc_data_type_string(astgen, expr->data_type);
-				fprintf(f, "(%.*s)", (int)data_type_name.size, data_type_name.data);
-			}
-			break;
-		};
+	if (!expr->is_stmt_block_entry) {
+		HscString data_type_name = hsc_data_type_string(astgen, expr->data_type);
+		fprintf(f, "(%.*s)", (int)data_type_name.size, data_type_name.data);
 	}
+
 	const char* expr_name;
 	switch (expr->type) {
 		case HSC_EXPR_TYPE_CONSTANT: {
@@ -2171,7 +2241,7 @@ void hsc_astgen_print_expr(HscAstGen* astgen, HscExpr* expr, U32 indent, bool is
 		};
 		case HSC_EXPR_TYPE_STMT_BLOCK: {
 			U32 stmts_count = expr->stmt_block.stmts_count;
-			fprintf(f, "EXPR_STMT_BLOCK[%u] {\n", stmts_count);
+			fprintf(f, "STMT_BLOCK[%u] {\n", stmts_count);
 			HscExpr* stmt = &expr[expr->stmt_block.first_expr_rel_idx];
 			for (U32 i = 0; i < stmts_count; i += 1) {
 				hsc_astgen_print_expr(astgen, stmt, indent + 1, true, f);
@@ -2188,13 +2258,33 @@ void hsc_astgen_print_expr(HscAstGen* astgen, HscExpr* expr, U32 indent, bool is
 			break;
 		};
 		case HSC_EXPR_TYPE_STMT_RETURN:
-			expr_name = "EXPR_RETURN";
+			expr_name = "STMT_RETURN";
 			goto UNARY;
 UNARY:
 		{
 			fprintf(f, "%s: {\n", expr_name);
 			HscExpr* unary_expr = &expr[expr->unary.expr_idx];
 			hsc_astgen_print_expr(astgen, unary_expr, indent + 1, false, f);
+			fprintf(f, "%.*s}", indent, indent_chars);
+			break;
+		};
+		case HSC_EXPR_TYPE_STMT_IF: {
+			fprintf(f, "%s: {\n", "STMT_IF");
+
+			HscExpr* cond_expr = &expr[expr->if_.cond_expr_rel_idx];
+			fprintf(f, "%.*sCONDITION_EXPR:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, cond_expr, indent + 2, false, f);
+
+			HscExpr* true_stmt = &expr[expr->if_.true_stmt_rel_idx];
+			fprintf(f, "%.*sTRUE_STMT:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, true_stmt, indent + 2, false, f);
+
+			if (true_stmt->if_aux.false_stmt_rel_idx) {
+				HscExpr* false_stmt = &true_stmt[true_stmt->if_aux.false_stmt_rel_idx];
+				fprintf(f, "%.*sFALSE_STMT:\n", indent + 1, indent_chars);
+				hsc_astgen_print_expr(astgen, false_stmt, indent + 2, false, f);
+			}
+
 			fprintf(f, "%.*s}", indent, indent_chars);
 			break;
 		};
@@ -2288,6 +2378,7 @@ HscIRBasicBlock* hsc_ir_add_basic_block(HscIR* ir, HscIRFunction* ir_function) {
 	HscIRBasicBlock* basic_block = &ir->basic_blocks[ir_function->basic_blocks_start_idx + (U32)ir_function->basic_blocks_count];
 	ir->basic_blocks_count += 1;
 	ir_function->basic_blocks_count += 1;
+	basic_block->instructions_start_idx = ir_function->instructions_count;
 	return basic_block;
 }
 
@@ -2307,6 +2398,8 @@ void hsc_ir_add_instrunction(HscIR* ir, HscIRFunction* ir_function, HscIROpCode 
 	instruction->op_code = op_code;
 	instruction->operands_start_idx = (operands - ir->operands) - ir_function->operands_start_idx;
 	instruction->operands_count = operands_count;
+	HscIRBasicBlock* basic_block = &ir->basic_blocks[ir->basic_blocks_count - 1];
+	basic_block->instructions_count += 1;
 	ir->instructions_count += 1;
 	ir_function->instructions_count += 1;
 #if HSC_DEBUG_ASSERTIONS
@@ -2348,6 +2441,10 @@ HscIRBasicBlock* hsc_ir_generate_instructions_from_intrinsic_function(HscIR* ir,
 	return basic_block;
 }
 
+U16 hsc_ir_basic_block_idx(HscIR* ir, HscIRFunction* ir_function, HscIRBasicBlock* basic_block) {
+	return (basic_block - ir->basic_blocks) - ir_function->basic_blocks_start_idx;
+}
+
 HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr) {
 	switch (expr->type) {
 		case HSC_EXPR_TYPE_STMT_BLOCK: {
@@ -2371,6 +2468,65 @@ HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscI
 			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 1);
 			operands[0] = ir->last_operand;
 			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_FUNCTION_RETURN, operands, 1);
+			break;
+		};
+		case HSC_EXPR_TYPE_STMT_IF: {
+			HscExpr* cond_expr = &expr[expr->if_.cond_expr_rel_idx];
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, cond_expr);
+			HscIROperand cond_operand = ir->last_operand;
+
+			HscIROperand* selection_merge_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_SELECTION_MERGE, selection_merge_operands, 1);
+
+			HscIROperand* cond_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 3);
+			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_BRANCH_CONDITIONAL, cond_branch_operands, 3);
+			cond_branch_operands[0] = cond_operand;
+
+			HscExpr* true_stmt = &expr[expr->if_.true_stmt_rel_idx];
+			bool true_needs_branch = !hsc_stmt_has_return(true_stmt);
+			HscIRBasicBlock* true_basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			hsc_ir_generate_instructions(ir, astgen, ir_function, true_basic_block, true_stmt);
+			cond_branch_operands[1] = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, true_basic_block));
+
+			HscIROperand* true_branch_operands;
+			if (true_needs_branch) {
+				true_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+				hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, true_branch_operands, 1);
+			}
+
+			HscIROperand* false_branch_operands;
+			bool false_needs_branch;
+			if (true_stmt->if_aux.false_stmt_rel_idx) {
+				HscExpr* false_stmt = &true_stmt[true_stmt->if_aux.false_stmt_rel_idx];
+				false_needs_branch = !hsc_stmt_has_return(false_stmt);
+				HscIRBasicBlock* false_basic_block = hsc_ir_add_basic_block(ir, ir_function);
+				hsc_ir_generate_instructions(ir, astgen, ir_function, false_basic_block, false_stmt);
+				cond_branch_operands[2] = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, false_basic_block));
+
+				if (false_needs_branch) {
+					false_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+					hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, false_branch_operands, 1);
+				}
+			}
+
+			basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			HscIROperand converging_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
+			selection_merge_operands[0] = converging_basic_block_operand;
+			if (true_needs_branch) {
+				true_branch_operands[0] = converging_basic_block_operand;
+			}
+
+			if (true_stmt->if_aux.false_stmt_rel_idx) {
+				if (false_needs_branch) {
+					false_branch_operands[0] = converging_basic_block_operand;
+				}
+			} else {
+				cond_branch_operands[2] = converging_basic_block_operand;
+			}
+
+			if (!true_needs_branch && !false_needs_branch) {
+				hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_UNREACHBALE, NULL, 0);
+			}
 			break;
 		};
 		case HSC_EXPR_TYPE_CALL: {
@@ -2445,6 +2601,9 @@ void hsc_ir_print_operand(HscIR* ir, HscAstGen* astgen, HscIROperand operand, FI
 		case HSC_IR_OPERAND_CONSTANT:
 			fprintf(f, "c%u", HSC_IR_OPERAND_CONSTANT_ID(operand).idx_plus_one - 1);
 			break;
+		case HSC_IR_OPERAND_BASIC_BLOCK:
+			fprintf(f, "b%u", HSC_IR_OPERAND_BASIC_BLOCK_IDX(operand));
+			break;
 		default: {
 			HscString data_type_name = hsc_data_type_string(astgen, operand);
 			fprintf(f, "%.*s", (int)data_type_name.size, data_type_name.data);
@@ -2472,8 +2631,8 @@ void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 		for (U32 basic_block_idx = ir_function->basic_blocks_start_idx; basic_block_idx < ir_function->basic_blocks_start_idx + (U32)ir_function->basic_blocks_count; basic_block_idx += 1) {
 			HscIRBasicBlock* basic_block = &ir->basic_blocks[basic_block_idx];
 			fprintf(f, "\tBASIC_BLOCK(#%u):\n", basic_block_idx - ir_function->basic_blocks_start_idx);
-			for (U32 instruction_idx = ir_function->instructions_start_idx; instruction_idx < ir_function->instructions_start_idx + (U32)ir_function->instructions_count; instruction_idx += 1) {
-				HscIRInstr* instruction = &ir->instructions[instruction_idx];
+			for (U32 instruction_idx = basic_block->instructions_start_idx; instruction_idx < basic_block->instructions_start_idx + (U32)basic_block->instructions_count; instruction_idx += 1) {
+				HscIRInstr* instruction = &ir->instructions[ir_function->instructions_start_idx + instruction_idx];
 				switch (instruction->op_code) {
 #if 0
 					case HSC_IR_OP_CODE_LOAD:
@@ -2505,6 +2664,35 @@ void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 						hsc_ir_print_operand(ir, astgen, operands[0], f);
 						fprintf(f, "\n");
 						break;
+					case HSC_IR_OP_CODE_SELECTION_MERGE: {
+						fprintf(f, "\t\tOP_SELECTION_MERGE: ");
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, "\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_BRANCH: {
+						fprintf(f, "\t\tOP_BRANCH: ");
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, "\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_BRANCH_CONDITIONAL: {
+						fprintf(f, "\t\tOP_BRANCH_CONDITIONAL: ");
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[1], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[2], f);
+						fprintf(f, "\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_UNREACHBALE: {
+						fprintf(f, "\t\tOP_UNREACHBALE:\n");
+						break;
+					};
 					default:
 						HSC_ABORT("unhandled instruction '%u'", instruction->op_code);
 				}
@@ -2644,6 +2832,9 @@ void hsc_spirv_instr_add_converted_operand(HscCompiler* c, HscIROperand ir_opera
 		case HSC_IR_OPERAND_CONSTANT:
 			word = c->spirv.constant_base_id + HSC_IR_OPERAND_CONSTANT_ID(ir_operand).idx_plus_one - 1;
 			break;
+		case HSC_IR_OPERAND_BASIC_BLOCK:
+			word = c->spirv.basic_block_base_spirv_id + HSC_IR_OPERAND_BASIC_BLOCK_IDX(ir_operand);
+			break;
 		default:
 			word = hsc_spirv_resolve_type_id(c, ir_operand);
 			break;
@@ -2700,9 +2891,13 @@ void hsc_spirv_instr_end(HscCompiler* c) {
 		case HSC_SPIRV_OP_FUNCTION_PARAMETER:
 		case HSC_SPIRV_OP_FUNCTION_END:
 		case HSC_SPIRV_OP_COMPOSITE_CONSTRUCT:
+		case HSC_SPIRV_OP_SELECTION_MERGE:
 		case HSC_SPIRV_OP_LABEL:
+		case HSC_SPIRV_OP_BRANCH:
+		case HSC_SPIRV_OP_BRANCH_CONDITIONAL:
 		case HSC_SPIRV_OP_RETURN:
 		case HSC_SPIRV_OP_RETURN_VALUE:
+		case HSC_SPIRV_OP_UNREACHABLE:
 		case HSC_SPIRV_OP_STORE:
 			HSC_DEBUG_ASSERT(c->spirv.out_functions_count < c->spirv.out_functions_cap, "internal error: spirv types variables constants array has been filled up");
 			out = &c->spirv.out_functions[c->spirv.out_functions_count];
@@ -2864,15 +3059,18 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 		default: HSC_ABORT("unhandle shader stage");
 	}
 
+	c->spirv.basic_block_base_spirv_id = c->spirv.next_id;
+	c->spirv.next_id += ir_function->basic_blocks_count;
+
 	for (U32 basic_block_idx = ir_function->basic_blocks_start_idx; basic_block_idx < ir_function->basic_blocks_start_idx + (U32)ir_function->basic_blocks_count; basic_block_idx += 1) {
 		HscIRBasicBlock* basic_block = &c->ir.basic_blocks[basic_block_idx];
 
 		hsc_spirv_instr_start(c, HSC_SPIRV_OP_LABEL);
-		hsc_spirv_instr_add_result_operand(c);
+		hsc_spirv_instr_add_operand(c, c->spirv.basic_block_base_spirv_id + (basic_block_idx - ir_function->basic_blocks_start_idx));
 		hsc_spirv_instr_end(c);
 
-		for (U32 instruction_idx = ir_function->instructions_start_idx; instruction_idx < ir_function->instructions_start_idx + (U32)ir_function->instructions_count; instruction_idx += 1) {
-			HscIRInstr* instruction = &c->ir.instructions[instruction_idx];
+		for (U32 instruction_idx = basic_block->instructions_start_idx; instruction_idx < basic_block->instructions_start_idx + (U32)basic_block->instructions_count; instruction_idx += 1) {
+			HscIRInstr* instruction = &c->ir.instructions[ir_function->instructions_start_idx + instruction_idx];
 			HscIROperand* operands = &c->ir.operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
 			switch (instruction->op_code) {
 				case HSC_IR_OP_CODE_COMPOSITE_INIT:
@@ -2908,6 +3106,31 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 
 					break;
 				};
+				case HSC_IR_OP_CODE_SELECTION_MERGE: {
+					hsc_spirv_instr_start(c, HSC_SPIRV_OP_SELECTION_MERGE);
+					hsc_spirv_instr_add_converted_operand(c, operands[0]);
+					hsc_spirv_instr_add_operand(c, HSC_SPIRV_SELECTION_CONTROL_NONE);
+					hsc_spirv_instr_end(c);
+					break;
+				};
+				case HSC_IR_OP_CODE_BRANCH: {
+					hsc_spirv_instr_start(c, HSC_SPIRV_OP_BRANCH);
+					hsc_spirv_instr_add_converted_operand(c, operands[0]);
+					hsc_spirv_instr_end(c);
+					break;
+				};
+				case HSC_IR_OP_CODE_BRANCH_CONDITIONAL: {
+					hsc_spirv_instr_start(c, HSC_SPIRV_OP_BRANCH_CONDITIONAL);
+					hsc_spirv_instr_add_converted_operand(c, operands[0]);
+					hsc_spirv_instr_add_converted_operand(c, operands[1]);
+					hsc_spirv_instr_add_converted_operand(c, operands[2]);
+					hsc_spirv_instr_end(c);
+					break;
+				};
+				case HSC_IR_OP_CODE_UNREACHBALE:
+					hsc_spirv_instr_start(c, HSC_SPIRV_OP_UNREACHABLE);
+					hsc_spirv_instr_end(c);
+					break;
 				default:
 					HSC_ABORT("unhandled instruction '%u'", instruction->op_code);
 			}
@@ -3201,10 +3424,8 @@ void hsc_compiler_compile(HscCompiler* compiler, const char* file_path) {
 	hsc_ir_generate(&compiler->ir, &compiler->astgen);
 	hsc_spirv_generate(compiler);
 
-	/*
 	hsc_tokens_print(&compiler->astgen, stdout);
 	hsc_astgen_print_ast(&compiler->astgen, stdout);
 	hsc_ir_print(&compiler->ir, &compiler->astgen, stdout);
-	*/
 }
 
