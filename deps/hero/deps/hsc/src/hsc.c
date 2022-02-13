@@ -136,6 +136,32 @@ char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_TOKEN_FORWARD_SLASH] = "/",
 	[HSC_TOKEN_ASTERISK] = "*",
 	[HSC_TOKEN_PERCENT] = "%",
+	[HSC_TOKEN_AMPERSAND] = "&",
+	[HSC_TOKEN_PIPE] = "|",
+	[HSC_TOKEN_CARET] = "^",
+	[HSC_TOKEN_EXCLAMATION_MARK] = "!",
+	[HSC_TOKEN_TILDE] = "~",
+	[HSC_TOKEN_EQUAL] = "=",
+	[HSC_TOKEN_LESS_THAN] = "<",
+	[HSC_TOKEN_GREATER_THAN] = ">",
+	[HSC_TOKEN_LOGICAL_AND] = "&&",
+	[HSC_TOKEN_LOGICAL_OR] = "||",
+	[HSC_TOKEN_LOGICAL_EQUAL] = "==",
+	[HSC_TOKEN_LOGICAL_NOT_EQUAL] = "!=",
+	[HSC_TOKEN_LESS_THAN_OR_EQUAL] = "<=",
+	[HSC_TOKEN_GREATER_THAN_OR_EQUAL] = ">=",
+	[HSC_TOKEN_BIT_SHIFT_LEFT] = "<<",
+	[HSC_TOKEN_BIT_SHIFT_RIGHT] = ">>",
+	[HSC_TOKEN_ADD_ASSIGN] = "+=",
+	[HSC_TOKEN_SUBTRACT_ASSIGN] = "-=",
+	[HSC_TOKEN_MULTIPLY_ASSIGN] = "*=",
+	[HSC_TOKEN_DIVIDE_ASSIGN] = "/=",
+	[HSC_TOKEN_MODULO_ASSIGN] = "%=",
+	[HSC_TOKEN_BIT_SHIFT_LEFT_ASSIGN] = "<<=",
+	[HSC_TOKEN_BIT_SHIFT_RIGHT_ASSIGN] = ">>=",
+	[HSC_TOKEN_BIT_AND_ASSIGN] = "&=",
+	[HSC_TOKEN_BIT_XOR_ASSIGN] = "^=",
+	[HSC_TOKEN_BIT_OR_ASSIGN] = "|=",
 	[HSC_TOKEN_LIT_U32] = "U32",
 	[HSC_TOKEN_LIT_U64] = "U64",
 	[HSC_TOKEN_LIT_S32] = "S32",
@@ -582,6 +608,16 @@ HscConstantId hsc_constant_table_deduplicate_composite_end(HscConstantTable* con
 	constant_table->fields_cap = 0;
 
 	return _hsc_constant_table_deduplicate_end(constant_table, constant_table->data_type, constant_table->data_write_ptr, constant_table->fields_count * sizeof(HscConstantId), alignof(HscConstantId));
+}
+
+HscConstantId hsc_constant_table_deduplicate_zero(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type) {
+	if (HSC_DATA_TYPE_IS_BASIC(data_type)) {
+		U64 data = 0; // largest basic data type set to zero
+		return hsc_constant_table_deduplicate_basic(constant_table, astgen, data_type, &data);
+	} else {
+		HSC_ABORT("TODO: make a new fuction we recursively call inside this deduplicate_end function to make a zeroed composite type and then deduplicate it");
+		return _hsc_constant_table_deduplicate_end(constant_table, data_type, NULL, 0, alignof(HscConstantId));
+	}
 }
 
 HscConstantId _hsc_constant_table_deduplicate_end(HscConstantTable* constant_table, HscDataType data_type, void* data, U32 data_size, U32 data_align) {
@@ -1230,14 +1266,25 @@ void hsc_astgen_tokenize(HscAstGen* astgen) {
 			case '.': token = HSC_TOKEN_FULL_STOP; break;
 			case ',': token = HSC_TOKEN_COMMA; break;
 			case ';': token = HSC_TOKEN_SEMICOLON; break;
-			case '+': token = HSC_TOKEN_PLUS; break;
-			case '-':
-				if (isdigit(astgen->bytes[astgen->location.code_end_idx + 1])) {
+			case '~': token = HSC_TOKEN_TILDE; break;
+			case '+':
+				if (astgen->bytes[astgen->location.code_end_idx + 1] == '=') {
+					token = HSC_TOKEN_ADD_ASSIGN;
+				} else {
+					token = HSC_TOKEN_PLUS;
+				}
+				break;
+			case '-': {
+				U8 next_byte = astgen->bytes[astgen->location.code_end_idx + 1];
+				if (isdigit(next_byte)) {
 					token_size = hsc_parse_num(astgen, &token);
+				} else if (next_byte == '=') {
+					token = HSC_TOKEN_SUBTRACT_ASSIGN;
 				} else {
 					token = HSC_TOKEN_MINUS;
 				}
 				break;
+			};
 			case '/': {
 				uint8_t next_byte = astgen->bytes[astgen->location.code_end_idx + 1];
 				if (next_byte == '/') {
@@ -1275,13 +1322,115 @@ void hsc_astgen_tokenize(HscAstGen* astgen) {
 
 					astgen->location.column_start = astgen->location.column_end;
 					continue;
+				} else if (next_byte == '=') {
+					token = HSC_TOKEN_DIVIDE_ASSIGN;
+				} else {
+					token = HSC_TOKEN_FORWARD_SLASH;
 				}
-
-				token = HSC_TOKEN_FORWARD_SLASH;
 				break;
 			};
-			case '*': token = HSC_TOKEN_ASTERISK; break;
-			case '%': token = HSC_TOKEN_PERCENT; break;
+			case '*':
+				if (astgen->bytes[astgen->location.code_end_idx + 1] == '=') {
+					token_size = 2;
+					token = HSC_TOKEN_MULTIPLY_ASSIGN;
+				} else {
+					token = HSC_TOKEN_ASTERISK;
+				}
+				break;
+			case '%':
+				if (astgen->bytes[astgen->location.code_end_idx + 1] == '=') {
+					token_size = 2;
+					token = HSC_TOKEN_MODULO_ASSIGN;
+				} else {
+					token = HSC_TOKEN_PERCENT;
+				}
+				break;
+			case '&': {
+				U8 next_byte = astgen->bytes[astgen->location.code_end_idx + 1];
+				if (next_byte == '&') {
+					token_size = 2;
+					token = HSC_TOKEN_LOGICAL_AND;
+				} else if (next_byte == '=') {
+					token_size = 2;
+					token = HSC_TOKEN_BIT_AND_ASSIGN;
+				} else {
+					token = HSC_TOKEN_AMPERSAND;
+				}
+				break;
+			};
+			case '|': {
+				U8 next_byte = astgen->bytes[astgen->location.code_end_idx + 1];
+				if (next_byte == '|') {
+					token_size = 2;
+					token = HSC_TOKEN_LOGICAL_OR;
+				} else if (next_byte == '=') {
+					token_size = 2;
+					token = HSC_TOKEN_BIT_OR_ASSIGN;
+				} else {
+					token = HSC_TOKEN_PIPE;
+				}
+				break;
+			};
+			case '^':
+				if (astgen->bytes[astgen->location.code_end_idx + 1] == '=') {
+					token_size = 2;
+					token = HSC_TOKEN_BIT_XOR_ASSIGN;
+				} else {
+					token = HSC_TOKEN_CARET;
+				}
+				break;
+			case '!':
+				if (astgen->bytes[astgen->location.code_end_idx + 1] == '=') {
+					token_size = 2;
+					token = HSC_TOKEN_LOGICAL_NOT_EQUAL;
+				} else {
+					token = HSC_TOKEN_EXCLAMATION_MARK;
+				}
+				break;
+			case '=':
+				if (astgen->bytes[astgen->location.code_end_idx + 1] == '=') {
+					token_size = 2;
+					token = HSC_TOKEN_LOGICAL_EQUAL;
+				} else {
+					token = HSC_TOKEN_EQUAL;
+				}
+				break;
+			case '<': {
+				U8 next_byte = astgen->bytes[astgen->location.code_end_idx + 1];
+				if (next_byte == '=') {
+					token_size = 2;
+					token = HSC_TOKEN_LESS_THAN_OR_EQUAL;
+				} else if (next_byte == '<') {
+					if (astgen->bytes[astgen->location.code_end_idx + 2] == '=') {
+						token_size = 3;
+						token = HSC_TOKEN_BIT_SHIFT_LEFT_ASSIGN;
+					} else {
+						token_size = 2;
+						token = HSC_TOKEN_BIT_SHIFT_LEFT;
+					}
+				} else {
+					token = HSC_TOKEN_LESS_THAN;
+				}
+				break;
+			};
+			case '>': {
+				U8 next_byte = astgen->bytes[astgen->location.code_end_idx + 1];
+				if (next_byte == '=') {
+					token_size = 2;
+					token = HSC_TOKEN_GREATER_THAN_OR_EQUAL;
+				} else if (next_byte == '>') {
+					if (astgen->bytes[astgen->location.code_end_idx + 2] == '=') {
+						token_size = 3;
+						token = HSC_TOKEN_BIT_SHIFT_RIGHT_ASSIGN;
+					} else {
+						token_size = 2;
+						token = HSC_TOKEN_BIT_SHIFT_RIGHT;
+					}
+				} else {
+					token = HSC_TOKEN_GREATER_THAN;
+				}
+				break;
+			};
 			case '{':
 				token = HSC_TOKEN_CURLY_OPEN;
 				close_token = HSC_TOKEN_CURLY_CLOSE;
@@ -1487,6 +1636,7 @@ HscExpr* hsc_astgen_alloc_expr_many(HscAstGen* astgen, U32 amount) {
 
 HscExpr* hsc_astgen_generate_unary_expr(HscAstGen* astgen) {
 	HscToken token = hsc_token_peek(astgen);
+	HscUnaryOp unary_op;
 	switch (token) {
 		case HSC_TOKEN_KEYWORD_TRUE:
 		case HSC_TOKEN_KEYWORD_FALSE:
@@ -1551,6 +1701,30 @@ HscExpr* hsc_astgen_generate_unary_expr(HscAstGen* astgen) {
 			HscString string = hsc_string_table_get(&astgen->string_table, identifier_value.string_id);
 			hsc_astgen_error_1(astgen, "undeclared identifier '%.*s'", (int)string.size, string.data);
 		};
+		case HSC_TOKEN_TILDE: unary_op = HSC_UNARY_OP_BIT_NOT; goto UNARY;
+		case HSC_TOKEN_EXCLAMATION_MARK: unary_op = HSC_UNARY_OP_LOGICAL_NOT; goto UNARY;
+		case HSC_TOKEN_PLUS: unary_op = HSC_UNARY_OP_PLUS; goto UNARY;
+		case HSC_TOKEN_MINUS: unary_op = HSC_UNARY_OP_NEGATE; goto UNARY;
+UNARY:
+		{
+			HscExpr* expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_UNARY_OP_START + unary_op);
+			hsc_token_consume(astgen, 1);
+
+			HscExpr* inner_expr = hsc_astgen_generate_unary_expr(astgen);
+			expr->unary.expr_rel_idx = inner_expr - expr;
+			expr->data_type = token == HSC_TOKEN_EXCLAMATION_MARK ? HSC_DATA_TYPE_BOOL : inner_expr->data_type;
+			return expr;
+		};
+		case HSC_TOKEN_PARENTHESIS_OPEN: {
+			hsc_token_consume(astgen, 1);
+			HscExpr* expr = hsc_astgen_generate_expr(astgen, 0);
+			HscToken token = hsc_token_peek(astgen);
+			if (token != HSC_TOKEN_PARENTHESIS_CLOSE) {
+				hsc_astgen_error_1(astgen, "expected a ')' here to finish the expression");
+			}
+			hsc_token_consume(astgen, 1);
+			return expr;
+		};
 		default:
 			hsc_astgen_error_1(astgen, "expected an expression here but got '%s'", hsc_token_strings[token]);
 	}
@@ -1564,24 +1738,76 @@ void hsc_astgen_generate_binary_op(HscAstGen* astgen, HscExprType* binary_op_typ
 			*precedence_out = 1;
 			break;
 		case HSC_TOKEN_ASTERISK:
-			//*binary_op_type_out = HSC_EXPR_TYPE_MULTIPLY;
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(MULTIPLY);
 			*precedence_out = 3;
 			break;
 		case HSC_TOKEN_FORWARD_SLASH:
-			//*binary_op_type_out = HSC_EXPR_TYPE_DIVIDE;
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(DIVIDE);
 			*precedence_out = 3;
 			break;
 		case HSC_TOKEN_PERCENT:
-			//*binary_op_type_out = HSC_EXPR_TYPE_MODULO;
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(MODULO);
 			*precedence_out = 3;
 			break;
 		case HSC_TOKEN_PLUS:
-			//*binary_op_type_out = HSC_EXPR_TYPE_ADD;
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(ADD);
 			*precedence_out = 4;
 			break;
 		case HSC_TOKEN_MINUS:
-			//*binary_op_type_out = HSC_EXPR_TYPE_SUBTRACT;
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(SUBTRACT);
 			*precedence_out = 4;
+			break;
+		case HSC_TOKEN_BIT_SHIFT_LEFT:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(BIT_SHIFT_LEFT);
+			*precedence_out = 5;
+			break;
+		case HSC_TOKEN_BIT_SHIFT_RIGHT:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(BIT_SHIFT_RIGHT);
+			*precedence_out = 5;
+			break;
+		case HSC_TOKEN_LESS_THAN:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(LESS_THAN);
+			*precedence_out = 6;
+			break;
+		case HSC_TOKEN_LESS_THAN_OR_EQUAL:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(LESS_THAN_OR_EQUAL);
+			*precedence_out = 6;
+			break;
+		case HSC_TOKEN_GREATER_THAN:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(GREATER_THAN);
+			*precedence_out = 6;
+			break;
+		case HSC_TOKEN_GREATER_THAN_OR_EQUAL:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(GREATER_THAN_OR_EQUAL);
+			*precedence_out = 6;
+			break;
+		case HSC_TOKEN_LOGICAL_EQUAL:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(EQUAL);
+			*precedence_out = 7;
+			break;
+		case HSC_TOKEN_LOGICAL_NOT_EQUAL:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(NOT_EQUAL);
+			*precedence_out = 7;
+			break;
+		case HSC_TOKEN_AMPERSAND:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(BIT_AND);
+			*precedence_out = 8;
+			break;
+		case HSC_TOKEN_CARET:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(BIT_XOR);
+			*precedence_out = 9;
+			break;
+		case HSC_TOKEN_PIPE:
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(BIT_OR);
+			*precedence_out = 10;
+			break;
+		case HSC_TOKEN_LOGICAL_AND:
+			*binary_op_type_out = HSC_EXPR_TYPE_LOGICAL_AND;
+			*precedence_out = 11;
+			break;
+		case HSC_TOKEN_LOGICAL_OR:
+			*binary_op_type_out = HSC_EXPR_TYPE_LOGICAL_OR;
+			*precedence_out = 12;
 			break;
 		default:
 			*binary_op_type_out = HSC_EXPR_TYPE_NONE;
@@ -1806,7 +2032,7 @@ END_ARG_COUNT: {}
 	U32 required_header_expressions = ((args_count + 2) / 8) + 1;
 	call_args_expr = hsc_astgen_alloc_expr_many(astgen, required_header_expressions);
 	call_args_expr->type = HSC_EXPR_TYPE_CALL_ARG_LIST;
-	call_args_expr->is_stmt_block_entry = false;
+	call_args_expr->is_stmt_block_entry = true;
 	((U8*)call_args_expr)[1] = args_count;
 	U8* next_arg_expr_rel_indices = &((U8*)call_args_expr)[2];
 
@@ -1906,7 +2132,12 @@ HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 			left_expr = hsc_astgen_generate_call_expr(astgen, left_expr);
 		} else {
 			HscExpr* right_expr = hsc_astgen_generate_expr(astgen, precedence);
-			HscDataType data_type = 0; // TODO implicit conversions
+			if (!hsc_data_type_check_compatible(astgen, left_expr->data_type, right_expr->data_type)) {
+				HscString left_data_type_name = hsc_data_type_string(astgen, left_expr->data_type);
+				HscString right_data_type_name = hsc_data_type_string(astgen, right_expr->data_type);
+				hsc_astgen_error_1(astgen, "type mismatch '%.*s' is does not implicitly cast to '%.*s'", (int)left_data_type_name.size, left_data_type_name.data, (int)right_data_type_name.size, right_data_type_name.data);
+			}
+			HscDataType data_type = left_expr->data_type; // TODO make implicit conversions explicit in the AST and make the error above work correctly
 
 			if (
 				hsc_opt_is_enabled(&astgen->opts, HSC_OPT_CONSTANT_FOLDING) &&
@@ -1994,7 +2225,7 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_STMT_RETURN);
 			hsc_token_next(astgen);
 			HscExpr* expr = hsc_astgen_generate_expr(astgen, 0);
-			stmt->unary.expr_idx = expr - stmt;
+			stmt->unary.expr_rel_idx = expr - stmt;
 			hsc_astgen_ensure_semicolon(astgen);
 			return stmt;
 		};
@@ -2257,13 +2488,15 @@ void hsc_astgen_print_expr(HscAstGen* astgen, HscExpr* expr, U32 indent, bool is
 			fprintf(f, "EXPR_FUNCTION Function(#%u): %s", expr->function.id - 1, buf);
 			break;
 		};
-		case HSC_EXPR_TYPE_STMT_RETURN:
-			expr_name = "STMT_RETURN";
-			goto UNARY;
+		case HSC_EXPR_TYPE_STMT_RETURN: expr_name = "STMT_RETURN"; goto UNARY;
+		case HSC_EXPR_TYPE_UNARY_OP(LOGICAL_NOT): expr_name = "EXPR_LOGICAL_NOT"; goto UNARY;
+		case HSC_EXPR_TYPE_UNARY_OP(BIT_NOT): expr_name = "EXPR_BIT_NOT"; goto UNARY;
+		case HSC_EXPR_TYPE_UNARY_OP(PLUS): expr_name = "EXPR_PLUS"; goto UNARY;
+		case HSC_EXPR_TYPE_UNARY_OP(NEGATE): expr_name = "EXPR_NEGATE"; goto UNARY;
 UNARY:
 		{
 			fprintf(f, "%s: {\n", expr_name);
-			HscExpr* unary_expr = &expr[expr->unary.expr_idx];
+			HscExpr* unary_expr = &expr[expr->unary.expr_rel_idx];
 			hsc_astgen_print_expr(astgen, unary_expr, indent + 1, false, f);
 			fprintf(f, "%.*s}", indent, indent_chars);
 			break;
@@ -2288,9 +2521,25 @@ UNARY:
 			fprintf(f, "%.*s}", indent, indent_chars);
 			break;
 		};
-		case HSC_EXPR_TYPE_CALL:
-			expr_name = "EXPR_CALL";
-			goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(ADD): expr_name = "EXPR_ADD"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(SUBTRACT): expr_name = "EXPR_SUBTRACT"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(MULTIPLY): expr_name = "EXPR_MULTIPLY"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(DIVIDE): expr_name = "EXPR_DIVIDE"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(MODULO): expr_name = "EXPR_MODULO"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_AND): expr_name = "EXPR_BIT_AND"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_OR): expr_name = "EXPR_BIT_OR"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_XOR): expr_name = "EXPR_BIT_XOR"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_SHIFT_LEFT): expr_name = "EXPR_BIT_SHIFT_LEFT"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_SHIFT_RIGHT): expr_name = "EXPR_BIT_SHIFT_RIGHT"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(EQUAL): expr_name = "EXPR_EQUAL"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(NOT_EQUAL): expr_name = "EXPR_NOT_EQUAL"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(LESS_THAN): expr_name = "EXPR_LESS_THAN"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(LESS_THAN_OR_EQUAL): expr_name = "EXPR_LESS_THAN_OR_EQUAL"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(GREATER_THAN): expr_name = "EXPR_GREATER_THAN"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(GREATER_THAN_OR_EQUAL): expr_name = "EXPR_GREATER_THAN_OR_EQUAL"; goto BINARY;
+		case HSC_EXPR_TYPE_LOGICAL_AND: expr_name = "EXPR_LOGICAL_AND"; goto BINARY;
+		case HSC_EXPR_TYPE_LOGICAL_OR: expr_name = "EXPR_LOGICAL_OR"; goto BINARY;
+		case HSC_EXPR_TYPE_CALL: expr_name = "EXPR_CALL"; goto BINARY;
 BINARY:
 		{
 			fprintf(f, "%s: {\n", expr_name);
@@ -2420,13 +2669,13 @@ HscIROperand* hsc_ir_add_operands_many(HscIR* ir, HscIRFunction* ir_function, U3
 
 HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr);
 
-HscIRBasicBlock* hsc_ir_generate_instructions_from_intrinsic_function(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscFunction* function, U32 function_id, HscExpr* call_args_expr) {
+HscIRBasicBlock* hsc_ir_generate_instructions_from_intrinsic_function(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr, HscFunction* function, U32 function_id, HscExpr* call_args_expr) {
 	U32 args_count = ((U8*)call_args_expr)[1];
 	U8* next_arg_expr_rel_indices = &((U8*)call_args_expr)[2];
 	HscExpr* arg_expr = call_args_expr;
 
 	HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, args_count + 1);
-	U16 return_value_idx = hsc_ir_add_value(ir, ir_function, function->return_data_type);
+	U16 return_value_idx = hsc_ir_add_value(ir, ir_function, expr->data_type);
 	operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
 
 	for (U32 idx = 0; idx < args_count; idx += 1) {
@@ -2445,7 +2694,89 @@ U16 hsc_ir_basic_block_idx(HscIR* ir, HscIRFunction* ir_function, HscIRBasicBloc
 	return (basic_block - ir->basic_blocks) - ir_function->basic_blocks_start_idx;
 }
 
+HscDataType hsc_ir_operand_type(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIROperand ir_operand) {
+	U32 word;
+	switch (ir_operand & 0xff) {
+		case HSC_IR_OPERAND_VALUE: {
+			HscIRValue* value = &ir->values[ir_function->values_start_idx + HSC_IR_OPERAND_VALUE_IDX(ir_operand)];
+			return value->data_type;
+		};
+		case HSC_IR_OPERAND_CONSTANT: {
+			HscConstant constant = hsc_constant_table_get(&astgen->constant_table, HSC_IR_OPERAND_CONSTANT_ID(ir_operand));
+			return constant.data_type;
+		};
+		case HSC_IR_OPERAND_BASIC_BLOCK:
+			HSC_UNREACHABLE("cannot get the type of a basic block");
+		default:
+			return (HscDataType)ir_operand;
+	}
+}
+
+HscIRBasicBlock* hsc_ir_generate_condition_expr(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* cond_expr) {
+	basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, cond_expr);
+	HscIROperand cond_operand = ir->last_operand;
+	HscDataType cond_data_type = hsc_ir_operand_type(ir, astgen, ir_function, cond_operand);
+	if (cond_data_type != HSC_DATA_TYPE_BOOL) {
+		if (HSC_DATA_TYPE_IS_STRUCT(cond_data_type) || HSC_DATA_TYPE_IS_MATRIX(cond_data_type)) {
+			HscString data_type_name = hsc_data_type_string(astgen, cond_operand);
+			// TODO emitt the error in the AST generation instead
+			hsc_astgen_error_1(astgen, "a condition expression must be a non-structure & non-matrix type but got '%.*s'", (int)data_type_name.size, data_type_name.data);
+		}
+
+		HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 3);
+		hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_BINARY_OP(NOT_EQUAL), operands, 3);
+
+		HscDataType new_cond_data_type;
+		if (cond_data_type >= HSC_DATA_TYPE_VEC4_START) {
+			new_cond_data_type = HSC_DATA_TYPE_VEC4(HSC_DATA_TYPE_BOOL);
+		} else if (cond_data_type >= HSC_DATA_TYPE_VEC3_START) {
+			new_cond_data_type = HSC_DATA_TYPE_VEC3(HSC_DATA_TYPE_BOOL);
+		} else if (cond_data_type >= HSC_DATA_TYPE_VEC2_START) {
+			new_cond_data_type = HSC_DATA_TYPE_VEC2(HSC_DATA_TYPE_BOOL);
+		} else {
+			new_cond_data_type = HSC_DATA_TYPE_BOOL;
+		}
+
+		U16 return_value_idx = hsc_ir_add_value(ir, ir_function, new_cond_data_type);
+		operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+		operands[1] = cond_operand;
+		operands[2] = HSC_IR_OPERAND_CONSTANT_INIT(hsc_constant_table_deduplicate_zero(&astgen->constant_table, astgen, cond_data_type).idx_plus_one);
+		ir->last_operand = operands[0];
+	}
+	return basic_block;
+}
+
+typedef U8 HscBasicTypeClass;
+enum {
+	HSC_BASIC_TYPE_CLASS_VOID,
+	HSC_BASIC_TYPE_CLASS_BOOL,
+	HSC_BASIC_TYPE_CLASS_UINT,
+	HSC_BASIC_TYPE_CLASS_SINT,
+	HSC_BASIC_TYPE_CLASS_FLOAT,
+
+	HSC_BASIC_TYPE_CLASS_COUNT,
+};
+
+HscBasicTypeClass hsc_basic_type_class(HscDataType data_type) {
+	switch (data_type) {
+		case HSC_DATA_TYPE_BOOL: return HSC_BASIC_TYPE_CLASS_BOOL;
+		case HSC_DATA_TYPE_U8:
+		case HSC_DATA_TYPE_U16:
+		case HSC_DATA_TYPE_U32:
+		case HSC_DATA_TYPE_U64: return HSC_BASIC_TYPE_CLASS_UINT;
+		case HSC_DATA_TYPE_S8:
+		case HSC_DATA_TYPE_S16:
+		case HSC_DATA_TYPE_S32:
+		case HSC_DATA_TYPE_S64: return HSC_BASIC_TYPE_CLASS_SINT;
+		case HSC_DATA_TYPE_F16:
+		case HSC_DATA_TYPE_F32:
+		case HSC_DATA_TYPE_F64: return HSC_BASIC_TYPE_CLASS_FLOAT;
+		default: HSC_UNREACHABLE("internal error: expected a basic type");
+	}
+}
+
 HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr) {
+	HscIROpCode op_code;
 	switch (expr->type) {
 		case HSC_EXPR_TYPE_STMT_BLOCK: {
 			if (!basic_block) {
@@ -2462,7 +2793,7 @@ HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscI
 			break;
 		};
 		case HSC_EXPR_TYPE_STMT_RETURN: {
-			HscExpr* unary_expr = &expr[expr->unary.expr_idx];
+			HscExpr* unary_expr = &expr[expr->unary.expr_rel_idx];
 			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, unary_expr);
 
 			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 1);
@@ -2470,9 +2801,35 @@ HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscI
 			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_FUNCTION_RETURN, operands, 1);
 			break;
 		};
+		case HSC_EXPR_TYPE_UNARY_OP(PLUS): {
+			HscExpr* unary_expr = &expr[expr->unary.expr_rel_idx];
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, unary_expr);
+			break;
+		};
+		case HSC_EXPR_TYPE_UNARY_OP(LOGICAL_NOT): op_code = HSC_IR_OP_CODE_UNARY_OP(LOGICAL_NOT); goto UNARY;
+		case HSC_EXPR_TYPE_UNARY_OP(BIT_NOT): op_code = HSC_IR_OP_CODE_UNARY_OP(BIT_NOT); goto UNARY;
+		case HSC_EXPR_TYPE_UNARY_OP(NEGATE): op_code = HSC_IR_OP_CODE_UNARY_OP(NEGATE); goto UNARY;
+UNARY:
+		{
+			HscExpr* unary_expr = &expr[expr->unary.expr_rel_idx];
+			if (op_code == HSC_IR_OP_CODE_UNARY_OP(LOGICAL_NOT) && HSC_DATA_TYPE_SCALAR(unary_expr->data_type) != HSC_DATA_TYPE_BOOL) {
+				basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, unary_expr);
+			} else {
+				basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, unary_expr);
+			}
+
+			U16 return_value_idx = hsc_ir_add_value(ir, ir_function, expr->data_type);
+			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 2);
+			operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+			operands[1] = ir->last_operand;
+			hsc_ir_add_instrunction(ir, ir_function, op_code, operands, 2);
+
+			ir->last_operand = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+			break;
+		};
 		case HSC_EXPR_TYPE_STMT_IF: {
 			HscExpr* cond_expr = &expr[expr->if_.cond_expr_rel_idx];
-			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, cond_expr);
+			basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, cond_expr);
 			HscIROperand cond_operand = ir->last_operand;
 
 			HscIROperand* selection_merge_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
@@ -2529,6 +2886,89 @@ HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscI
 			}
 			break;
 		};
+		case HSC_EXPR_TYPE_BINARY_OP(ADD):
+		case HSC_EXPR_TYPE_BINARY_OP(SUBTRACT):
+		case HSC_EXPR_TYPE_BINARY_OP(MULTIPLY):
+		case HSC_EXPR_TYPE_BINARY_OP(DIVIDE):
+		case HSC_EXPR_TYPE_BINARY_OP(MODULO):
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_AND):
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_OR):
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_XOR):
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_SHIFT_LEFT):
+		case HSC_EXPR_TYPE_BINARY_OP(BIT_SHIFT_RIGHT):
+		case HSC_EXPR_TYPE_BINARY_OP(EQUAL):
+		case HSC_EXPR_TYPE_BINARY_OP(NOT_EQUAL):
+		case HSC_EXPR_TYPE_BINARY_OP(LESS_THAN):
+		case HSC_EXPR_TYPE_BINARY_OP(LESS_THAN_OR_EQUAL):
+		case HSC_EXPR_TYPE_BINARY_OP(GREATER_THAN):
+		case HSC_EXPR_TYPE_BINARY_OP(GREATER_THAN_OR_EQUAL):
+		{
+			HscExpr* left_expr = expr - expr->binary.left_expr_rel_idx;
+			HscExpr* right_expr = expr - expr->binary.right_expr_rel_idx;
+			HscIROpCode op_code = HSC_IR_OP_CODE_BINARY_OP_START + (expr->type - HSC_EXPR_TYPE_BINARY_OP_START);
+
+			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 3);
+			hsc_ir_add_instrunction(ir, ir_function, op_code, operands, 3);
+			U16 return_value_idx = hsc_ir_add_value(ir, ir_function, left_expr->data_type);
+			operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, left_expr);
+			operands[1] = ir->last_operand;
+
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, right_expr);
+			operands[2] = ir->last_operand;
+
+			ir->last_operand = operands[0];
+			break;
+		};
+		case HSC_EXPR_TYPE_LOGICAL_AND:
+		case HSC_EXPR_TYPE_LOGICAL_OR:
+		{
+			HscExpr* left_expr = expr - expr->binary.left_expr_rel_idx;
+			HscExpr* right_expr = expr - expr->binary.right_expr_rel_idx;
+
+			HscIROperand starting_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
+
+			basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, left_expr);
+			HscIROperand cond_operand = ir->last_operand;
+
+			HscIROperand* selection_merge_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_SELECTION_MERGE, selection_merge_operands, 1);
+
+			HscIROperand* cond_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 3);
+			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_BRANCH_CONDITIONAL, cond_branch_operands, 3);
+			cond_branch_operands[0] = cond_operand;
+			U32 success_idx = expr->type != HSC_EXPR_TYPE_LOGICAL_AND;
+			U32 converging_idx = expr->type == HSC_EXPR_TYPE_LOGICAL_AND;
+
+			basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			HscIROperand success_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
+			cond_branch_operands[1 + success_idx] = success_basic_block_operand;
+
+			basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, right_expr);
+			HscIROperand success_cond_operand = ir->last_operand;
+
+			HscIROperand* success_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, success_branch_operands, 1);
+
+			basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			HscIROperand converging_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
+			selection_merge_operands[0] = converging_basic_block_operand;
+			success_branch_operands[0] = converging_basic_block_operand;
+			cond_branch_operands[1 + converging_idx] = converging_basic_block_operand;
+
+			HscIROperand* phi_operands = hsc_ir_add_operands_many(ir, ir_function, 5);
+			hsc_ir_add_instrunction(ir, ir_function, HSC_IR_OP_CODE_PHI, phi_operands, 5);
+			U16 return_value_idx = hsc_ir_add_value(ir, ir_function, hsc_ir_operand_type(ir, astgen, ir_function, cond_operand));
+			phi_operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+			phi_operands[1] = cond_operand;
+			phi_operands[2] = starting_basic_block_operand;
+			phi_operands[3] = success_cond_operand;
+			phi_operands[4] = success_basic_block_operand;
+
+			ir->last_operand = phi_operands[0];
+			break;
+		};
 		case HSC_EXPR_TYPE_CALL: {
 			HscExpr* function_expr = expr - expr->binary.left_expr_rel_idx;
 			HscExpr* call_args_expr = expr - expr->binary.right_expr_rel_idx;
@@ -2536,7 +2976,7 @@ HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscI
 			HSC_DEBUG_ASSERT(call_args_expr->type == HSC_EXPR_TYPE_CALL_ARG_LIST, "expected call argument list expression");
 			HscFunction* function = &astgen->functions[function_expr->function.id - 1];
 			if (function_expr->function.id < HSC_FUNCTION_ID_USER_START) {
-				basic_block = hsc_ir_generate_instructions_from_intrinsic_function(ir, astgen, ir_function, basic_block, function, function_expr->function.id, call_args_expr);
+				basic_block = hsc_ir_generate_instructions_from_intrinsic_function(ir, astgen, ir_function, basic_block, expr, function, function_expr->function.id, call_args_expr);
 			} else {
 				HscExpr* arg_expr = call_args_expr;
 				U32 args_count = ((U8*)call_args_expr)[1];
@@ -2633,6 +3073,7 @@ void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 			fprintf(f, "\tBASIC_BLOCK(#%u):\n", basic_block_idx - ir_function->basic_blocks_start_idx);
 			for (U32 instruction_idx = basic_block->instructions_start_idx; instruction_idx < basic_block->instructions_start_idx + (U32)basic_block->instructions_count; instruction_idx += 1) {
 				HscIRInstr* instruction = &ir->instructions[ir_function->instructions_start_idx + instruction_idx];
+				char* op_name;
 				switch (instruction->op_code) {
 #if 0
 					case HSC_IR_OP_CODE_LOAD:
@@ -2664,10 +3105,50 @@ void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 						hsc_ir_print_operand(ir, astgen, operands[0], f);
 						fprintf(f, "\n");
 						break;
+					case HSC_IR_OP_CODE_UNARY_OP(LOGICAL_NOT): op_name = "LOGICAL_NOT"; goto UNARY;
+					case HSC_IR_OP_CODE_UNARY_OP(BIT_NOT): op_name = "BIT_NOT"; goto UNARY;
+					case HSC_IR_OP_CODE_UNARY_OP(NEGATE): op_name = "NEGATE"; goto UNARY;
+UNARY:				{
+						fprintf(f, "\t\tOP_%s: ", op_name);
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[1], f);
+						fprintf(f, "\n");
+						break;
+					};
 					case HSC_IR_OP_CODE_SELECTION_MERGE: {
 						fprintf(f, "\t\tOP_SELECTION_MERGE: ");
 						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
 						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, "\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_BINARY_OP(ADD): op_name = "OP_ADD"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(SUBTRACT): op_name = "OP_SUBTRACT"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(MULTIPLY): op_name = "OP_MULTIPLY"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(DIVIDE): op_name = "OP_DIVIDE"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(MODULO): op_name = "OP_MODULO"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(BIT_AND): op_name = "OP_BIT_AND"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(BIT_OR): op_name = "OP_BIT_OR"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(BIT_XOR): op_name = "OP_BIT_XOR"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(BIT_SHIFT_LEFT): op_name = "OP_BIT_SHIFT_LEFT"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(BIT_SHIFT_RIGHT): op_name = "OP_BIT_SHIFT_RIGHT"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(EQUAL): op_name = "OP_EQUAL"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(NOT_EQUAL): op_name = "OP_NOT_EQUAL"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(LESS_THAN): op_name = "OP_LESS_THAN"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(LESS_THAN_OR_EQUAL): op_name = "OP_LESS_THAN_OR_EQUAL"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(GREATER_THAN): op_name = "OP_GREATER_THAN"; goto BINARY_OP;
+					case HSC_IR_OP_CODE_BINARY_OP(GREATER_THAN_OR_EQUAL): op_name = "OP_GREATER_THAN_OR_EQUAL"; goto BINARY_OP;
+BINARY_OP:
+					{
+						fprintf(f, "\t\t%s: ", op_name);
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[1], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[2], f);
 						fprintf(f, "\n");
 						break;
 					};
@@ -2686,6 +3167,19 @@ void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 						hsc_ir_print_operand(ir, astgen, operands[1], f);
 						fprintf(f, ", ");
 						hsc_ir_print_operand(ir, astgen, operands[2], f);
+						fprintf(f, "\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_PHI: {
+						fprintf(f, "\t\tOP_PHI: ");
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						for (U32 idx = 1; idx < instruction->operands_count; idx += 2) {
+							fprintf(f, "(");
+							hsc_ir_print_operand(ir, astgen, operands[idx + 1], f);
+							fprintf(f, ": ");
+							hsc_ir_print_operand(ir, astgen, operands[idx + 0], f);
+							fprintf(f, ")");
+						}
 						fprintf(f, "\n");
 						break;
 					};
@@ -2708,6 +3202,100 @@ void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 //
 //
 // ===========================================
+
+HscSpirvOp hsc_spriv_binary_ops[HSC_BINARY_OP_COUNT][HSC_BASIC_TYPE_CLASS_COUNT] = {
+	[HSC_BINARY_OP_ADD] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_I_ADD,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_I_ADD,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_ADD,
+	},
+	[HSC_BINARY_OP_SUBTRACT] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_I_SUB,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_I_SUB,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_SUB,
+	},
+	[HSC_BINARY_OP_MULTIPLY] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_I_MUL,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_I_MUL,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_MUL,
+	},
+	[HSC_BINARY_OP_DIVIDE] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_U_DIV,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_S_DIV,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_DIV,
+	},
+	[HSC_BINARY_OP_MODULO] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_U_MOD,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_S_MOD,
+	},
+	[HSC_BINARY_OP_BIT_AND] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_BITWISE_AND,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_BITWISE_AND,
+	},
+	[HSC_BINARY_OP_BIT_OR] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_BITWISE_OR,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_BITWISE_OR,
+	},
+	[HSC_BINARY_OP_BIT_XOR] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_BITWISE_XOR,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_BITWISE_XOR,
+	},
+	[HSC_BINARY_OP_BIT_SHIFT_LEFT] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_BITWISE_SHIFT_LEFT_LOGICAL,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_BITWISE_SHIFT_LEFT_LOGICAL,
+	},
+	[HSC_BINARY_OP_BIT_SHIFT_RIGHT] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_BITWISE_SHIFT_RIGHT_LOGICAL,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_BITWISE_SHIFT_RIGHT_ARITHMETIC,
+	},
+	[HSC_BINARY_OP_EQUAL] = {
+		[HSC_BASIC_TYPE_CLASS_BOOL] = HSC_SPIRV_OP_LOGICAL_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_I_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_I_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_UNORD_EQUAL,
+	},
+	[HSC_BINARY_OP_NOT_EQUAL] = {
+		[HSC_BASIC_TYPE_CLASS_BOOL] = HSC_SPIRV_OP_LOGICAL_NOT_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_I_NOT_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_I_NOT_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_UNORD_NOT_EQUAL,
+	},
+	[HSC_BINARY_OP_LESS_THAN] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_U_LESS_THAN,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_S_LESS_THAN,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_UNORD_LESS_THAN,
+	},
+	[HSC_BINARY_OP_LESS_THAN_OR_EQUAL] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_U_LESS_THAN_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_S_LESS_THAN_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_UNORD_LESS_THAN_EQUAL,
+	},
+	[HSC_BINARY_OP_GREATER_THAN] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_U_GREATER_THAN,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_S_GREATER_THAN,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_UNORD_GREATER_THAN,
+	},
+	[HSC_BINARY_OP_GREATER_THAN_OR_EQUAL] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_U_GREATER_THAN_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_S_GREATER_THAN_EQUAL,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_UNORD_GREATER_THAN_EQUAL,
+	},
+};
+
+HscSpirvOp hsc_spriv_unary_ops[HSC_UNARY_OP_COUNT][HSC_BASIC_TYPE_CLASS_COUNT] = {
+	[HSC_UNARY_OP_LOGICAL_NOT] = {
+		[HSC_BASIC_TYPE_CLASS_BOOL] = HSC_SPIRV_OP_LOGICAL_NOT,
+	},
+	[HSC_UNARY_OP_BIT_NOT] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_BITWISE_NOT,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_BITWISE_NOT,
+	},
+	[HSC_UNARY_OP_NEGATE] = {
+		[HSC_BASIC_TYPE_CLASS_UINT] = HSC_SPIRV_OP_S_NEGATE,
+		[HSC_BASIC_TYPE_CLASS_SINT] = HSC_SPIRV_OP_S_NEGATE,
+		[HSC_BASIC_TYPE_CLASS_FLOAT] = HSC_SPIRV_OP_F_NEGATE,
+	},
+};
 
 void hsc_spirv_function_type_table_init(HscSpirvFunctionTypeTable* table) {
 	U32 cap = 8192;
@@ -2823,23 +3411,17 @@ void hsc_spirv_instr_add_operand(HscCompiler* c, U32 word) {
 	c->spirv.instr_operands_count += 1;
 }
 
-void hsc_spirv_instr_add_converted_operand(HscCompiler* c, HscIROperand ir_operand) {
-	U32 word;
+U32 hsc_spirv_convert_operand(HscCompiler* c, HscIROperand ir_operand) {
 	switch (ir_operand & 0xff) {
-		case HSC_IR_OPERAND_VALUE:
-			HSC_ABORT("TODO\n");
-			break;
-		case HSC_IR_OPERAND_CONSTANT:
-			word = c->spirv.constant_base_id + HSC_IR_OPERAND_CONSTANT_ID(ir_operand).idx_plus_one - 1;
-			break;
-		case HSC_IR_OPERAND_BASIC_BLOCK:
-			word = c->spirv.basic_block_base_spirv_id + HSC_IR_OPERAND_BASIC_BLOCK_IDX(ir_operand);
-			break;
-		default:
-			word = hsc_spirv_resolve_type_id(c, ir_operand);
-			break;
+		case HSC_IR_OPERAND_VALUE: return c->spirv.value_base_id + HSC_IR_OPERAND_VALUE_IDX(ir_operand);
+		case HSC_IR_OPERAND_CONSTANT: return c->spirv.constant_base_id + HSC_IR_OPERAND_CONSTANT_ID(ir_operand).idx_plus_one - 1;
+		case HSC_IR_OPERAND_BASIC_BLOCK: return c->spirv.basic_block_base_spirv_id + HSC_IR_OPERAND_BASIC_BLOCK_IDX(ir_operand);
+		default: return hsc_spirv_resolve_type_id(c, ir_operand);
 	}
+}
 
+void hsc_spirv_instr_add_converted_operand(HscCompiler* c, HscIROperand ir_operand) {
+	U32 word = hsc_spirv_convert_operand(c, ir_operand);
 	hsc_spirv_instr_add_operand(c, word);
 }
 
@@ -2891,6 +3473,50 @@ void hsc_spirv_instr_end(HscCompiler* c) {
 		case HSC_SPIRV_OP_FUNCTION_PARAMETER:
 		case HSC_SPIRV_OP_FUNCTION_END:
 		case HSC_SPIRV_OP_COMPOSITE_CONSTRUCT:
+		case HSC_SPIRV_OP_S_NEGATE:
+		case HSC_SPIRV_OP_F_NEGATE:
+		case HSC_SPIRV_OP_I_ADD:
+		case HSC_SPIRV_OP_F_ADD:
+		case HSC_SPIRV_OP_I_SUB:
+		case HSC_SPIRV_OP_F_SUB:
+		case HSC_SPIRV_OP_I_MUL:
+		case HSC_SPIRV_OP_F_MUL:
+		case HSC_SPIRV_OP_U_DIV:
+		case HSC_SPIRV_OP_S_DIV:
+		case HSC_SPIRV_OP_F_DIV:
+		case HSC_SPIRV_OP_U_MOD:
+		case HSC_SPIRV_OP_S_MOD:
+		case HSC_SPIRV_OP_F_MOD:
+		case HSC_SPIRV_OP_LOGICAL_EQUAL:
+		case HSC_SPIRV_OP_LOGICAL_NOT_EQUAL:
+		case HSC_SPIRV_OP_LOGICAL_OR:
+		case HSC_SPIRV_OP_LOGICAL_AND:
+		case HSC_SPIRV_OP_LOGICAL_NOT:
+		case HSC_SPIRV_OP_SELECT:
+		case HSC_SPIRV_OP_I_EQUAL:
+		case HSC_SPIRV_OP_I_NOT_EQUAL:
+		case HSC_SPIRV_OP_U_GREATER_THAN:
+		case HSC_SPIRV_OP_S_GREATER_THAN:
+		case HSC_SPIRV_OP_U_GREATER_THAN_EQUAL:
+		case HSC_SPIRV_OP_S_GREATER_THAN_EQUAL:
+		case HSC_SPIRV_OP_U_LESS_THAN:
+		case HSC_SPIRV_OP_S_LESS_THAN:
+		case HSC_SPIRV_OP_U_LESS_THAN_EQUAL:
+		case HSC_SPIRV_OP_S_LESS_THAN_EQUAL:
+		case HSC_SPIRV_OP_F_UNORD_EQUAL:
+		case HSC_SPIRV_OP_F_UNORD_NOT_EQUAL:
+		case HSC_SPIRV_OP_F_UNORD_LESS_THAN:
+		case HSC_SPIRV_OP_F_UNORD_GREATER_THAN:
+		case HSC_SPIRV_OP_F_UNORD_LESS_THAN_EQUAL:
+		case HSC_SPIRV_OP_F_UNORD_GREATER_THAN_EQUAL:
+		case HSC_SPIRV_OP_BITWISE_SHIFT_RIGHT_LOGICAL:
+		case HSC_SPIRV_OP_BITWISE_SHIFT_RIGHT_ARITHMETIC:
+		case HSC_SPIRV_OP_BITWISE_SHIFT_LEFT_LOGICAL:
+		case HSC_SPIRV_OP_BITWISE_OR:
+		case HSC_SPIRV_OP_BITWISE_XOR:
+		case HSC_SPIRV_OP_BITWISE_AND:
+		case HSC_SPIRV_OP_BITWISE_NOT:
+		case HSC_SPIRV_OP_PHI:
 		case HSC_SPIRV_OP_SELECTION_MERGE:
 		case HSC_SPIRV_OP_LABEL:
 		case HSC_SPIRV_OP_BRANCH:
@@ -3062,6 +3688,9 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 	c->spirv.basic_block_base_spirv_id = c->spirv.next_id;
 	c->spirv.next_id += ir_function->basic_blocks_count;
 
+	c->spirv.value_base_id = c->spirv.next_id;
+	c->spirv.next_id += ir_function->values_count;
+
 	for (U32 basic_block_idx = ir_function->basic_blocks_start_idx; basic_block_idx < ir_function->basic_blocks_start_idx + (U32)ir_function->basic_blocks_count; basic_block_idx += 1) {
 		HscIRBasicBlock* basic_block = &c->ir.basic_blocks[basic_block_idx];
 
@@ -3073,20 +3702,26 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 			HscIRInstr* instruction = &c->ir.instructions[ir_function->instructions_start_idx + instruction_idx];
 			HscIROperand* operands = &c->ir.operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
 			switch (instruction->op_code) {
-				case HSC_IR_OP_CODE_COMPOSITE_INIT:
+				case HSC_IR_OP_CODE_COMPOSITE_INIT: {
 					hsc_spirv_instr_start(c, HSC_SPIRV_OP_COMPOSITE_CONSTRUCT);
 					U32 return_value_idx = HSC_IR_OPERAND_VALUE_IDX(operands[0]);
 					HscIRValue* return_value = &c->ir.values[ir_function->values_start_idx + return_value_idx];
 
 					hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, return_value->data_type));
-					hsc_spirv_instr_add_result_operand(c);
 
-					for (U32 i = 1; i < instruction->operands_count; i += 1) {
+					for (U32 i = 0; i < instruction->operands_count; i += 1) {
 						hsc_spirv_instr_add_converted_operand(c, operands[i]);
+					}
+
+					U32 fields_count = hsc_data_type_composite_fields_count(&c->astgen, return_value->data_type);
+					printf("fields_count = %u\n", fields_count);
+					for (U32 i = instruction->operands_count; i < fields_count + 1; i += 1) {
+						hsc_spirv_instr_add_converted_operand(c, operands[instruction->operands_count - 1]);
 					}
 
 					hsc_spirv_instr_end(c);
 					break;
+				};
 				case HSC_IR_OP_CODE_FUNCTION_RETURN: {
 					if (function->shader_stage == HSC_FUNCTION_SHADER_STAGE_FRAGMENT) {
 						hsc_spirv_instr_start(c, HSC_SPIRV_OP_STORE);
@@ -3113,6 +3748,61 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 					hsc_spirv_instr_end(c);
 					break;
 				};
+				case HSC_IR_OP_CODE_BINARY_OP(ADD):
+				case HSC_IR_OP_CODE_BINARY_OP(SUBTRACT):
+				case HSC_IR_OP_CODE_BINARY_OP(MULTIPLY):
+				case HSC_IR_OP_CODE_BINARY_OP(DIVIDE):
+				case HSC_IR_OP_CODE_BINARY_OP(MODULO):
+				case HSC_IR_OP_CODE_BINARY_OP(BIT_AND):
+				case HSC_IR_OP_CODE_BINARY_OP(BIT_OR):
+				case HSC_IR_OP_CODE_BINARY_OP(BIT_XOR):
+				case HSC_IR_OP_CODE_BINARY_OP(BIT_SHIFT_LEFT):
+				case HSC_IR_OP_CODE_BINARY_OP(BIT_SHIFT_RIGHT):
+				case HSC_IR_OP_CODE_BINARY_OP(EQUAL):
+				case HSC_IR_OP_CODE_BINARY_OP(NOT_EQUAL):
+				case HSC_IR_OP_CODE_BINARY_OP(LESS_THAN):
+				case HSC_IR_OP_CODE_BINARY_OP(LESS_THAN_OR_EQUAL):
+				case HSC_IR_OP_CODE_BINARY_OP(GREATER_THAN):
+				case HSC_IR_OP_CODE_BINARY_OP(GREATER_THAN_OR_EQUAL):
+				{
+					U32 return_value_idx = HSC_IR_OPERAND_VALUE_IDX(operands[0]);
+					HscIRValue* return_value = &c->ir.values[ir_function->values_start_idx + return_value_idx];
+
+					HscBinaryOp binary_op = instruction->op_code - HSC_IR_OP_CODE_BINARY_OP_START;
+					HscBasicTypeClass type_class = hsc_basic_type_class(HSC_DATA_TYPE_SCALAR(hsc_ir_operand_type(&c->ir, &c->astgen, ir_function, operands[1])));
+					printf("binary_op = %u, type_class = %u\n", binary_op, type_class);
+					HscSpirvOp spirv_op = hsc_spriv_binary_ops[binary_op][type_class];
+					HSC_DEBUG_ASSERT(spirv_op != HSC_SPIRV_OP_NO_OP, "internal error: invalid configuration for a binary op");
+
+					hsc_spirv_instr_start(c, spirv_op);
+					hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, return_value->data_type));
+					hsc_spirv_instr_add_converted_operand(c, operands[0]);
+					hsc_spirv_instr_add_converted_operand(c, operands[1]);
+					hsc_spirv_instr_add_converted_operand(c, operands[2]);
+					hsc_spirv_instr_end(c);
+					break;
+				};
+				case HSC_IR_OP_CODE_UNARY_OP(LOGICAL_NOT):
+				case HSC_IR_OP_CODE_UNARY_OP(BIT_NOT):
+				case HSC_IR_OP_CODE_UNARY_OP(NEGATE):
+				{
+					U32 return_value_idx = HSC_IR_OPERAND_VALUE_IDX(operands[0]);
+					HscIRValue* return_value = &c->ir.values[ir_function->values_start_idx + return_value_idx];
+
+					HscDataType scalar_data_type = HSC_DATA_TYPE_SCALAR(hsc_ir_operand_type(&c->ir, &c->astgen, ir_function, operands[1]));
+					HscBasicTypeClass type_class = hsc_basic_type_class(scalar_data_type);
+
+					HscUnaryOp unary_op = instruction->op_code - HSC_IR_OP_CODE_UNARY_OP_START;
+					HscSpirvOp spirv_op = hsc_spriv_unary_ops[unary_op][type_class];
+					HSC_DEBUG_ASSERT(spirv_op != HSC_SPIRV_OP_NO_OP, "internal error: invalid configuration for a unary op");
+
+					hsc_spirv_instr_start(c, spirv_op);
+					hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, return_value->data_type));
+					hsc_spirv_instr_add_converted_operand(c, operands[0]);
+					hsc_spirv_instr_add_converted_operand(c, operands[1]);
+					hsc_spirv_instr_end(c);
+					break;
+				};
 				case HSC_IR_OP_CODE_BRANCH: {
 					hsc_spirv_instr_start(c, HSC_SPIRV_OP_BRANCH);
 					hsc_spirv_instr_add_converted_operand(c, operands[0]);
@@ -3124,6 +3814,16 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 					hsc_spirv_instr_add_converted_operand(c, operands[0]);
 					hsc_spirv_instr_add_converted_operand(c, operands[1]);
 					hsc_spirv_instr_add_converted_operand(c, operands[2]);
+					hsc_spirv_instr_end(c);
+					break;
+				};
+				case HSC_IR_OP_CODE_PHI: {
+					hsc_spirv_instr_start(c, HSC_SPIRV_OP_PHI);
+					HscDataType data_type = hsc_ir_operand_type(&c->ir, &c->astgen, ir_function, operands[1]);
+					hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, data_type));
+					for (U32 idx = 0; idx < instruction->operands_count; idx += 1) {
+						hsc_spirv_instr_add_converted_operand(c, operands[idx]);
+					}
 					hsc_spirv_instr_end(c);
 					break;
 				};
@@ -3380,7 +4080,7 @@ void hsc_compiler_init(HscCompiler* compiler, HscCompilerSetup* setup) {
 		}
 	}
 
-	hsc_opt_set_enabled(&compiler->astgen.opts, HSC_OPT_CONSTANT_FOLDING);
+	//hsc_opt_set_enabled(&compiler->astgen.opts, HSC_OPT_CONSTANT_FOLDING);
 
 	hsc_astgen_init(&compiler->astgen, setup);
 	hsc_ir_init(&compiler->ir);

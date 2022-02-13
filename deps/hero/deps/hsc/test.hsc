@@ -4,15 +4,22 @@ vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
 }
 
 fragment Vec4 billboard_shader_fragment(Vec4 state) {
-	if (false) {
+	if (~(-1)) {
 		return vec4(1.f, 0.f, 0.f, 1.f);
-	} else if (false) {
+	} else {
+		return vec4(0.f, 0.f, 1.f, 1.f);
+	}
+/*
+	if (1 && 1) {
+		return vec4(1.f, 0.f, 0.f, 1.f);
+	} else if (0) {
 		return vec4(0.f, 0.f, 1.f, 1.f);
 	} else if (true) {
 		return vec4(1.f, 0.f, 1.f, 1.f);
 	} else {
 		return vec4(0.f, 1.f, 1.f, 1.f);
 	}
+	*/
 }
 
 /*
