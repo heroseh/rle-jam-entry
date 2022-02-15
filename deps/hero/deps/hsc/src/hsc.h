@@ -63,9 +63,9 @@
 #endif
 
 #if HSC_DEBUG_ASSERTIONS
-#define HSC_UNREACHABLE(message) HSC_ABORT("unreachable code: " message);
+#define HSC_UNREACHABLE(...) HSC_ABORT("unreachable code: " __VA_ARGS__);
 #else
-#define HSC_UNREACHABLE(message) __builtin_unreachable()
+#define HSC_UNREACHABLE(...) __builtin_unreachable()
 #endif
 
 #ifdef __GNUC__
@@ -324,6 +324,7 @@ enum {
 	HSC_TOKEN_FULL_STOP,
 	HSC_TOKEN_COMMA,
 	HSC_TOKEN_SEMICOLON,
+	HSC_TOKEN_COLON,
 	HSC_TOKEN_PLUS,
 	HSC_TOKEN_MINUS,
 	HSC_TOKEN_FORWARD_SLASH,
@@ -374,6 +375,10 @@ enum {
 	HSC_TOKEN_KEYWORD_RETURN,
 	HSC_TOKEN_KEYWORD_IF,
 	HSC_TOKEN_KEYWORD_ELSE,
+	HSC_TOKEN_KEYWORD_SWITCH,
+	HSC_TOKEN_KEYWORD_CASE,
+	HSC_TOKEN_KEYWORD_DEFAULT,
+	HSC_TOKEN_KEYWORD_BREAK,
 	HSC_TOKEN_KEYWORD_TRUE,
 	HSC_TOKEN_KEYWORD_FALSE,
 	HSC_TOKEN_KEYWORD_VERTEX,
@@ -482,8 +487,8 @@ struct HscConstantTable {
 	HscConstantId*    data_write_ptr;
 };
 
-typedef struct HscFunctionParam HscFunctionParam;
-struct HscFunctionParam {
+typedef struct HscLocalVariable HscLocalVariable;
+struct HscLocalVariable {
 	HscStringId identifier_string_id;
 	HscDataType data_type;
 	U32         identifier_token_idx;
@@ -541,7 +546,7 @@ struct HscIntrinsicFunction {
 	char* name;
 	HscDataType return_data_type;
 	U32 params_count;
-	HscFunctionParam params[16];
+	HscLocalVariable params[16];
 };
 
 extern U32 hsc_intrinsic_function_overloads_count[HSC_FUNCTION_ID_INTRINSIC_END];
@@ -553,6 +558,7 @@ enum {
 
 typedef U8 HscBinaryOp;
 enum {
+	HSC_BINARY_OP_ASSIGN,
 	HSC_BINARY_OP_ADD,
 	HSC_BINARY_OP_SUBTRACT,
 	HSC_BINARY_OP_MULTIPLY,
@@ -563,6 +569,9 @@ enum {
 	HSC_BINARY_OP_BIT_XOR,
 	HSC_BINARY_OP_BIT_SHIFT_LEFT,
 	HSC_BINARY_OP_BIT_SHIFT_RIGHT,
+
+	//
+	// logical operators (return a bool)
 	HSC_BINARY_OP_EQUAL,
 	HSC_BINARY_OP_NOT_EQUAL,
 	HSC_BINARY_OP_LESS_THAN,
@@ -597,10 +606,17 @@ enum {
 	HSC_EXPR_TYPE_LOGICAL_OR,
 	HSC_EXPR_TYPE_CALL,
 
+	HSC_EXPR_TYPE_LOCAL_VARIABLE,
+
 	HSC_EXPR_TYPE_CONSTANT,
+	HSC_EXPR_TYPE_DATA_TYPE,
 	HSC_EXPR_TYPE_FUNCTION,
 	HSC_EXPR_TYPE_CALL_ARG_LIST,
 	HSC_EXPR_TYPE_STMT_IF,
+	HSC_EXPR_TYPE_STMT_SWITCH,
+	HSC_EXPR_TYPE_STMT_CASE,
+	HSC_EXPR_TYPE_STMT_DEFAULT,
+	HSC_EXPR_TYPE_STMT_BREAK,
 
 	//
 	// unary ops
@@ -616,48 +632,62 @@ typedef struct HscExpr HscExpr;
 struct HscExpr {
 	union {
 		struct {
-			U32 type: 5; // HscExprType
+			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
 		};
 		struct {
-			U32 type: 5; // HscExprType
+			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
-			U32 id: 26; // HscFunctionId
+			U32 id: 25; // HscFunctionId
 		} function;
 		struct {
-			U32 type: 5; // HscExprType
+			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
-			U32 expr_rel_idx: 26;
+			U32 expr_rel_idx: 25;
 		} unary;
 		struct {
-			U32 type: 5; // HscExprType
+			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
-			U32 left_expr_rel_idx: 13;
+			U32 is_assignment: 1;
+			U32 left_expr_rel_idx: 11;
 			U32 right_expr_rel_idx: 13;
 		} binary;
 		struct {
-			U32 type: 5; // HscExprType
+			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
-			U32 id: 26;
+			U32 id: 25;
 		} constant;
 		struct {
-			U32 type: 5; // HscExprType
+			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
 			U32 has_return_stmt: 1;
 			U32 stmts_count: 11;
-			U32 first_expr_rel_idx: 13;
+			U32 first_expr_rel_idx: 6;
+			U32 local_variables_count: 6;
 		} stmt_block;
 		struct {
-			U32 type: 5; // HscExprType
+			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
-			U32 cond_expr_rel_idx: 13;
+			U32 cond_expr_rel_idx: 12;
 			U32 true_stmt_rel_idx: 13;
 		} if_;
+		struct {
+			U32 type: 6; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 cond_expr_rel_idx: 12;
+			U32 block_expr_rel_idx: 13;
+			// alt_next_expr_rel_idx is the default_case_expr_rel_idx
+		} switch_;
+		struct {
+			U32 type: 6; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 idx: 25;
+		} variable;
 	};
 
 	union {
 		struct { // if is_stmt_block_entry
-			U16 prev_expr_rel_idx;
+			U16 alt_next_expr_rel_idx;
 			U16 next_expr_rel_idx;
 		};
 		struct { // this is stored in the true statement of the if statement
@@ -665,6 +695,10 @@ struct HscExpr {
 			U32 true_and_false_stmts_have_return_stmt: 1;
 			U32 __unused: 15;
 		} if_aux;
+		struct {
+			U32 case_stmts_count: 17;
+			U32 first_case_expr_rel_idx: 15;
+		} switch_aux;
 		HscDataType data_type;
 	};
 };
@@ -691,18 +725,34 @@ struct HscGenericDataTypeState {
 	HscDataType vec4;
 };
 
+typedef struct HscSwitchState HscSwitchState;
+struct HscSwitchState {
+	HscExpr* switch_stmt;
+	HscExpr* first_switch_case;
+	HscExpr* prev_switch_case;
+	HscExpr* default_switch_case;
+	HscDataType switch_condition_type;
+	U32 case_stmts_count;
+};
+
 typedef struct HscAstGen HscAstGen;
 struct HscAstGen {
-	HscFunctionParam* function_params;
+	HscLocalVariable* function_params_and_local_variables;
 	HscFunction*      functions;
 	HscExpr*          exprs;
 	HscLocation*      expr_locations;
-	U32 function_params_count;
-	U32 function_params_cap;
+	U32 function_params_and_local_variables_count;
+	U32 function_params_and_local_variables_cap;
 	U32 functions_count;
 	U32 functions_cap;
 	U32 exprs_count;
 	U32 exprs_cap;
+
+	HscExpr* stmt_block;
+	HscFunction* print_function;
+	U32 print_variable_base_idx;
+
+	HscSwitchState switch_state;
 
 	HscGenericDataTypeState generic_data_type_state;
 
@@ -784,7 +834,7 @@ void hsc_astgen_generate(HscAstGen* astgen);
 
 void hsc_astgen_variable_stack_open(HscAstGen* astgen);
 void hsc_astgen_variable_stack_close(HscAstGen* astgen);
-void hsc_astgen_variable_stack_add(HscAstGen* astgen, HscStringId string_id);
+U32 hsc_astgen_variable_stack_add(HscAstGen* astgen, HscStringId string_id);
 U32 hsc_astgen_variable_stack_find(HscAstGen* astgen, HscStringId string_id);
 
 // ===========================================
@@ -810,6 +860,8 @@ enum {
 
 	HSC_IR_OP_CODE_PHI,
 
+	HSC_IR_OP_CODE_SWITCH,
+
 	HSC_IR_OP_CODE_COMPOSITE_INIT,
 	HSC_IR_OP_CODE_ACCESS_CHAIN,
 	HSC_IR_OP_CODE_FUNCTION_CALL,
@@ -818,7 +870,7 @@ enum {
 	HSC_IR_OP_CODE_LOOP_MERGE,
 	HSC_IR_OP_CODE_BRANCH,
 	HSC_IR_OP_CODE_BRANCH_CONDITIONAL,
-	HSC_IR_OP_CODE_UNREACHBALE,
+	HSC_IR_OP_CODE_UNREACHABLE,
 };
 
 typedef struct HscIRConst HscIRConst;
@@ -900,6 +952,10 @@ struct HscIR {
 	HscIROperand* operands;
 	U32 operands_count;
 	U32 operands_cap;
+
+	HscIROperand* lastest_variable_operands;
+	U32 lastest_variable_operands_count;
+	U32 lastest_variable_operands_cap;
 
 	HscIROperand last_operand;
 };
@@ -990,6 +1046,7 @@ enum {
 	HSC_SPIRV_OP_LABEL = 248,
 	HSC_SPIRV_OP_BRANCH = 249,
 	HSC_SPIRV_OP_BRANCH_CONDITIONAL = 250,
+	HSC_SPIRV_OP_SWITCH = 251,
 	HSC_SPIRV_OP_RETURN = 253,
 	HSC_SPIRV_OP_RETURN_VALUE = 254,
 	HSC_SPIRV_OP_UNREACHABLE = 255,
@@ -1123,7 +1180,7 @@ struct HscCompilerSetup {
 	uint32_t tokens_cap;
 	uint32_t lines_cap;
 	uint32_t functions_cap;
-	uint32_t function_params_cap;
+	uint32_t function_params_and_local_variables_cap;
 	uint32_t exprs_cap;
 	uint32_t variable_stack_cap;
 	uint32_t string_table_data_cap;
