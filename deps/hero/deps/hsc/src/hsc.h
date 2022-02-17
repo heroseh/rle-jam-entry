@@ -514,6 +514,7 @@ struct HscFunction {
 	HscStringId            identifier_string_id;
 	HscDataType            return_data_type;
 	U32                    params_start_idx;
+	U16                    local_variables_count;
 	U8                     params_count;
 	HscFunctionShaderStage shader_stage;
 	HscExprId              block_expr_id;
@@ -906,6 +907,7 @@ enum {
 	HSC_IR_OPERAND_VALUE = HSC_DATA_TYPE_COUNT,
 	HSC_IR_OPERAND_CONSTANT,
 	HSC_IR_OPERAND_BASIC_BLOCK,
+	HSC_IR_OPERAND_LOCAL_VARIABLE,
 };
 #define HSC_IR_OPERAND_VALUE_INIT(value_idx) (((value_idx) << 8) | HSC_IR_OPERAND_VALUE)
 #define HSC_IR_OPERAND_IS_VALUE(operand) (((operand) & 0xff) == HSC_IR_OPERAND_VALUE)
@@ -918,6 +920,10 @@ enum {
 #define HSC_IR_OPERAND_BASIC_BLOCK_INIT(basic_block_idx) (((basic_block_idx) << 8) | HSC_IR_OPERAND_BASIC_BLOCK)
 #define HSC_IR_OPERAND_IS_BASIC_BLOCK(operand) (((operand) & 0xff) == HSC_IR_OPERAND_BASIC_BLOCK)
 #define HSC_IR_OPERAND_BASIC_BLOCK_IDX(operand) ((operand) >> 8)
+
+#define HSC_IR_OPERAND_LOCAL_VARIABLE_INIT(local_variable_idx) (((local_variable_idx) << 8) | HSC_IR_OPERAND_LOCAL_VARIABLE)
+#define HSC_IR_OPERAND_IS_VARIABLE(operand) (((operand) & 0xff) == HSC_IR_OPERAND_LOCAL_VARIABLE)
+#define HSC_IR_OPERAND_LOCAL_VARIABLE_IDX(operand) ((operand) >> 8)
 
 typedef struct HscIRFunction HscIRFunction;
 struct HscIRFunction {
@@ -958,6 +964,7 @@ struct HscIR {
 	U32 lastest_variable_operands_cap;
 
 	HscIROperand last_operand;
+	bool do_not_load_variable;
 };
 
 void hsc_ir_init(HscIR* ir);
@@ -995,6 +1002,7 @@ enum {
 	HSC_SPIRV_OP_FUNCTION_PARAMETER = 55,
 	HSC_SPIRV_OP_FUNCTION_END = 56,
 	HSC_SPIRV_OP_VARIABLE = 59,
+	HSC_SPIRV_OP_LOAD = 61,
 	HSC_SPIRV_OP_STORE = 62,
 	HSC_SPIRV_OP_DECORATE = 71,
 	HSC_SPIRV_OP_COMPOSITE_CONSTRUCT = 80,
@@ -1074,6 +1082,7 @@ enum {
 	HSC_SPIRV_STORAGE_CLASS_INPUT = 1,
 	HSC_SPIRV_STORAGE_CLASS_UNIFORM = 2,
 	HSC_SPIRV_STORAGE_CLASS_OUTPUT = 3,
+	HSC_SPIRV_STORAGE_CLASS_FUNCTION = 7,
 };
 
 enum {
@@ -1097,17 +1106,24 @@ enum {
 
 #define HSC_SPIRV_INSTR_OPERANDS_CAP 24
 
-typedef struct HscSpirvFunctionTypeEntry HscSpirvFunctionTypeEntry;
-struct HscSpirvFunctionTypeEntry {
-	U32 data_types_start_idx;
-	U32 spirv_id: 24;
-	U32 data_types_count: 8;
+typedef U8 HscSpirvTypeKind;
+enum {
+	HSC_SPIRV_TYPE_KIND_FUNCTION,
+	HSC_SPIRV_TYPE_KIND_FUNCTION_VARIABLE,
 };
 
-typedef struct HscSpirvFunctionTypeTable HscSpirvFunctionTypeTable;
-struct HscSpirvFunctionTypeTable {
+typedef struct HscSpirvTypeEntry HscSpirvTypeEntry;
+struct HscSpirvTypeEntry {
+	U32 data_types_start_idx;
+	U32 spirv_id: 22;
+	U32 data_types_count: 8;
+	U32 kind: 2; // HscSpirvTypeKind
+};
+
+typedef struct HscSpirvTypeTable HscSpirvTypeTable;
+struct HscSpirvTypeTable {
 	HscDataType* data_types;
-	HscSpirvFunctionTypeEntry* entries;
+	HscSpirvTypeEntry* entries;
 	U32 data_types_count;
 	U32 data_types_cap;
 	U32 entries_count;
@@ -1116,7 +1132,7 @@ struct HscSpirvFunctionTypeTable {
 
 typedef struct HscSpirv HscSpirv;
 struct HscSpirv {
-	HscSpirvFunctionTypeTable function_type_table;
+	HscSpirvTypeTable type_table;
 
 	U32* out_capabilities;
 	U32 out_capabilities_count;
@@ -1152,6 +1168,7 @@ struct HscSpirv {
 	U32 value_base_id;
 	U32 constant_base_id;
 	U32 basic_block_base_spirv_id;
+	U32 local_variable_base_spirv_id;
 	U32 next_id;
 	HscSpirvOp instr_op;
 	U16 instr_operands_count;

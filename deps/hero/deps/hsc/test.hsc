@@ -4,18 +4,51 @@ vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
 }
 
 fragment Vec4 billboard_shader_fragment(Vec4 state) {
-	U32 test = 4u;
-	test += test + 1u;
-	if (test == 9 && 1) {
-		return vec4(1.f, 0.f, 0.f, 1.f);
+	Vec4 color;
+	if (0) {
+		color = vec4(1.f, 0.f, 0.f, 1.f);
 	} else if (0) {
-		return vec4(0.f, 0.f, 1.f, 1.f);
+		color = vec4(0.f, 0.f, 1.f, 1.f);
 	} else if (true) {
-		return vec4(1.f, 0.f, 1.f, 1.f);
+		switch (3) {
+			case 3:
+				color = vec4(1.f, 0.f, 1.f, 1.f);
+				break;
+			case 2:
+				color = vec4(1.f, 1.f, 1.f, 1.f);
+				break;
+			case 1:
+				color = vec4(1.f, 1.f, 0.f, 1.f);
+				break;
+		}
 	} else {
-		return vec4(0.f, 1.f, 1.f, 1.f);
+		color = vec4(0.f, 1.f, 1.f, 1.f);
 	}
+	return color;
 }
+
+/*
+fragment Vec4 billboard_shader_fragment(Vec4 state) {
+	Vec4 color;
+	color = vec4(1.f, 0.f, 0.f, 1.f);
+	%0 = vec4(...);
+	if (1) { BLOCK_0:
+		color = vec4(1.f, 0.f, 0.f, 1.f);
+		%1 = vec4(...);
+	} else if (0) {BLOCK_1:
+		color = vec4(0.f, 0.f, 1.f, 1.f);
+		%2 = vec4(...);
+	} else if (true) {
+		color = vec4(1.f, 0.f, 1.f, 1.f);
+		%3 = vec4(...);
+	} else {
+		color = vec4(0.f, 1.f, 1.f, 1.f);
+	}
+	%5 = PHI BLOCK_0 %1, BLOCK_1 %2
+
+	return color;
+}
+*/
 
 /*
 struct Globals {
