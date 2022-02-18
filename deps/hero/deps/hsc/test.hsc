@@ -4,27 +4,12 @@ vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
 }
 
 fragment Vec4 billboard_shader_fragment(Vec4 state) {
-	Vec4 color;
-	if (0) {
-		color = vec4(1.f, 0.f, 0.f, 1.f);
-	} else if (0) {
-		color = vec4(0.f, 0.f, 1.f, 1.f);
-	} else if (true) {
-		switch (3) {
-			case 3:
-				color = vec4(1.f, 0.f, 1.f, 1.f);
-				break;
-			case 2:
-				color = vec4(1.f, 1.f, 1.f, 1.f);
-				break;
-			case 1:
-				color = vec4(1.f, 1.f, 0.f, 1.f);
-				break;
-		}
-	} else {
-		color = vec4(0.f, 1.f, 1.f, 1.f);
+	F32 red = 0.f;
+	for (U32 idx = 0u; idx < 1u; idx += 1u) {
+		red += 0.1f;
 	}
-	return color;
+
+	return vec4(red, 0.f, 0.f, 1.f);
 }
 
 /*

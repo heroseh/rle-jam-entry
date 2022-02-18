@@ -375,10 +375,13 @@ enum {
 	HSC_TOKEN_KEYWORD_RETURN,
 	HSC_TOKEN_KEYWORD_IF,
 	HSC_TOKEN_KEYWORD_ELSE,
+	HSC_TOKEN_KEYWORD_WHILE,
+	HSC_TOKEN_KEYWORD_FOR,
 	HSC_TOKEN_KEYWORD_SWITCH,
 	HSC_TOKEN_KEYWORD_CASE,
 	HSC_TOKEN_KEYWORD_DEFAULT,
 	HSC_TOKEN_KEYWORD_BREAK,
+	HSC_TOKEN_KEYWORD_CONTINUE,
 	HSC_TOKEN_KEYWORD_TRUE,
 	HSC_TOKEN_KEYWORD_FALSE,
 	HSC_TOKEN_KEYWORD_VERTEX,
@@ -615,9 +618,12 @@ enum {
 	HSC_EXPR_TYPE_CALL_ARG_LIST,
 	HSC_EXPR_TYPE_STMT_IF,
 	HSC_EXPR_TYPE_STMT_SWITCH,
+	HSC_EXPR_TYPE_STMT_WHILE,
+	HSC_EXPR_TYPE_STMT_FOR,
 	HSC_EXPR_TYPE_STMT_CASE,
 	HSC_EXPR_TYPE_STMT_DEFAULT,
 	HSC_EXPR_TYPE_STMT_BREAK,
+	HSC_EXPR_TYPE_STMT_CONTINUE,
 
 	//
 	// unary ops
@@ -679,6 +685,20 @@ struct HscExpr {
 			U32 block_expr_rel_idx: 13;
 			// alt_next_expr_rel_idx is the default_case_expr_rel_idx
 		} switch_;
+		struct {
+			U32 type: 6; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 cond_expr_rel_idx: 12;
+			U32 loop_stmt_rel_idx: 13;
+		} while_;
+		struct {
+			U32 type: 6; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 init_expr_rel_idx: 5;
+			U32 cond_expr_rel_idx: 6;
+			U32 inc_expr_rel_idx: 7;
+			U32 loop_stmt_rel_idx: 7;
+		} for_;
 		struct {
 			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
@@ -754,6 +774,7 @@ struct HscAstGen {
 	U32 print_variable_base_idx;
 
 	HscSwitchState switch_state;
+	bool is_in_loop;
 
 	HscGenericDataTypeState generic_data_type_state;
 
@@ -937,6 +958,15 @@ struct HscIRFunction {
 	U16 operands_count;
 };
 
+typedef struct HscIRBranchState HscIRBranchState;
+struct HscIRBranchState {
+	bool all_cases_return;
+	U32 break_branch_linked_list_head;
+	U32 break_branch_linked_list_tail;
+	U32 continue_branch_linked_list_head;
+	U32 continue_branch_linked_list_tail;
+};
+
 typedef struct HscIR HscIR;
 struct HscIR {
 	HscIRFunction* functions;
@@ -959,12 +989,10 @@ struct HscIR {
 	U32 operands_count;
 	U32 operands_cap;
 
-	HscIROperand* lastest_variable_operands;
-	U32 lastest_variable_operands_count;
-	U32 lastest_variable_operands_cap;
-
 	HscIROperand last_operand;
 	bool do_not_load_variable;
+
+	HscIRBranchState branch_state;
 };
 
 void hsc_ir_init(HscIR* ir);
@@ -1050,6 +1078,7 @@ enum {
 	HSC_SPIRV_OP_BITWISE_AND = 199,
 	HSC_SPIRV_OP_BITWISE_NOT = 200,
 	HSC_SPIRV_OP_PHI = 245,
+	HSC_SPIRV_OP_LOOP_MERGE = 246,
 	HSC_SPIRV_OP_SELECTION_MERGE = 247,
 	HSC_SPIRV_OP_LABEL = 248,
 	HSC_SPIRV_OP_BRANCH = 249,
@@ -1098,6 +1127,10 @@ enum {
 	HSC_SPIRV_SELECTION_CONTROL_NONE          = 0,
 	HSC_SPIRV_SELECTION_CONTROL_FLATTERN      = 1,
 	HSC_SPIRV_SELECTION_CONTROL_DONT_FLATTERN = 2,
+};
+
+enum {
+	HSC_SPIRV_LOOP_CONTROL_NONE = 0,
 };
 
 enum {

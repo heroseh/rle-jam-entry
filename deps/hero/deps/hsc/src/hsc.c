@@ -172,10 +172,13 @@ char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_TOKEN_KEYWORD_RETURN] = "return",
 	[HSC_TOKEN_KEYWORD_IF] = "if",
 	[HSC_TOKEN_KEYWORD_ELSE] = "else",
+	[HSC_TOKEN_KEYWORD_WHILE] = "while",
+	[HSC_TOKEN_KEYWORD_FOR] = "for",
 	[HSC_TOKEN_KEYWORD_SWITCH] = "switch",
 	[HSC_TOKEN_KEYWORD_CASE] = "case",
 	[HSC_TOKEN_KEYWORD_DEFAULT] = "default",
 	[HSC_TOKEN_KEYWORD_BREAK] = "break",
+	[HSC_TOKEN_KEYWORD_CONTINUE] = "continue",
 	[HSC_TOKEN_KEYWORD_TRUE] = "true",
 	[HSC_TOKEN_KEYWORD_FALSE] = "false",
 	[HSC_TOKEN_KEYWORD_VERTEX] = "vertex",
@@ -2303,6 +2306,80 @@ bool hsc_stmt_has_return(HscExpr* stmt) {
 	return false;
 }
 
+HscExpr* hsc_astgen_generate_cond_expr(HscAstGen* astgen) {
+	HscToken token = hsc_token_peek(astgen);
+	if (token != HSC_TOKEN_PARENTHESIS_OPEN) {
+		hsc_astgen_error_1(astgen, "expected a '(' for the if statement condition");
+	}
+	token = hsc_token_next(astgen);
+
+	HscExpr* cond_expr = hsc_astgen_generate_expr(astgen, 0);
+	if (!hsc_data_type_is_condition(astgen, cond_expr->data_type)) {
+		HscString data_type_name = hsc_data_type_string(astgen, cond_expr->data_type);
+		hsc_astgen_error_1(astgen, "the condition expression must be convertable to a 'bool' but got '%.*s'", (int)data_type_name.size, data_type_name.data);
+	}
+
+	token = hsc_token_peek(astgen);
+	if (token != HSC_TOKEN_PARENTHESIS_CLOSE) {
+		hsc_astgen_error_1(astgen, "expected a ')' to finish the if statement condition");
+	}
+	token = hsc_token_next(astgen);
+	return cond_expr;
+}
+
+HscExpr* hsc_astgen_generate_variable_decl(HscAstGen* astgen, HscExpr* type_expr) {
+	HSC_DEBUG_ASSERT(type_expr->type == HSC_EXPR_TYPE_DATA_TYPE, "expected a data type expression here");
+
+	HscToken token = hsc_token_peek(astgen);
+	if (token != HSC_TOKEN_IDENT) {
+		hsc_astgen_error_1(astgen, "expected an identifier for a variable declaration");
+	}
+	HscTokenValue identifier_value = hsc_token_value_next(astgen);
+
+	U32 existing_variable_id = hsc_astgen_variable_stack_find(astgen, identifier_value.string_id);
+	if (existing_variable_id) {
+		HscLocation* other_location = NULL; // TODO: location of existing variable
+		HscString string = hsc_string_table_get(&astgen->string_table, identifier_value.string_id);
+		hsc_astgen_error_2(astgen, other_location, "redefinition of '%.*s' local variable identifier", (int)string.size, string.data);
+	}
+	U32 variable_idx = hsc_astgen_variable_stack_add(astgen, identifier_value.string_id);
+
+	HscLocalVariable* local_variable = &astgen->function_params_and_local_variables[astgen->function_params_and_local_variables_count];
+	astgen->function_params_and_local_variables_count += 1;
+	local_variable->identifier_string_id = identifier_value.string_id;
+	local_variable->identifier_token_idx = astgen->token_read_idx;
+	local_variable->data_type = type_expr->data_type;
+	astgen->stmt_block->stmt_block.local_variables_count += 1;
+
+	token = hsc_token_next(astgen);
+	switch (token) {
+		case HSC_TOKEN_SEMICOLON:
+			hsc_token_next(astgen);
+			break;
+		case HSC_TOKEN_EQUAL: {
+			HscExpr* left_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_LOCAL_VARIABLE);
+			left_expr->variable.idx = variable_idx;
+			left_expr->data_type = type_expr->data_type;
+			hsc_token_next(astgen);
+
+			HscExpr* right_expr = hsc_astgen_generate_expr(astgen, 0);
+			HscLocation* other_location = NULL; // TODO
+			hsc_data_type_ensure_compatible(astgen, other_location, left_expr->data_type, right_expr->data_type);
+
+			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_BINARY_OP(ASSIGN));
+			stmt->binary.is_assignment = true;
+			stmt->binary.left_expr_rel_idx = stmt - left_expr;
+			stmt->binary.right_expr_rel_idx = stmt - right_expr;
+
+			return stmt;
+		};
+		default:
+			hsc_astgen_error_1(astgen, "'expected a ';' to end the declaration or a '=' to assign to the new variable");
+	}
+
+	return NULL;
+}
+
 HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 	HscToken token = hsc_token_peek(astgen);
 	switch (token) {
@@ -2355,26 +2432,8 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 		};
 		case HSC_TOKEN_KEYWORD_IF: {
 			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_STMT_IF);
-			token = hsc_token_next(astgen);
-			HscExpr* cond_expr;
-			{
-				if (token != HSC_TOKEN_PARENTHESIS_OPEN) {
-					hsc_astgen_error_1(astgen, "expected a '(' for the if statement condition");
-				}
-				token = hsc_token_next(astgen);
-
-				cond_expr = hsc_astgen_generate_expr(astgen, 0);
-				if (!hsc_data_type_is_condition(astgen, cond_expr->data_type)) {
-					HscString data_type_name = hsc_data_type_string(astgen, cond_expr->data_type);
-					hsc_astgen_error_1(astgen, "the condition expression must be convertable to a 'bool' but got '%.*s'", (int)data_type_name.size, data_type_name.data);
-				}
-
-				token = hsc_token_peek(astgen);
-				if (token != HSC_TOKEN_PARENTHESIS_CLOSE) {
-					hsc_astgen_error_1(astgen, "expected a ')' to finish the if statement condition");
-				}
-				token = hsc_token_next(astgen);
-			}
+			hsc_token_next(astgen);
+			HscExpr* cond_expr = hsc_astgen_generate_cond_expr(astgen);
 
 			HscExpr* true_stmt = hsc_astgen_generate_stmt(astgen);
 			true_stmt->is_stmt_block_entry = true;
@@ -2453,6 +2512,69 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 			astgen->switch_state = prev_switch_state;
 			return stmt;
 		};
+		case HSC_TOKEN_KEYWORD_WHILE: {
+			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_STMT_WHILE);
+			hsc_token_next(astgen);
+
+			HscExpr* cond_expr = hsc_astgen_generate_cond_expr(astgen);
+
+			bool prev_is_in_loop = astgen->is_in_loop;
+			astgen->is_in_loop = true;
+			HscExpr* loop_stmt = hsc_astgen_generate_stmt(astgen);
+			loop_stmt->is_stmt_block_entry = true;
+			astgen->is_in_loop = prev_is_in_loop;
+
+			stmt->while_.cond_expr_rel_idx = cond_expr - stmt;
+			stmt->while_.loop_stmt_rel_idx = loop_stmt - stmt;
+
+			return stmt;
+		};
+		case HSC_TOKEN_KEYWORD_FOR: {
+			hsc_astgen_variable_stack_open(astgen);
+
+			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_STMT_FOR);
+			token = hsc_token_next(astgen);
+
+			if (token != HSC_TOKEN_PARENTHESIS_OPEN) {
+				hsc_astgen_error_1(astgen, "expected a '(' for the if statement condition");
+			}
+			token = hsc_token_next(astgen);
+
+			HscExpr* init_expr = hsc_astgen_generate_expr(astgen, 0);
+			if (init_expr->type == HSC_EXPR_TYPE_DATA_TYPE) {
+				init_expr = hsc_astgen_generate_variable_decl(astgen, init_expr);
+			}
+			hsc_astgen_ensure_semicolon(astgen);
+
+			HscExpr* cond_expr = hsc_astgen_generate_expr(astgen, 0);
+			if (!hsc_data_type_is_condition(astgen, cond_expr->data_type)) {
+				HscString data_type_name = hsc_data_type_string(astgen, cond_expr->data_type);
+				hsc_astgen_error_1(astgen, "the condition expression must be convertable to a 'bool' but got '%.*s'", (int)data_type_name.size, data_type_name.data);
+			}
+			hsc_astgen_ensure_semicolon(astgen);
+
+			HscExpr* inc_expr = hsc_astgen_generate_expr(astgen, 0);
+
+			token = hsc_token_peek(astgen);
+			if (token != HSC_TOKEN_PARENTHESIS_CLOSE) {
+				hsc_astgen_error_1(astgen, "expected a ')' to finish the if statement condition");
+			}
+			token = hsc_token_next(astgen);
+
+			bool prev_is_in_loop = astgen->is_in_loop;
+			astgen->is_in_loop = true;
+			HscExpr* loop_stmt = hsc_astgen_generate_stmt(astgen);
+			loop_stmt->is_stmt_block_entry = true;
+			astgen->is_in_loop = prev_is_in_loop;
+
+			stmt->for_.init_expr_rel_idx = init_expr - stmt;
+			stmt->for_.cond_expr_rel_idx = cond_expr - stmt;
+			stmt->for_.inc_expr_rel_idx = inc_expr - stmt;
+			stmt->for_.loop_stmt_rel_idx = loop_stmt - stmt;
+
+			hsc_astgen_variable_stack_close(astgen);
+			return stmt;
+		};
 		case HSC_TOKEN_KEYWORD_CASE: {
 			if (astgen->switch_state.switch_condition_type == HSC_DATA_TYPE_VOID) {
 				hsc_astgen_error_1(astgen, "case statement must be inside a switch statement");
@@ -2513,7 +2635,7 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 			return stmt;
 		};
 		case HSC_TOKEN_KEYWORD_BREAK: {
-			if (astgen->switch_state.switch_condition_type == HSC_DATA_TYPE_VOID) {
+			if (astgen->switch_state.switch_condition_type == HSC_DATA_TYPE_VOID && !astgen->is_in_loop) {
 				hsc_astgen_error_1(astgen, "'break' can only be used within a switch statement, a for loop or a while loop");
 			}
 			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_STMT_BREAK);
@@ -2522,60 +2644,21 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 			hsc_astgen_ensure_semicolon(astgen);
 			return stmt;
 		};
+		case HSC_TOKEN_KEYWORD_CONTINUE: {
+			if (astgen->switch_state.switch_condition_type == HSC_DATA_TYPE_VOID && !astgen->is_in_loop) {
+				hsc_astgen_error_1(astgen, "'continue' can only be used within a switch statement, a for loop or a while loop");
+			}
+			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_STMT_CONTINUE);
+			stmt->is_stmt_block_entry = true;
+			hsc_token_next(astgen);
+			hsc_astgen_ensure_semicolon(astgen);
+			return stmt;
+		};
 		default: {
 			HscExpr* expr = hsc_astgen_generate_expr(astgen, 0);
 			if (expr->type == HSC_EXPR_TYPE_DATA_TYPE) {
-				token = hsc_token_peek(astgen);
-				if (token != HSC_TOKEN_IDENT) {
-					hsc_astgen_error_1(astgen, "expected an identifier for a variable declaration");
-				}
-				HscTokenValue identifier_value = hsc_token_value_next(astgen);
-
-				U32 existing_variable_id = hsc_astgen_variable_stack_find(astgen, identifier_value.string_id);
-				if (existing_variable_id) {
-					HscLocation* other_location = NULL; // TODO: location of existing variable
-					HscString string = hsc_string_table_get(&astgen->string_table, identifier_value.string_id);
-					hsc_astgen_error_2(astgen, other_location, "redefinition of '%.*s' local variable identifier", (int)string.size, string.data);
-				}
-				U32 variable_idx = hsc_astgen_variable_stack_add(astgen, identifier_value.string_id);
-
-				HscLocalVariable* local_variable = &astgen->function_params_and_local_variables[astgen->function_params_and_local_variables_count];
-				astgen->function_params_and_local_variables_count += 1;
-				local_variable->identifier_string_id = identifier_value.string_id;
-				local_variable->identifier_token_idx = astgen->token_read_idx;
-				local_variable->data_type = expr->data_type;
-				astgen->stmt_block->stmt_block.local_variables_count += 1;
-
-				token = hsc_token_next(astgen);
-				switch (token) {
-					case HSC_TOKEN_SEMICOLON:
-						hsc_token_next(astgen);
-						break;
-					case HSC_TOKEN_EQUAL: {
-						HscExpr* left_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_LOCAL_VARIABLE);
-						left_expr->variable.idx = variable_idx;
-						left_expr->data_type = expr->data_type;
-						hsc_token_next(astgen);
-
-						HscExpr* right_expr = hsc_astgen_generate_expr(astgen, 0);
-						HscLocation* other_location = NULL; // TODO
-						hsc_data_type_ensure_compatible(astgen, other_location, left_expr->data_type, right_expr->data_type);
-
-						HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_BINARY_OP(ASSIGN));
-						stmt->binary.is_assignment = true;
-						stmt->binary.left_expr_rel_idx = stmt - left_expr;
-						stmt->binary.right_expr_rel_idx = stmt - right_expr;
-
-						hsc_astgen_ensure_semicolon(astgen);
-						return stmt;
-					};
-					default:
-						hsc_astgen_error_1(astgen, "'expected a ';' to end the declaration or a '=' to assign to the new variable");
-				}
-
-				return NULL;
+				expr = hsc_astgen_generate_variable_decl(astgen, expr);
 			}
-
 			hsc_astgen_ensure_semicolon(astgen);
 			return expr;
 		};
@@ -2852,12 +2935,52 @@ UNARY:
 			fprintf(f, "%.*s}", indent, indent_chars);
 			break;
 		};
+		case HSC_EXPR_TYPE_STMT_WHILE: {
+			fprintf(f, "%s: {\n", "STMT_WHILE");
+
+			HscExpr* cond_expr = &expr[expr->while_.cond_expr_rel_idx];
+			fprintf(f, "%.*sCONDITION_EXPR:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, cond_expr, indent + 2, false, f);
+
+			HscExpr* loop_stmt = &expr[expr->while_.loop_stmt_rel_idx];
+			fprintf(f, "%.*sLOOP_STMT:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, loop_stmt, indent + 2, false, f);
+
+			fprintf(f, "%.*s}", indent, indent_chars);
+			break;
+		};
+		case HSC_EXPR_TYPE_STMT_FOR: {
+			fprintf(f, "%s: {\n", "STMT_FOR");
+
+			HscExpr* init_expr = &expr[expr->for_.init_expr_rel_idx];
+			fprintf(f, "%.*sINIT_EXPR:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, init_expr, indent + 2, false, f);
+
+			HscExpr* cond_expr = &expr[expr->for_.cond_expr_rel_idx];
+			fprintf(f, "%.*sCONDITION_EXPR:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, cond_expr, indent + 2, false, f);
+
+			HscExpr* inc_expr = &expr[expr->for_.inc_expr_rel_idx];
+			fprintf(f, "%.*sINCREMENT_EXPR:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, inc_expr, indent + 2, false, f);
+
+			HscExpr* loop_stmt = &expr[expr->for_.loop_stmt_rel_idx];
+			fprintf(f, "%.*sLOOP_STMT:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, loop_stmt, indent + 2, false, f);
+
+			fprintf(f, "%.*s}", indent, indent_chars);
+			break;
+		};
 		case HSC_EXPR_TYPE_STMT_DEFAULT: {
 			fprintf(f, "%s:\n", "STMT_DEFAULT");
 			break;
 		};
 		case HSC_EXPR_TYPE_STMT_BREAK: {
 			fprintf(f, "%s:\n", "STMT_BREAK");
+			break;
+		};
+		case HSC_EXPR_TYPE_STMT_CONTINUE: {
+			fprintf(f, "%s:\n", "STMT_CONTINUE");
 			break;
 		};
 		case HSC_EXPR_TYPE_BINARY_OP(ASSIGN): expr_name = "ASSIGN"; goto BINARY;
@@ -2966,14 +3089,11 @@ void hsc_ir_init(HscIR* ir) {
 	HSC_ASSERT(ir->instructions, "out of memory");
 	ir->operands = HSC_ALLOC_ARRAY(HscIROperand, 8192);
 	HSC_ASSERT(ir->operands, "out of memory");
-	ir->lastest_variable_operands = HSC_ALLOC_ARRAY(HscIROperand, 8192);
-	HSC_ASSERT(ir->lastest_variable_operands, "out of memory");
 	ir->functions_cap = 8192;
 	ir->basic_blocks_cap = 8192;
 	ir->values_cap = 8192;
 	ir->instructions_cap = 8192;
 	ir->operands_cap = 8192;
-	ir->lastest_variable_operands_count = 8192;
 }
 
 HscIRBasicBlock* hsc_ir_add_basic_block(HscIR* ir, HscIRFunction* ir_function) {
@@ -3134,29 +3254,11 @@ HscBasicTypeClass hsc_basic_type_class(HscDataType data_type) {
 	}
 }
 
-typedef struct HscIRSwitchState HscIRSwitchState;
-struct HscIRSwitchState {
-	bool all_cases_return;
-	U32 case_break_branch_linked_list_head;
-	U32 case_break_branch_linked_list_tail;
-};
-
-HscIRBasicBlock* hsc_ir_generate_case_instructions(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* first_stmt, HscIRSwitchState* state_mut) {
+HscIRBasicBlock* hsc_ir_generate_case_instructions(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* first_stmt) {
 	HscExpr* stmt = first_stmt;
 	while (1) {
 		basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, stmt);
-		if (stmt->type == HSC_EXPR_TYPE_STMT_BREAK) {
-			if (state_mut->case_break_branch_linked_list_tail == -1) {
-				state_mut->case_break_branch_linked_list_head = ir_function->operands_count - 1;
-			} else {
-				ir->operands[ir_function->operands_start_idx + state_mut->case_break_branch_linked_list_tail] = ir_function->operands_count - 1;
-			}
-			state_mut->case_break_branch_linked_list_tail = ir_function->operands_count - 1;
-			break;
-		}
-
 		if (
-			stmt->type == HSC_EXPR_TYPE_STMT_RETURN ||
 			stmt->type == HSC_EXPR_TYPE_STMT_CASE ||
 			stmt->type == HSC_EXPR_TYPE_STMT_DEFAULT
 		) {
@@ -3164,7 +3266,7 @@ HscIRBasicBlock* hsc_ir_generate_case_instructions(HscIR* ir, HscAstGen* astgen,
 		}
 		stmt = &stmt[stmt->next_expr_rel_idx];
 	}
-	state_mut->all_cases_return &= hsc_stmt_has_return(stmt);
+	ir->branch_state.all_cases_return &= hsc_stmt_has_return(stmt);
 	return basic_block;
 }
 
@@ -3306,11 +3408,12 @@ UNARY:
 			HscExpr* case_expr = &block_stmt[block_stmt->switch_aux.first_case_expr_rel_idx];
 			U32 case_idx = 0;
 
-			HscIRSwitchState state = {
-				.all_cases_return = true,
-				.case_break_branch_linked_list_head = -1,
-				.case_break_branch_linked_list_tail = -1,
-			};
+			HscIRBranchState prev_branch_state = ir->branch_state;
+			ir->branch_state.all_cases_return = true;
+			ir->branch_state.break_branch_linked_list_head = -1;
+			ir->branch_state.break_branch_linked_list_tail = -1;
+			ir->branch_state.continue_branch_linked_list_head = -1;
+			ir->branch_state.continue_branch_linked_list_tail = -1;
 			while (1) {
 				basic_block = hsc_ir_add_basic_block(ir, ir_function);
 				operands[2 + (case_idx * 2) + 0] = HSC_IR_OPERAND_CONSTANT_INIT(case_expr->constant.id);
@@ -3320,7 +3423,7 @@ UNARY:
 				}
 
 				HscExpr* first_stmt = &case_expr[case_expr->next_expr_rel_idx];
-				basic_block = hsc_ir_generate_case_instructions(ir, astgen, ir_function, basic_block, first_stmt, &state);
+				basic_block = hsc_ir_generate_case_instructions(ir, astgen, ir_function, basic_block, first_stmt);
 
 				if (case_expr->alt_next_expr_rel_idx == 0) {
 					break;
@@ -3337,7 +3440,7 @@ UNARY:
 				basic_block = default_basic_block;
 
 				HscExpr* first_stmt = &default_case_expr[1];
-				basic_block = hsc_ir_generate_case_instructions(ir, astgen, ir_function, basic_block, first_stmt, &state);
+				basic_block = hsc_ir_generate_case_instructions(ir, astgen, ir_function, basic_block, first_stmt);
 
 				/*
 				default_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
@@ -3358,16 +3461,105 @@ UNARY:
 				operands[1] = converging_basic_block_operand;
 			}
 
-			if (state.all_cases_return) {
+			if (ir->branch_state.all_cases_return) {
 				hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_UNREACHABLE, NULL, 0);
 			}
 
-			while (state.case_break_branch_linked_list_head != -1) {
-				U32 next = ir->operands[ir_function->operands_start_idx + state.case_break_branch_linked_list_head];
-				ir->operands[ir_function->operands_start_idx + state.case_break_branch_linked_list_head] = converging_basic_block_operand;
-				state.case_break_branch_linked_list_head = next;
+			while (ir->branch_state.break_branch_linked_list_head != -1) {
+				U32 next = ir->operands[ir_function->operands_start_idx + ir->branch_state.break_branch_linked_list_head];
+				ir->operands[ir_function->operands_start_idx + ir->branch_state.break_branch_linked_list_head] = converging_basic_block_operand;
+				ir->branch_state.break_branch_linked_list_head = next;
 			}
 
+			ir->branch_state = prev_branch_state;
+
+			break;
+		};
+		case HSC_EXPR_TYPE_STMT_WHILE:
+		case HSC_EXPR_TYPE_STMT_FOR: {
+			HscExpr* init_expr;
+			HscExpr* cond_expr;
+			HscExpr* inc_expr;
+			HscExpr* loop_stmt;
+			if (expr->type == HSC_EXPR_TYPE_STMT_FOR) {
+				init_expr = &expr[expr->for_.init_expr_rel_idx];
+				cond_expr = &expr[expr->for_.cond_expr_rel_idx];
+				inc_expr = &expr[expr->for_.inc_expr_rel_idx];
+				loop_stmt = &expr[expr->for_.loop_stmt_rel_idx];
+			} else {
+				init_expr = NULL;
+				cond_expr = &expr[expr->while_.cond_expr_rel_idx];
+				inc_expr = NULL;
+				loop_stmt = &expr[expr->while_.loop_stmt_rel_idx];
+			}
+
+			if (init_expr) {
+				basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, init_expr);
+			}
+
+			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, operands, 1);
+
+			basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			HscIROperand starting_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
+			operands[0] = starting_basic_block_operand;
+
+			basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, cond_expr);
+			HscIROperand cond_operand = ir->last_operand;
+
+			HscIROperand* loop_merge_operands = hsc_ir_add_operands_many(ir, ir_function, 2);
+			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_LOOP_MERGE, loop_merge_operands, 2);
+
+			HscIROperand* cond_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 3);
+			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH_CONDITIONAL, cond_branch_operands, 3);
+			cond_branch_operands[0] = cond_operand;
+
+			HscIRBranchState prev_branch_state = ir->branch_state;
+			ir->branch_state.break_branch_linked_list_head = -1;
+			ir->branch_state.break_branch_linked_list_tail = -1;
+			ir->branch_state.continue_branch_linked_list_head = -1;
+			ir->branch_state.continue_branch_linked_list_tail = -1;
+
+			HscIRBasicBlock* loop_basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			hsc_ir_generate_instructions(ir, astgen, ir_function, loop_basic_block, loop_stmt);
+			cond_branch_operands[1] = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, loop_basic_block));
+
+			HscIROpCode last_op_code = ir->instructions[ir->instructions_count - 1].op_code;
+			HscIROperand* loop_branch_operands;
+			if (last_op_code != HSC_IR_OP_CODE_BRANCH || last_op_code != HSC_IR_OP_CODE_FUNCTION_RETURN) {
+				loop_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+				hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, loop_branch_operands, 1);
+			}
+
+			basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			HscIROperand continue_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
+			loop_branch_operands[0] = continue_basic_block_operand;
+			loop_merge_operands[1] = continue_basic_block_operand;
+			if (inc_expr) {
+				basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, inc_expr);
+			}
+			operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, operands, 1);
+			operands[0] = starting_basic_block_operand;
+
+			basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			HscIROperand converging_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
+			cond_branch_operands[2] = converging_basic_block_operand;
+			loop_merge_operands[0] = converging_basic_block_operand;
+
+			while (ir->branch_state.break_branch_linked_list_head != -1) {
+				U32 next = ir->operands[ir_function->operands_start_idx + ir->branch_state.break_branch_linked_list_head];
+				ir->operands[ir_function->operands_start_idx + ir->branch_state.break_branch_linked_list_head] = converging_basic_block_operand;
+				ir->branch_state.break_branch_linked_list_head = next;
+			}
+
+			while (ir->branch_state.continue_branch_linked_list_head != -1) {
+				U32 next = ir->operands[ir_function->operands_start_idx + ir->branch_state.continue_branch_linked_list_head];
+				ir->operands[ir_function->operands_start_idx + ir->branch_state.continue_branch_linked_list_head] = continue_basic_block_operand;
+				ir->branch_state.continue_branch_linked_list_head = next;
+			}
+
+			ir->branch_state = prev_branch_state;
 			break;
 		};
 		case HSC_EXPR_TYPE_BINARY_OP(ASSIGN):
@@ -3382,18 +3574,8 @@ UNARY:
 			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, right_expr);
 			HscIROperand right_operand = ir->last_operand;
 
-			if (expr->binary.is_assignment) {
-				switch (left_expr->type) {
-					case HSC_EXPR_TYPE_LOCAL_VARIABLE:
-						ir->lastest_variable_operands[left_expr->variable.idx] = right_operand;
-						ir->last_operand = right_operand;
-						break;
-					default:
-						HSC_UNREACHABLE("internal error: expected a variable expression");
-				}
-			}
-
 			hsc_ir_generate_store(ir, ir_function, left_operand, right_operand);
+			ir->last_operand = left_operand;
 			break;
 		};
 		case HSC_EXPR_TYPE_BINARY_OP(ADD):
@@ -3426,7 +3608,6 @@ UNARY:
 
 			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 3);
 
-			ir->do_not_load_variable = expr->binary.is_assignment && left_expr->type == HSC_EXPR_TYPE_LOCAL_VARIABLE;
 			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, left_expr);
 			operands[1] = ir->last_operand;
 
@@ -3438,13 +3619,14 @@ UNARY:
 			hsc_ir_add_instruction(ir, ir_function, op_code, operands, 3);
 
 			if (expr->binary.is_assignment) {
-				switch (left_expr->type) {
-					case HSC_EXPR_TYPE_LOCAL_VARIABLE:
-						ir->lastest_variable_operands[left_expr->variable.idx] = operands[0];
-						break;
-					default:
-						HSC_UNREACHABLE("internal error: expected a variable expression");
+				HscIROperand dst_operand;
+				if (left_expr->type == HSC_EXPR_TYPE_LOCAL_VARIABLE) {
+					dst_operand = HSC_IR_OPERAND_LOCAL_VARIABLE_INIT(left_expr->variable.idx);
+				} else {
+					dst_operand = operands[1];
 				}
+
+				hsc_ir_generate_store(ir, ir_function, dst_operand, operands[0]);
 			}
 
 			ir->last_operand = operands[0];
@@ -3535,6 +3717,36 @@ UNARY:
 			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 1);
 			operands[0] = -1; // the operand is initialized later by the callee
 			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, operands, 1);
+
+			if (ir->branch_state.break_branch_linked_list_tail == -1) {
+				ir->branch_state.break_branch_linked_list_head = ir_function->operands_count - 1;
+			} else {
+				ir->operands[ir_function->operands_start_idx + ir->branch_state.break_branch_linked_list_tail] = ir_function->operands_count - 1;
+			}
+			ir->branch_state.break_branch_linked_list_tail = ir_function->operands_count - 1;
+
+			if (expr->next_expr_rel_idx) {
+				basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			}
+
+			break;
+		};
+		case HSC_EXPR_TYPE_STMT_CONTINUE: {
+			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+			operands[0] = -1; // the operand is initialized later by the callee
+			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, operands, 1);
+
+			if (ir->branch_state.continue_branch_linked_list_tail == -1) {
+				ir->branch_state.continue_branch_linked_list_head = ir_function->operands_count - 1;
+			} else {
+				ir->operands[ir_function->operands_start_idx + ir->branch_state.continue_branch_linked_list_tail] = ir_function->operands_count - 1;
+			}
+			ir->branch_state.continue_branch_linked_list_tail = ir_function->operands_count - 1;
+
+			if (expr->next_expr_rel_idx) {
+				basic_block = hsc_ir_add_basic_block(ir, ir_function);
+			}
+
 			break;
 		};
 		case HSC_EXPR_TYPE_STMT_CASE:
@@ -3708,6 +3920,15 @@ UNARY:				{
 						fprintf(f, "\t\tOP_SELECTION_MERGE: ");
 						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
 						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, "\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_LOOP_MERGE: {
+						fprintf(f, "\t\tOP_LOOP_MERGE: ");
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[1], f);
 						fprintf(f, "\n");
 						break;
 					};
@@ -4161,6 +4382,7 @@ TYPES_VARIABLES_CONSTANTS:
 		case HSC_SPIRV_OP_BITWISE_AND:
 		case HSC_SPIRV_OP_BITWISE_NOT:
 		case HSC_SPIRV_OP_PHI:
+		case HSC_SPIRV_OP_LOOP_MERGE:
 		case HSC_SPIRV_OP_SELECTION_MERGE:
 		case HSC_SPIRV_OP_LABEL:
 		case HSC_SPIRV_OP_BRANCH:
@@ -4462,6 +4684,14 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 						hsc_spirv_instr_end(c);
 					}
 
+					break;
+				};
+				case HSC_IR_OP_CODE_LOOP_MERGE: {
+					hsc_spirv_instr_start(c, HSC_SPIRV_OP_LOOP_MERGE);
+					hsc_spirv_instr_add_converted_operand(c, operands[0]);
+					hsc_spirv_instr_add_converted_operand(c, operands[1]);
+					hsc_spirv_instr_add_operand(c, HSC_SPIRV_LOOP_CONTROL_NONE);
+					hsc_spirv_instr_end(c);
 					break;
 				};
 				case HSC_IR_OP_CODE_SELECTION_MERGE: {
