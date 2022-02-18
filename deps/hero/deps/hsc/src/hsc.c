@@ -441,6 +441,21 @@ FLOAT:
 	}
 }
 
+HscDataType hsc_data_type_unsigned_to_signed(HscDataType data_type) {
+	HSC_DEBUG_ASSERT(data_type < HSC_DATA_TYPE_VECTOR_END, "data_type must be a basic or vector type");
+	HscDataType scalar_data_type = HSC_DATA_TYPE_SCALAR(data_type);
+	HSC_DEBUG_ASSERT(HSC_DATA_TYPE_U8 <= scalar_data_type && scalar_data_type <= HSC_DATA_TYPE_U64, "scalar_data_type must be a unsigned integer");
+	return data_type + 4;
+}
+
+HscDataType hsc_data_type_signed_to_unsigned(HscDataType data_type) {
+	HSC_DEBUG_ASSERT(data_type < HSC_DATA_TYPE_VECTOR_END, "data_type must be a basic or vector type");
+	HscDataType scalar_data_type = HSC_DATA_TYPE_SCALAR(data_type);
+	HSC_DEBUG_ASSERT(HSC_DATA_TYPE_S8 <= scalar_data_type && scalar_data_type <= HSC_DATA_TYPE_S64, "scalar_data_type must be a signed integer");
+	return data_type - 4;
+}
+
+
 void hsc_constant_print(HscAstGen* astgen, HscConstantId constant_id, FILE* f) {
 	HscConstant constant = hsc_constant_table_get(&astgen->constant_table, constant_id);
 	if (constant.data_type < HSC_DATA_TYPE_BASIC_END) {
@@ -1743,6 +1758,25 @@ UNARY:
 				hsc_astgen_error_1(astgen, "expected a ')' here to finish the expression");
 			}
 			hsc_token_consume(astgen, 1);
+
+			if (expr->type == HSC_EXPR_TYPE_DATA_TYPE) {
+				HscExpr* cast_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_CAST);
+
+				HscExpr* right_expr = hsc_astgen_generate_expr(astgen, 0);
+				if (expr->data_type != right_expr->data_type) {
+					if (expr->data_type >= HSC_DATA_TYPE_VECTOR_END || right_expr->data_type >= HSC_DATA_TYPE_VECTOR_END) {
+						HscString target_data_type_name = hsc_data_type_string(astgen, expr->data_type);
+						HscString source_data_type_name = hsc_data_type_string(astgen, right_expr->data_type);
+						hsc_astgen_error_1(astgen, "cannot cast '%.*s' to '%.*s'", (int)source_data_type_name.size, source_data_type_name.data, (int)target_data_type_name.size, target_data_type_name.data);
+					}
+
+					cast_expr->unary.expr_rel_idx = right_expr - cast_expr;
+					cast_expr->data_type = expr->data_type;
+					return cast_expr;
+				}
+				return right_expr;
+			}
+
 			return expr;
 		};
 		case HSC_DATA_TYPE_VOID:
@@ -2898,6 +2932,7 @@ CONSTANT: {
 		case HSC_EXPR_TYPE_UNARY_OP(BIT_NOT): expr_name = "EXPR_BIT_NOT"; goto UNARY;
 		case HSC_EXPR_TYPE_UNARY_OP(PLUS): expr_name = "EXPR_PLUS"; goto UNARY;
 		case HSC_EXPR_TYPE_UNARY_OP(NEGATE): expr_name = "EXPR_NEGATE"; goto UNARY;
+		case HSC_EXPR_TYPE_CAST: expr_name = "EXPR_CAST"; goto UNARY;
 UNARY:
 		{
 			fprintf(f, "%s: {\n", expr_name);
@@ -3191,36 +3226,41 @@ HscDataType hsc_ir_operand_data_type(HscIR* ir, HscAstGen* astgen, HscIRFunction
 	}
 }
 
+void hsc_ir_generate_convert_to_bool(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIROperand cond_operand) {
+	HscDataType cond_data_type = hsc_ir_operand_data_type(ir, astgen, ir_function, cond_operand);
+	if (HSC_DATA_TYPE_IS_STRUCT(cond_data_type) || HSC_DATA_TYPE_IS_MATRIX(cond_data_type)) {
+		HscString data_type_name = hsc_data_type_string(astgen, cond_operand);
+		// TODO emitt the error in the AST generation instead
+		hsc_astgen_error_1(astgen, "a condition expression must be a non-structure & non-matrix type but got '%.*s'", (int)data_type_name.size, data_type_name.data);
+	}
+
+	HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 3);
+	hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BINARY_OP(NOT_EQUAL), operands, 3);
+
+	HscDataType new_cond_data_type;
+	if (cond_data_type >= HSC_DATA_TYPE_VEC4_START) {
+		new_cond_data_type = HSC_DATA_TYPE_VEC4(HSC_DATA_TYPE_BOOL);
+	} else if (cond_data_type >= HSC_DATA_TYPE_VEC3_START) {
+		new_cond_data_type = HSC_DATA_TYPE_VEC3(HSC_DATA_TYPE_BOOL);
+	} else if (cond_data_type >= HSC_DATA_TYPE_VEC2_START) {
+		new_cond_data_type = HSC_DATA_TYPE_VEC2(HSC_DATA_TYPE_BOOL);
+	} else {
+		new_cond_data_type = HSC_DATA_TYPE_BOOL;
+	}
+
+	U16 return_value_idx = hsc_ir_add_value(ir, ir_function, new_cond_data_type);
+	operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+	operands[1] = cond_operand;
+	operands[2] = HSC_IR_OPERAND_CONSTANT_INIT(hsc_constant_table_deduplicate_zero(&astgen->constant_table, astgen, cond_data_type).idx_plus_one);
+	ir->last_operand = operands[0];
+}
+
 HscIRBasicBlock* hsc_ir_generate_condition_expr(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* cond_expr) {
 	basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, cond_expr);
 	HscIROperand cond_operand = ir->last_operand;
 	HscDataType cond_data_type = hsc_ir_operand_data_type(ir, astgen, ir_function, cond_operand);
 	if (cond_data_type != HSC_DATA_TYPE_BOOL) {
-		if (HSC_DATA_TYPE_IS_STRUCT(cond_data_type) || HSC_DATA_TYPE_IS_MATRIX(cond_data_type)) {
-			HscString data_type_name = hsc_data_type_string(astgen, cond_operand);
-			// TODO emitt the error in the AST generation instead
-			hsc_astgen_error_1(astgen, "a condition expression must be a non-structure & non-matrix type but got '%.*s'", (int)data_type_name.size, data_type_name.data);
-		}
-
-		HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 3);
-		hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BINARY_OP(NOT_EQUAL), operands, 3);
-
-		HscDataType new_cond_data_type;
-		if (cond_data_type >= HSC_DATA_TYPE_VEC4_START) {
-			new_cond_data_type = HSC_DATA_TYPE_VEC4(HSC_DATA_TYPE_BOOL);
-		} else if (cond_data_type >= HSC_DATA_TYPE_VEC3_START) {
-			new_cond_data_type = HSC_DATA_TYPE_VEC3(HSC_DATA_TYPE_BOOL);
-		} else if (cond_data_type >= HSC_DATA_TYPE_VEC2_START) {
-			new_cond_data_type = HSC_DATA_TYPE_VEC2(HSC_DATA_TYPE_BOOL);
-		} else {
-			new_cond_data_type = HSC_DATA_TYPE_BOOL;
-		}
-
-		U16 return_value_idx = hsc_ir_add_value(ir, ir_function, new_cond_data_type);
-		operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
-		operands[1] = cond_operand;
-		operands[2] = HSC_IR_OPERAND_CONSTANT_INIT(hsc_constant_table_deduplicate_zero(&astgen->constant_table, astgen, cond_data_type).idx_plus_one);
-		ir->last_operand = operands[0];
+		hsc_ir_generate_convert_to_bool(ir, astgen, ir_function, cond_operand);
 	}
 	return basic_block;
 }
@@ -3709,6 +3749,26 @@ UNARY:
 
 			break;
 		};
+		case HSC_EXPR_TYPE_CAST: {
+			HscExpr* unary_expr = &expr[expr->unary.expr_rel_idx];
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, unary_expr);
+
+			HscBasicTypeClass dst_type_class = hsc_basic_type_class(HSC_DATA_TYPE_SCALAR(expr->data_type));
+			if (dst_type_class == HSC_BASIC_TYPE_CLASS_BOOL) {
+				hsc_ir_generate_convert_to_bool(ir, astgen, ir_function, ir->last_operand);
+			} else {
+				HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 3);
+				hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_CONVERT, operands, 3);
+
+				U16 return_value_idx = hsc_ir_add_value(ir, ir_function, expr->data_type);
+				operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+				operands[1] = expr->data_type;
+				operands[2] = ir->last_operand;
+
+				ir->last_operand = operands[0];
+			}
+			break;
+		};
 		case HSC_EXPR_TYPE_CONSTANT: {
 			ir->last_operand = HSC_IR_OPERAND_CONSTANT_INIT(expr->constant.id);
 			break;
@@ -4008,6 +4068,17 @@ BINARY_OP:
 								fprintf(f, ", ");
 							}
 						}
+						fprintf(f, "\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_CONVERT: {
+						fprintf(f, "\t\tOP_CONVERT: ");
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[1], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[2], f);
 						fprintf(f, "\n");
 						break;
 					};
@@ -4338,6 +4409,14 @@ TYPES_VARIABLES_CONSTANTS:
 		case HSC_SPIRV_OP_FUNCTION_PARAMETER:
 		case HSC_SPIRV_OP_FUNCTION_END:
 		case HSC_SPIRV_OP_COMPOSITE_CONSTRUCT:
+		case HSC_SPIRV_OP_CONVERT_F_TO_U:
+		case HSC_SPIRV_OP_CONVERT_F_TO_S:
+		case HSC_SPIRV_OP_CONVERT_S_TO_F:
+		case HSC_SPIRV_OP_CONVERT_U_TO_F:
+		case HSC_SPIRV_OP_U_CONVERT:
+		case HSC_SPIRV_OP_S_CONVERT:
+		case HSC_SPIRV_OP_F_CONVERT:
+		case HSC_SPIRV_OP_BITCAST:
 		case HSC_SPIRV_OP_S_NEGATE:
 		case HSC_SPIRV_OP_F_NEGATE:
 		case HSC_SPIRV_OP_I_ADD:
@@ -4500,6 +4579,14 @@ U32 hsc_spirv_generate_function_variable_type(HscCompiler* c, HscDataType data_t
 	}
 
 	return type_id;
+}
+
+void hsc_spirv_generate_convert(HscCompiler* c, HscSpirvOp spirv_convert_op, U32 result_spirv_operand, HscDataType dst_type, U32 value_spirv_operand) {
+	hsc_spirv_instr_start(c, spirv_convert_op);
+	hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, dst_type));
+	hsc_spirv_instr_add_operand(c, result_spirv_operand);
+	hsc_spirv_instr_add_operand(c, value_spirv_operand);
+	hsc_spirv_instr_end(c);
 }
 
 void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
@@ -4802,6 +4889,82 @@ SWITCH_SINGLE_WORD_LITERAL:
 						hsc_spirv_instr_add_converted_operand(c, operands[idx + 1]);
 					}
 					hsc_spirv_instr_end(c);
+					break;
+				};
+				case HSC_IR_OP_CODE_CONVERT: {
+					HscDataType dst_type = operands[1];
+					HscDataType src_type = hsc_ir_operand_data_type(&c->ir, &c->astgen, ir_function, operands[2]);
+					HscBasicTypeClass dst_type_class = hsc_basic_type_class(HSC_DATA_TYPE_SCALAR(dst_type));
+					HscBasicTypeClass src_type_class = hsc_basic_type_class(HSC_DATA_TYPE_SCALAR(src_type));
+
+					U32 result_spirv_operand = hsc_spirv_convert_operand(c, operands[0]);
+					U32 src_spirv_operand = hsc_spirv_convert_operand(c, operands[2]);
+					switch (dst_type_class) {
+						case HSC_BASIC_TYPE_CLASS_UINT:
+							switch (src_type_class) {
+								case HSC_BASIC_TYPE_CLASS_UINT:
+									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_U_CONVERT, result_spirv_operand, dst_type, src_spirv_operand);
+									break;
+								case HSC_BASIC_TYPE_CLASS_SINT: {
+									HscDataType signed_dst_type = hsc_data_type_unsigned_to_signed(dst_type);
+									if (signed_dst_type != src_type) {
+										hsc_spirv_generate_convert(c, HSC_SPIRV_OP_S_CONVERT, c->spirv.next_id, signed_dst_type, src_spirv_operand);
+										src_spirv_operand = c->spirv.next_id;
+										c->spirv.next_id += 1;
+									}
+									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_BITCAST, result_spirv_operand, dst_type, src_spirv_operand);
+									break;
+								};
+								case HSC_BASIC_TYPE_CLASS_FLOAT:
+									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_CONVERT_F_TO_U, result_spirv_operand, dst_type, src_spirv_operand);
+									break;
+								default:
+									HSC_UNREACHABLE();
+							}
+							break;
+						case HSC_BASIC_TYPE_CLASS_SINT:
+							switch (src_type_class) {
+								case HSC_BASIC_TYPE_CLASS_UINT: {
+									HscDataType unsigned_dst_type = hsc_data_type_signed_to_unsigned(dst_type);
+									if (unsigned_dst_type != src_type) {
+										hsc_spirv_generate_convert(c, HSC_SPIRV_OP_U_CONVERT, c->spirv.next_id, unsigned_dst_type, src_spirv_operand);
+										src_spirv_operand = c->spirv.next_id;
+										c->spirv.next_id += 1;
+									}
+									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_BITCAST, result_spirv_operand, dst_type, src_spirv_operand);
+									break;
+								};
+								case HSC_BASIC_TYPE_CLASS_SINT: {
+									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_S_CONVERT, result_spirv_operand, dst_type, src_spirv_operand);
+									break;
+								};
+								case HSC_BASIC_TYPE_CLASS_FLOAT:
+									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_CONVERT_F_TO_S, result_spirv_operand, dst_type, src_spirv_operand);
+									break;
+								default:
+									HSC_UNREACHABLE();
+							}
+							break;
+						case HSC_BASIC_TYPE_CLASS_FLOAT:
+							switch (src_type_class) {
+								case HSC_BASIC_TYPE_CLASS_UINT:
+									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_CONVERT_U_TO_F, result_spirv_operand, dst_type, src_spirv_operand);
+									break;
+								case HSC_BASIC_TYPE_CLASS_SINT: {
+									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_CONVERT_S_TO_F, result_spirv_operand, dst_type, src_spirv_operand);
+									break;
+								};
+								case HSC_BASIC_TYPE_CLASS_FLOAT:
+									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_F_CONVERT, result_spirv_operand, dst_type, src_spirv_operand);
+									break;
+								default:
+									HSC_UNREACHABLE();
+							}
+							break;
+						default:
+							HSC_UNREACHABLE();
+					}
+
 					break;
 				};
 				case HSC_IR_OP_CODE_PHI: {

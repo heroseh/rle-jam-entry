@@ -609,6 +609,7 @@ enum {
 	HSC_EXPR_TYPE_LOGICAL_AND,
 	HSC_EXPR_TYPE_LOGICAL_OR,
 	HSC_EXPR_TYPE_CALL,
+	HSC_EXPR_TYPE_CAST,
 
 	HSC_EXPR_TYPE_LOCAL_VARIABLE,
 
@@ -820,6 +821,8 @@ HscString hsc_data_type_string(HscAstGen* astgen, HscDataType data_type);
 void hsc_data_type_size_align(HscAstGen* astgen, HscDataType data_type, Uptr* size_out, Uptr* align_out);
 HscDataType hsc_data_type_resolve_generic(HscAstGen* astgen, HscDataType data_type);
 void hsc_data_type_print_basic(HscAstGen* astgen, HscDataType data_type, void* data, FILE* f);
+HscDataType hsc_data_type_unsigned_to_signed(HscDataType data_type);
+HscDataType hsc_data_type_signed_to_unsigned(HscDataType data_type);
 
 void hsc_string_table_init(HscStringTable* string_table, uint32_t data_cap, uint32_t entries_cap);
 #define hsc_string_table_deduplicate_lit(string_table, string_lit) hsc_string_table_deduplicate(string_table, string_lit, sizeof(string_lit) - 1)
@@ -869,6 +872,7 @@ U32 hsc_astgen_variable_stack_find(HscAstGen* astgen, HscStringId string_id);
 
 typedef U8 HscIROpCode;
 enum {
+	HSC_IR_OP_CODE_NO_OP,
 	HSC_IR_OP_CODE_LOAD,
 	HSC_IR_OP_CODE_STORE,
 
@@ -883,6 +887,8 @@ enum {
 	HSC_IR_OP_CODE_PHI,
 
 	HSC_IR_OP_CODE_SWITCH,
+
+	HSC_IR_OP_CODE_CONVERT,
 
 	HSC_IR_OP_CODE_COMPOSITE_INIT,
 	HSC_IR_OP_CODE_ACCESS_CHAIN,
@@ -1034,6 +1040,14 @@ enum {
 	HSC_SPIRV_OP_STORE = 62,
 	HSC_SPIRV_OP_DECORATE = 71,
 	HSC_SPIRV_OP_COMPOSITE_CONSTRUCT = 80,
+	HSC_SPIRV_OP_CONVERT_F_TO_U = 109,
+	HSC_SPIRV_OP_CONVERT_F_TO_S = 110,
+	HSC_SPIRV_OP_CONVERT_S_TO_F = 111,
+	HSC_SPIRV_OP_CONVERT_U_TO_F = 112,
+	HSC_SPIRV_OP_U_CONVERT = 113,
+	HSC_SPIRV_OP_S_CONVERT = 114,
+	HSC_SPIRV_OP_F_CONVERT = 115,
+	HSC_SPIRV_OP_BITCAST = 124,
 	HSC_SPIRV_OP_S_NEGATE = 126,
 	HSC_SPIRV_OP_F_NEGATE = 127,
 	HSC_SPIRV_OP_I_ADD = 128,

@@ -5,7 +5,7 @@ vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
 
 fragment Vec4 billboard_shader_fragment(Vec4 state) {
 	F32 red = 0.f;
-	for (U32 idx = 0u; idx < 1u; idx += 1u) {
+	for (U32 idx = 0u; idx < (U32)1; idx += 1u) {
 		red += 0.1f;
 	}
 
