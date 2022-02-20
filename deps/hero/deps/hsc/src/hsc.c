@@ -128,6 +128,8 @@ char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_TOKEN_CURLY_CLOSE] = "}",
 	[HSC_TOKEN_PARENTHESIS_OPEN] = "(",
 	[HSC_TOKEN_PARENTHESIS_CLOSE] = ")",
+	[HSC_TOKEN_SQUARE_OPEN] = "[",
+	[HSC_TOKEN_SQUARE_CLOSE] = "]",
 	[HSC_TOKEN_FULL_STOP] = ".",
 	[HSC_TOKEN_COMMA] = ",",
 	[HSC_TOKEN_SEMICOLON] = ";",
@@ -321,7 +323,21 @@ HscString hsc_data_type_string(HscAstGen* astgen, HscDataType data_type) {
 	} else if (HSC_DATA_TYPE_GENERIC_SCALAR <= data_type && data_type <= HSC_DATA_TYPE_GENERIC_VEC4) {
 		string_id.idx_plus_one = HSC_STRING_ID_GENERIC_SCALAR + (data_type - HSC_DATA_TYPE_GENERIC_SCALAR);
 	} else {
-		HSC_ABORT("unhandle type '%u'", data_type);
+		char buf[1024];
+		switch (data_type & 0xff) {
+			case HSC_DATA_TYPE_ARRAY: {
+				HscArrayDataType* d = &astgen->array_data_types[HSC_DATA_TYPE_ARRAY_DATA_TYPE_ID(data_type).idx_plus_one - 1];
+				HscString element_string = hsc_data_type_string(astgen, d->element_data_type);
+				HscConstant constant = hsc_constant_table_get(&astgen->constant_table, d->size_constant_id);
+				U64 size;
+				HSC_DEBUG_ASSERT(hsc_constant_as_uint(constant, &size), "internal error: array size is not an unsigned integer");
+				U32 string_size = snprintf(buf, sizeof(buf), "%.*s[%zu]", (int)element_string.size, element_string.data, size);
+				string_id = hsc_string_table_deduplicate(&astgen->string_table, buf, string_size);
+				break;
+			};
+			default:
+				HSC_ABORT("unhandled data type '%u'", data_type);
+		}
 	}
 
 	return hsc_string_table_get(&astgen->string_table, string_id);
@@ -527,7 +543,17 @@ U32 hsc_data_type_composite_fields_count(HscAstGen* astgen, HscDataType data_typ
 		}
 		return  componments_count;
 	} else {
-		HSC_ABORT("unhandled data type '%u'", data_type);
+		switch (data_type & 0xff) {
+			case HSC_DATA_TYPE_ARRAY: {
+				HscArrayDataType* d = &astgen->array_data_types[HSC_DATA_TYPE_ARRAY_DATA_TYPE_ID(data_type).idx_plus_one - 1];
+				HscConstant constant = hsc_constant_table_get(&astgen->constant_table, d->size_constant_id);
+				U64 count;
+				hsc_constant_as_uint(constant, &count);
+				return count;
+			};
+			default:
+				HSC_ABORT("unhandled data type '%u'", data_type);
+		}
 	}
 }
 
@@ -692,6 +718,35 @@ HscConstant hsc_constant_table_get(HscConstantTable* constant_table, HscConstant
 	return constant;
 }
 
+bool hsc_constant_as_uint(HscConstant constant, U64* out) {
+	S64 signed_value = 0;
+	switch (constant.data_type) {
+		case HSC_DATA_TYPE_U8: *out = *(U8*)constant.data; break;
+		case HSC_DATA_TYPE_U16: *out = *(U16*)constant.data; break;
+		case HSC_DATA_TYPE_U32: *out = *(U32*)constant.data; break;
+		case HSC_DATA_TYPE_U64: *out = *(U64*)constant.data; break;
+		case HSC_DATA_TYPE_S8:
+			signed_value = *(S8*)constant.data;
+			goto SIGNED_VALUE;
+		case HSC_DATA_TYPE_S16:
+			signed_value = *(S16*)constant.data;
+			goto SIGNED_VALUE;
+		case HSC_DATA_TYPE_S32:
+			signed_value = *(S32*)constant.data;
+			goto SIGNED_VALUE;
+		case HSC_DATA_TYPE_S64:
+			signed_value = *(S64*)constant.data;
+SIGNED_VALUE:
+			if (signed_value < 0) {
+				return false;
+			}
+			*out = signed_value;
+			break;
+	}
+
+	return true;
+}
+
 void hsc_add_intrinsic_function(HscAstGen* astgen, U32 function_id) {
 	HscIntrinsicFunction* intrinsic_function = &hsc_intrinsic_functions[function_id];
 
@@ -730,6 +785,10 @@ void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup) {
 	astgen->function_params_and_local_variables_cap = setup->function_params_and_local_variables_cap;
 	astgen->functions_cap = setup->functions_cap;
 	astgen->exprs_cap = setup->exprs_cap;
+
+	astgen->array_data_types = HSC_ALLOC_ARRAY(HscArrayDataType, setup->exprs_cap);
+	HSC_ASSERT(astgen->array_data_types, "out of memory");
+	astgen->array_data_types_cap = setup->exprs_cap;
 
 	astgen->variable_stack_strings = HSC_ALLOC_ARRAY(HscStringId, setup->variable_stack_cap);
 	HSC_ASSERT(astgen->variable_stack_strings, "out of memory");
@@ -1465,6 +1524,11 @@ void hsc_astgen_tokenize(HscAstGen* astgen) {
 			case '(':
 				token = HSC_TOKEN_PARENTHESIS_OPEN;
 				close_token = HSC_TOKEN_PARENTHESIS_CLOSE;
+				goto OPEN_BRACKETS;
+			case '[':
+				token = HSC_TOKEN_SQUARE_OPEN;
+				close_token = HSC_TOKEN_SQUARE_CLOSE;
+				goto OPEN_BRACKETS;
 OPEN_BRACKETS:
 			{
 				if (brackets_to_close_count >= _HSC_TOKENIZER_NESTED_BRACKETS_CAP) {
@@ -1482,6 +1546,10 @@ OPEN_BRACKETS:
 				goto CLOSE_BRACKETS;
 			case ')':
 				token = HSC_TOKEN_PARENTHESIS_CLOSE;
+				goto CLOSE_BRACKETS;
+			case ']':
+				token = HSC_TOKEN_SQUARE_CLOSE;
+				goto CLOSE_BRACKETS;
 CLOSE_BRACKETS:
 			{
 				if (brackets_to_close_count == 0) {
@@ -1528,6 +1596,8 @@ CLOSE_BRACKETS:
 						case ')':
 						case '{':
 						case '}':
+						case '[':
+						case ']':
 						case ':':
 						case ';':
 						case '\n':
@@ -1663,6 +1733,69 @@ HscExpr* hsc_astgen_alloc_expr_many(HscAstGen* astgen, U32 amount) {
 	return exprs;
 }
 
+bool hsc_data_type_check_compatible(HscAstGen* astgen, HscDataType target_data_type, HscDataType source_data_type) {
+	if (target_data_type == source_data_type) {
+		return true;
+	}
+
+	switch (target_data_type) {
+		case HSC_DATA_TYPE_GENERIC_SCALAR:
+			if (astgen->generic_data_type_state.scalar != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.scalar != source_data_type) {
+				return false;
+			}
+			if (
+				source_data_type != HSC_DATA_TYPE_VOID &&
+				HSC_DATA_TYPE_BASIC_START <= source_data_type &&
+				source_data_type < HSC_DATA_TYPE_BASIC_END
+			) {
+				astgen->generic_data_type_state.scalar = source_data_type;
+				return true;
+			}
+			break;
+		case HSC_DATA_TYPE_GENERIC_VEC2:
+			if (astgen->generic_data_type_state.vec2 != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.vec2 != source_data_type) {
+				return false;
+			}
+			if (HSC_DATA_TYPE_VEC2_START <= source_data_type && source_data_type < HSC_DATA_TYPE_VEC2_END) {
+				astgen->generic_data_type_state.vec2 = source_data_type;
+				return true;
+			}
+			break;
+		case HSC_DATA_TYPE_GENERIC_VEC3:
+			if (astgen->generic_data_type_state.vec3 != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.vec3 != source_data_type) {
+				return false;
+			}
+			if (HSC_DATA_TYPE_VEC3_START <= source_data_type && source_data_type < HSC_DATA_TYPE_VEC3_END) {
+				astgen->generic_data_type_state.vec3 = source_data_type;
+				return true;
+			}
+			break;
+		case HSC_DATA_TYPE_GENERIC_VEC4:
+			if (astgen->generic_data_type_state.vec4 != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.vec4 != source_data_type) {
+				return false;
+			}
+			if (HSC_DATA_TYPE_VEC4_START <= source_data_type && source_data_type < HSC_DATA_TYPE_VEC4_END) {
+				astgen->generic_data_type_state.vec4 = source_data_type;
+				return true;
+			}
+			break;
+	}
+
+	return false;
+}
+
+void hsc_astgen_error_data_type_mismatch(HscAstGen* astgen, HscLocation* other_location, HscDataType target_data_type, HscDataType source_data_type) {
+	HscString target_data_type_name = hsc_data_type_string(astgen, target_data_type);
+	HscString source_data_type_name = hsc_data_type_string(astgen, source_data_type);
+	hsc_astgen_error_2(astgen, other_location, "type mismatch '%.*s' is does not implicitly cast to '%.*s'", (int)source_data_type_name.size, source_data_type_name.data, (int)target_data_type_name.size, target_data_type_name.data);
+}
+
+void hsc_data_type_ensure_compatible(HscAstGen* astgen, HscLocation* other_location, HscDataType target_data_type, HscDataType source_data_type) {
+	if (!hsc_data_type_check_compatible(astgen, target_data_type, source_data_type)) {
+		hsc_astgen_error_data_type_mismatch(astgen, other_location, target_data_type, source_data_type);
+	}
+}
+
 HscExpr* hsc_astgen_generate_unary_expr(HscAstGen* astgen) {
 	HscToken token = hsc_token_peek(astgen);
 	HscUnaryOp unary_op;
@@ -1779,6 +1912,102 @@ UNARY:
 
 			return expr;
 		};
+		case HSC_TOKEN_CURLY_OPEN: {
+			HscDataType assign_data_type = astgen->assign_data_type;
+			astgen->assign_data_type = HSC_DATA_TYPE_VOID;
+			switch (assign_data_type & 0xff) {
+				case HSC_DATA_TYPE_ARRAY: {
+					HscExpr* array_lit_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_ARRAY_LIT);
+					HscArrayDataType* array_data_type = &astgen->array_data_types[HSC_DATA_TYPE_ARRAY_DATA_TYPE_ID(assign_data_type).idx_plus_one - 1];
+					array_lit_expr->data_type = assign_data_type;
+
+					HscDataType value_assign_data_type = HSC_DATA_TYPE_VOID;
+					switch (array_data_type->element_data_type & 0xff) {
+						case HSC_DATA_TYPE_ARRAY:
+						case HSC_DATA_TYPE_STRUCT:
+						case HSC_DATA_TYPE_UNION:
+							value_assign_data_type = array_data_type->element_data_type;
+							break;
+					}
+
+					HscExpr* prev_value_expr = NULL;
+					HscExpr* first_value_expr = NULL;
+					token = hsc_token_next(astgen);
+					U32 values_count = 0;
+					while (token != HSC_TOKEN_CURLY_CLOSE) {
+						HscExpr* designator_index_expr = NULL;
+						if (token == HSC_TOKEN_SQUARE_OPEN) {
+							hsc_token_next(astgen);
+							designator_index_expr = hsc_astgen_generate_expr(astgen, 0);
+							if (designator_index_expr->type != HSC_EXPR_TYPE_CONSTANT || !HSC_DATA_TYPE_IS_INT(designator_index_expr->data_type)) {
+								hsc_astgen_error_1(astgen, "array designator index must be a constant integer");
+							}
+
+							token = hsc_token_peek(astgen);
+							if (token != HSC_TOKEN_SQUARE_CLOSE) {
+								hsc_astgen_error_1(astgen, "expected a ']' to finish the array designator index");
+							}
+
+							token = hsc_token_next(astgen);
+							if (token != HSC_TOKEN_EQUAL) {
+								hsc_astgen_error_1(astgen, "expected a '=' to bridge the value expression for the array designator");
+							}
+							token = hsc_token_next(astgen);
+						}
+
+						astgen->assign_data_type = value_assign_data_type;
+						HscExpr* value_expr = hsc_astgen_generate_expr(astgen, 0);
+						HscLocation* other_location = NULL;
+						hsc_data_type_ensure_compatible(astgen, other_location, array_data_type->element_data_type, value_expr->data_type);
+						astgen->assign_data_type = HSC_DATA_TYPE_VOID;
+
+						token = hsc_token_peek(astgen);
+
+						if (designator_index_expr) {
+							HscExpr* designator_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_ARRAY_DESIGNATOR);
+							designator_expr->binary.left_expr_rel_idx = designator_expr - designator_index_expr;
+							designator_expr->binary.right_expr_rel_idx = designator_expr - value_expr;
+							value_expr = designator_expr;
+						}
+						value_expr->is_stmt_block_entry = true;
+
+						if (prev_value_expr) {
+							prev_value_expr->next_expr_rel_idx = value_expr - prev_value_expr;
+						} else {
+							first_value_expr = value_expr;
+						}
+						prev_value_expr = value_expr;
+
+						value_expr->next_expr_rel_idx = 0;
+						values_count += 1;
+
+						token = hsc_token_peek(astgen);
+						if (token == HSC_TOKEN_CURLY_CLOSE) {
+							break;
+						}
+
+						if (token != HSC_TOKEN_COMMA) {
+							hsc_astgen_error_1(astgen, "expected a '}' to finish the array literal or a ',' declare another array element value expression");
+						}
+
+						token = hsc_token_next(astgen);
+					}
+					token = hsc_token_next(astgen);
+
+					array_lit_expr->array_lit.first_expr_rel_idx = first_value_expr - array_lit_expr;
+					array_lit_expr->array_lit.values_count = values_count;
+					return array_lit_expr;
+				};
+				case HSC_DATA_TYPE_VOID:
+					hsc_astgen_error_1(astgen, "compound/array literals can only be used in the right side of an assign expressions");
+				default: {
+					HscString data_type_name = hsc_data_type_string(astgen, assign_data_type);
+					hsc_astgen_error_1(astgen, "compound/array literals can only be used for structure or array types but got '%.*s'", (int)data_type_name.size, data_type_name.data);
+				};
+			}
+
+			HSC_UNREACHABLE();
+		};
 		case HSC_DATA_TYPE_VOID:
 		case HSC_DATA_TYPE_BOOL:
 		case HSC_DATA_TYPE_U8:
@@ -1820,6 +2049,10 @@ void hsc_astgen_generate_binary_op(HscAstGen* astgen, HscExprType* binary_op_typ
 	switch (token) {
 		case HSC_TOKEN_PARENTHESIS_OPEN:
 			*binary_op_type_out = HSC_EXPR_TYPE_CALL;
+			*precedence_out = 1;
+			break;
+		case HSC_TOKEN_SQUARE_OPEN:
+			*binary_op_type_out = HSC_EXPR_TYPE_ARRAY_SUBSCRIPT;
 			*precedence_out = 1;
 			break;
 		case HSC_TOKEN_ASTERISK:
@@ -1953,69 +2186,6 @@ void hsc_astgen_generate_binary_op(HscAstGen* astgen, HscExprType* binary_op_typ
 			*binary_op_type_out = HSC_EXPR_TYPE_NONE;
 			*precedence_out = 0;
 			break;
-	}
-}
-
-bool hsc_data_type_check_compatible(HscAstGen* astgen, HscDataType target_data_type, HscDataType source_data_type) {
-	if (target_data_type == source_data_type) {
-		return true;
-	}
-
-	switch (target_data_type) {
-		case HSC_DATA_TYPE_GENERIC_SCALAR:
-			if (astgen->generic_data_type_state.scalar != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.scalar != source_data_type) {
-				return false;
-			}
-			if (
-				source_data_type != HSC_DATA_TYPE_VOID &&
-				HSC_DATA_TYPE_BASIC_START <= source_data_type &&
-				source_data_type < HSC_DATA_TYPE_BASIC_END
-			) {
-				astgen->generic_data_type_state.scalar = source_data_type;
-				return true;
-			}
-			break;
-		case HSC_DATA_TYPE_GENERIC_VEC2:
-			if (astgen->generic_data_type_state.vec2 != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.vec2 != source_data_type) {
-				return false;
-			}
-			if (HSC_DATA_TYPE_VEC2_START <= source_data_type && source_data_type < HSC_DATA_TYPE_VEC2_END) {
-				astgen->generic_data_type_state.vec2 = source_data_type;
-				return true;
-			}
-			break;
-		case HSC_DATA_TYPE_GENERIC_VEC3:
-			if (astgen->generic_data_type_state.vec3 != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.vec3 != source_data_type) {
-				return false;
-			}
-			if (HSC_DATA_TYPE_VEC3_START <= source_data_type && source_data_type < HSC_DATA_TYPE_VEC3_END) {
-				astgen->generic_data_type_state.vec3 = source_data_type;
-				return true;
-			}
-			break;
-		case HSC_DATA_TYPE_GENERIC_VEC4:
-			if (astgen->generic_data_type_state.vec4 != HSC_DATA_TYPE_VOID && astgen->generic_data_type_state.vec4 != source_data_type) {
-				return false;
-			}
-			if (HSC_DATA_TYPE_VEC4_START <= source_data_type && source_data_type < HSC_DATA_TYPE_VEC4_END) {
-				astgen->generic_data_type_state.vec4 = source_data_type;
-				return true;
-			}
-			break;
-	}
-
-	return false;
-}
-
-void hsc_astgen_error_data_type_mismatch(HscAstGen* astgen, HscLocation* other_location, HscDataType target_data_type, HscDataType source_data_type) {
-	HscString target_data_type_name = hsc_data_type_string(astgen, target_data_type);
-	HscString source_data_type_name = hsc_data_type_string(astgen, source_data_type);
-	hsc_astgen_error_2(astgen, other_location, "type mismatch '%.*s' is does not implicitly cast to '%.*s'", (int)source_data_type_name.size, source_data_type_name.data, (int)target_data_type_name.size, target_data_type_name.data);
-}
-
-void hsc_data_type_ensure_compatible(HscAstGen* astgen, HscLocation* other_location, HscDataType target_data_type, HscDataType source_data_type) {
-	if (!hsc_data_type_check_compatible(astgen, target_data_type, source_data_type)) {
-		hsc_astgen_error_data_type_mismatch(astgen, other_location, target_data_type, source_data_type);
 	}
 }
 
@@ -2261,6 +2431,23 @@ END_ARG_COUNT: {}
 	return expr;
 }
 
+HscExpr* hsc_astgen_generate_array_subscript_expr(HscAstGen* astgen, HscExpr* array_expr) {
+	HscExpr* index_expr = hsc_astgen_generate_expr(astgen, 0);
+	HscToken token = hsc_token_peek(astgen);
+	if (token != HSC_TOKEN_SQUARE_CLOSE) {
+		hsc_astgen_error_1(astgen, "expected ']' to finish the array subscript");
+	}
+	hsc_token_next(astgen);
+
+	HscArrayDataType* d = &astgen->array_data_types[HSC_DATA_TYPE_ARRAY_DATA_TYPE_ID(array_expr->data_type).idx_plus_one - 1];
+
+	HscExpr* expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_ARRAY_SUBSCRIPT);
+	expr->binary.left_expr_rel_idx = expr - array_expr;
+	expr->binary.right_expr_rel_idx = expr - index_expr;
+	expr->data_type = d->element_data_type;
+	return expr;
+}
+
 HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 	U32 expr_idx = astgen->exprs_count;
 	U32 callee_token_idx = astgen->token_read_idx;
@@ -2279,10 +2466,17 @@ HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 		if (binary_op_type == HSC_EXPR_TYPE_CALL) {
 			if (left_expr->type != HSC_EXPR_TYPE_FUNCTION) {
 				HscLocation* other_location = &astgen->token_locations[callee_token_idx];
-				hsc_astgen_error_2(astgen, other_location, "unexpected '(', this can only be used when the callee is a function");
+				hsc_astgen_error_2(astgen, other_location, "unexpected '(', this can only be used when the left expression is a function");
 			}
 
 			left_expr = hsc_astgen_generate_call_expr(astgen, left_expr);
+		} else if (binary_op_type == HSC_EXPR_TYPE_ARRAY_SUBSCRIPT) {
+			if (!HSC_DATA_TYPE_IS_ARRAY(left_expr->data_type)) {
+				HscLocation* other_location = &astgen->token_locations[callee_token_idx];
+				hsc_astgen_error_2(astgen, other_location, "unexpected '[', this can only be used when the left expression is an array");
+			}
+
+			left_expr = hsc_astgen_generate_array_subscript_expr(astgen, left_expr);
 		} else {
 			HscExpr* right_expr = hsc_astgen_generate_expr(astgen, precedence);
 
@@ -2361,6 +2555,59 @@ HscExpr* hsc_astgen_generate_cond_expr(HscAstGen* astgen) {
 	return cond_expr;
 }
 
+HscDataType hsc_astgen_deduplicate_array_data_type(HscAstGen* astgen, HscDataType element_data_type, HscConstantId size_constant_id) {
+	for (U32 i = 0; i < astgen->array_data_types_count; i += 1) {
+		HscArrayDataType* d = &astgen->array_data_types[i];
+		if (d->element_data_type == element_data_type && d->size_constant_id.idx_plus_one == size_constant_id.idx_plus_one) {
+			return HSC_DATA_TYPE_ARRAY((HscArrayDataTypeId){ .idx_plus_one = i + 1 });
+		}
+	}
+
+	HSC_ASSERT_ARRAY_BOUNDS(astgen->array_data_types_count, astgen->array_data_types_cap);
+	HscArrayDataType* d = &astgen->array_data_types[astgen->array_data_types_count];
+	d->element_data_type = element_data_type;
+	d->size_constant_id = size_constant_id;
+	astgen->array_data_types_count += 1;
+	return HSC_DATA_TYPE_ARRAY((HscArrayDataTypeId){ .idx_plus_one = astgen->array_data_types_count });
+}
+
+HscDataType hsc_astgen_generate_variable_decl_array(HscAstGen* astgen, HscDataType element_data_type) {
+	HscToken token = hsc_token_next(astgen);
+	if (token == HSC_TOKEN_SQUARE_CLOSE) {
+		hsc_astgen_error_1(astgen, "expected the array size here");
+	}
+	HscExpr* size_expr = hsc_astgen_generate_expr(astgen, 0);
+	if (size_expr->type != HSC_EXPR_TYPE_CONSTANT) {
+		hsc_astgen_error_1(astgen, "expected an expression to resolve to an integer for the array size here");
+	}
+
+	if (size_expr->data_type < HSC_DATA_TYPE_U8 || size_expr->data_type > HSC_DATA_TYPE_S64) {
+		hsc_astgen_error_1(astgen, "expected an integer type for the array size here");
+	}
+
+	HscConstantId size_constant_id = { .idx_plus_one = size_expr->constant.id };
+	HscConstant constant = hsc_constant_table_get(&astgen->constant_table, size_constant_id);
+	U64 size;
+	if (!hsc_constant_as_uint(constant, &size)) {
+		hsc_astgen_error_1(astgen, "the array size cannot be negative");
+	}
+	if (size == 0) {
+		hsc_astgen_error_1(astgen, "the array size cannot be zero");
+	}
+
+	token = hsc_token_peek(astgen);
+	if (token != HSC_TOKEN_SQUARE_CLOSE) {
+		hsc_astgen_error_1(astgen, "expected a ']' after the array size expression");
+	}
+	token = hsc_token_next(astgen);
+
+	HscDataType data_type = hsc_astgen_deduplicate_array_data_type(astgen, element_data_type, size_constant_id);
+	if (token == HSC_TOKEN_SQUARE_OPEN) {
+		data_type = hsc_astgen_generate_variable_decl_array(astgen, data_type);
+	}
+	return data_type;
+}
+
 HscExpr* hsc_astgen_generate_variable_decl(HscAstGen* astgen, HscExpr* type_expr) {
 	HSC_DEBUG_ASSERT(type_expr->type == HSC_EXPR_TYPE_DATA_TYPE, "expected a data type expression here");
 
@@ -2386,19 +2633,25 @@ HscExpr* hsc_astgen_generate_variable_decl(HscAstGen* astgen, HscExpr* type_expr
 	astgen->stmt_block->stmt_block.local_variables_count += 1;
 
 	token = hsc_token_next(astgen);
+	if (token == HSC_TOKEN_SQUARE_OPEN) {
+		local_variable->data_type = hsc_astgen_generate_variable_decl_array(astgen, local_variable->data_type);
+		token = hsc_token_peek(astgen);
+	}
+
 	switch (token) {
 		case HSC_TOKEN_SEMICOLON:
-			hsc_token_next(astgen);
 			break;
 		case HSC_TOKEN_EQUAL: {
 			HscExpr* left_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_LOCAL_VARIABLE);
 			left_expr->variable.idx = variable_idx;
-			left_expr->data_type = type_expr->data_type;
+			left_expr->data_type = local_variable->data_type;
 			hsc_token_next(astgen);
 
+			astgen->assign_data_type = local_variable->data_type;
 			HscExpr* right_expr = hsc_astgen_generate_expr(astgen, 0);
 			HscLocation* other_location = NULL; // TODO
 			hsc_data_type_ensure_compatible(astgen, other_location, left_expr->data_type, right_expr->data_type);
+			astgen->assign_data_type = HSC_DATA_TYPE_VOID;
 
 			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_BINARY_OP(ASSIGN));
 			stmt->binary.is_assignment = true;
@@ -3038,6 +3291,7 @@ UNARY:
 		case HSC_EXPR_TYPE_LOGICAL_AND: expr_name = "LOGICAL_AND"; goto BINARY;
 		case HSC_EXPR_TYPE_LOGICAL_OR: expr_name = "LOGICAL_OR"; goto BINARY;
 		case HSC_EXPR_TYPE_CALL: expr_name = "CALL"; goto BINARY;
+		case HSC_EXPR_TYPE_ARRAY_SUBSCRIPT: expr_name = "ARRAY_SUBSCRIPT"; goto BINARY;
 BINARY:
 		{
 			char* prefix = expr->binary.is_assignment ? "STMT_ASSIGN_" : "EXPR_";
@@ -3046,6 +3300,30 @@ BINARY:
 			HscExpr* right_expr = expr - expr->binary.right_expr_rel_idx;
 			hsc_astgen_print_expr(astgen, left_expr, indent + 1, false, f);
 			hsc_astgen_print_expr(astgen, right_expr, indent + 1, false, f);
+			fprintf(f, "%.*s}", indent, indent_chars);
+			break;
+		};
+		case HSC_EXPR_TYPE_ARRAY_LIT: {
+			fprintf(f, "%s: {\n", "EXPR_ARRAY_LIT");
+
+			U32 values_count = expr->array_lit.values_count;
+			HscExpr* value_expr = &expr[expr->array_lit.first_expr_rel_idx];
+			for (U32 i = 0; i < values_count; i += 1) {
+				hsc_astgen_print_expr(astgen, value_expr, indent + 1, false, f);
+				value_expr = &value_expr[value_expr->next_expr_rel_idx];
+			}
+
+			fprintf(f, "%.*s}", indent, indent_chars);
+			break;
+		};
+		case HSC_EXPR_TYPE_ARRAY_DESIGNATOR: {
+			fprintf(f, "%s: {\n", "EXPR_ARRAY_DESIGNATOR");
+
+			HscExpr* left_expr = expr - expr->binary.left_expr_rel_idx;
+			HscExpr* right_expr = expr - expr->binary.right_expr_rel_idx;
+			hsc_astgen_print_expr(astgen, left_expr, indent + 1, false, f);
+			hsc_astgen_print_expr(astgen, right_expr, indent + 1, false, f);
+
 			fprintf(f, "%.*s}", indent, indent_chars);
 			break;
 		};
@@ -3315,6 +3593,38 @@ void hsc_ir_generate_store(HscIR* ir, HscIRFunction* ir_function, HscIROperand l
 	operands[0] = left_operand;
 	operands[1] = right_operand;
 	hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_STORE, operands, 2);
+}
+
+HscIRBasicBlock* hsc_ir_generate_access_chain_instruction(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr, U32 count) {
+	switch (expr->type) {
+		case HSC_EXPR_TYPE_ARRAY_SUBSCRIPT: {
+			HscExpr* right_expr = expr - expr->binary.right_expr_rel_idx;
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, right_expr);
+			HscIROperand right_operand = ir->last_operand;
+
+			HscExpr* left_expr = expr - expr->binary.left_expr_rel_idx;
+			basic_block = hsc_ir_generate_access_chain_instruction(ir, astgen, ir_function, basic_block, left_expr, count + 1);
+
+			ir->operands[ir->operands_count - count - 1] = right_operand;
+			break;
+		};
+		default: {
+			ir->do_not_load_variable = true;
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, expr);
+			ir->do_not_load_variable = false;
+
+			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, count + 3);
+			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_ACCESS_CHAIN, operands, count + 3);
+
+			U16 return_value_idx = hsc_ir_add_value(ir, ir_function, expr->data_type);
+			operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+			operands[1] = ir->last_operand;
+
+			ir->last_operand = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+			break;
+		};
+	}
+	return basic_block;
 }
 
 HscIRBasicBlock* hsc_ir_generate_instructions(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIRBasicBlock* basic_block, HscExpr* expr) {
@@ -3607,10 +3917,12 @@ UNARY:
 			HscExpr* left_expr = expr - expr->binary.left_expr_rel_idx;
 			HscExpr* right_expr = expr - expr->binary.right_expr_rel_idx;
 
-			ir->do_not_load_variable = left_expr->type == HSC_EXPR_TYPE_LOCAL_VARIABLE;
+			ir->do_not_load_variable = true;
 			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, left_expr);
+			ir->do_not_load_variable = false;
 			HscIROperand left_operand = ir->last_operand;
 
+			ir->assign_data_type = hsc_ir_operand_data_type(ir, astgen, ir_function, left_operand);
 			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, right_expr);
 			HscIROperand right_operand = ir->last_operand;
 
@@ -3747,6 +4059,70 @@ UNARY:
 				ir->last_operand = operands[0];
 			}
 
+			break;
+		};
+		case HSC_EXPR_TYPE_ARRAY_SUBSCRIPT: {
+			bool do_load = !ir->do_not_load_variable;
+			ir->do_not_load_variable = false;
+
+			basic_block = hsc_ir_generate_access_chain_instruction(ir, astgen, ir_function, basic_block, expr, 0);
+			U16 operands_count = ir->instructions[ir->instructions_count - 1].operands_count;
+			HscIROperand* operands = &ir->operands[ir->operands_count - operands_count];
+			operands[2] = expr->data_type;
+
+			if (do_load) {
+				HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 2);
+				U16 return_value_idx = hsc_ir_add_value(ir, ir_function, expr->data_type);
+				operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+				operands[1] = ir->last_operand;
+				hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_LOAD, operands, 2);
+
+				ir->last_operand = operands[0];
+			}
+			break;
+		};
+		case HSC_EXPR_TYPE_ARRAY_LIT: {
+			HscDataType data_type = ir->assign_data_type;
+			HSC_DEBUG_ASSERT((data_type & 0xff) == HSC_DATA_TYPE_ARRAY, "internal error: expected an array type");
+			HscArrayDataType* d = &astgen->array_data_types[HSC_DATA_TYPE_ARRAY_DATA_TYPE_ID(data_type).idx_plus_one - 1];
+			HscConstant constant = hsc_constant_table_get(&astgen->constant_table, d->size_constant_id);
+			U64 count;
+			hsc_constant_as_uint(constant, &count);
+
+			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, count + 1);
+
+			U64 index = 0;
+			HscExpr* value_expr = expr;
+			U32 rel_idx = expr->array_lit.first_expr_rel_idx;
+			while (rel_idx) {
+				value_expr = &value_expr[rel_idx];
+				rel_idx = value_expr->next_expr_rel_idx;
+
+				HscExpr* v_expr = value_expr;
+				if (value_expr->type == HSC_EXPR_TYPE_ARRAY_DESIGNATOR) {
+					HscExpr* left_expr = value_expr - value_expr->binary.left_expr_rel_idx;
+					HscExpr* right_expr = value_expr - value_expr->binary.right_expr_rel_idx;
+					HSC_DEBUG_ASSERT(left_expr->type == HSC_EXPR_TYPE_CONSTANT, "internal error: array designator index is meant to be a constnat");
+
+					HscConstantId constant_id = { .idx_plus_one = left_expr->constant.id };
+					HscConstant index_constant = hsc_constant_table_get(&astgen->constant_table, constant_id);
+					hsc_constant_as_uint(index_constant, &index);
+
+					v_expr = right_expr;
+				}
+
+				ir->assign_data_type = d->element_data_type;
+				basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, v_expr);
+				HscIROperand value_operand = ir->last_operand;
+				operands[index + 1] = value_operand;
+				index += 1;
+			}
+
+			U16 return_value_idx = hsc_ir_add_value(ir, ir_function, data_type);
+			operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+
+			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_COMPOSITE_INIT, operands, count + 1);
+			ir->last_operand = operands[0];
 			break;
 		};
 		case HSC_EXPR_TYPE_CAST: {
@@ -3949,6 +4325,20 @@ void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 						fprintf(f, "\t\t");
 						hsc_ir_print_operand(ir, astgen, operands[0], f);
 						fprintf(f, " = OP_COMPOSITE_INIT: ");
+						for (U32 idx = 1; idx < instruction->operands_count; idx += 1) {
+							hsc_ir_print_operand(ir, astgen, operands[idx], f);
+							if (idx + 1 < instruction->operands_count) {
+								fprintf(f, ", ");
+							}
+						}
+						fprintf(f, "\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_ACCESS_CHAIN: {
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						fprintf(f, "\t\t");
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, " = OP_ACCESS_CHAIN: ");
 						for (U32 idx = 1; idx < instruction->operands_count; idx += 1) {
 							hsc_ir_print_operand(ir, astgen, operands[idx], f);
 							if (idx + 1 < instruction->operands_count) {
@@ -4329,7 +4719,12 @@ U32 hsc_spirv_resolve_type_id(HscCompiler* c, HscDataType data_type) {
 	if (data_type < HSC_DATA_TYPE_MATRIX_END) {
 		return data_type + 1;
 	} else {
-		HSC_ABORT("unhandled data type '%u'", data_type);
+		switch (data_type & 0xff) {
+			case HSC_DATA_TYPE_ARRAY:
+				return c->spirv.array_type_base_id + HSC_DATA_TYPE_ARRAY_DATA_TYPE_ID(data_type).idx_plus_one - 1;
+			default:
+				HSC_ABORT("unhandled data type '%u'", data_type);
+		}
 	}
 }
 
@@ -4394,6 +4789,7 @@ void hsc_spirv_instr_end(HscCompiler* c) {
 		case HSC_SPIRV_OP_TYPE_INT:
 		case HSC_SPIRV_OP_TYPE_FLOAT:
 		case HSC_SPIRV_OP_TYPE_VECTOR:
+		case HSC_SPIRV_OP_TYPE_ARRAY:
 		case HSC_SPIRV_OP_TYPE_POINTER:
 		case HSC_SPIRV_OP_TYPE_FUNCTION:
 		case HSC_SPIRV_OP_CONSTANT_TRUE:
@@ -4409,6 +4805,7 @@ TYPES_VARIABLES_CONSTANTS:
 		case HSC_SPIRV_OP_FUNCTION_PARAMETER:
 		case HSC_SPIRV_OP_FUNCTION_END:
 		case HSC_SPIRV_OP_COMPOSITE_CONSTRUCT:
+		case HSC_SPIRV_OP_ACCESS_CHAIN:
 		case HSC_SPIRV_OP_CONVERT_F_TO_U:
 		case HSC_SPIRV_OP_CONVERT_F_TO_S:
 		case HSC_SPIRV_OP_CONVERT_S_TO_F:
@@ -4751,6 +5148,19 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 						hsc_spirv_instr_add_converted_operand(c, operands[instruction->operands_count - 1]);
 					}
 
+					hsc_spirv_instr_end(c);
+					break;
+				};
+				case HSC_IR_OP_CODE_ACCESS_CHAIN: {
+					U32 data_type_spirv_id = hsc_spirv_generate_function_variable_type(c, operands[2]);
+
+					hsc_spirv_instr_start(c, HSC_SPIRV_OP_ACCESS_CHAIN);
+					hsc_spirv_instr_add_operand(c, data_type_spirv_id);
+					hsc_spirv_instr_add_converted_operand(c, operands[0]);
+					hsc_spirv_instr_add_converted_operand(c, operands[1]);
+					for (U32 i = 3; i < instruction->operands_count; i += 1) {
+						hsc_spirv_instr_add_converted_operand(c, operands[i]);
+					}
 					hsc_spirv_instr_end(c);
 					break;
 				};
@@ -5165,6 +5575,18 @@ void hsc_spirv_generate_binary(HscCompiler* c) {
 void hsc_spirv_generate(HscCompiler* c) {
 	hsc_spirv_generate_basic_types(c);
 	hsc_spirv_generate_constants(c);
+
+	{
+		c->spirv.array_type_base_id = c->spirv.next_id;
+		for (U32 i = 0; i < c->astgen.array_data_types_count; i += 1) {
+			HscArrayDataType* d = &c->astgen.array_data_types[i];
+			hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_ARRAY);
+			hsc_spirv_instr_add_result_operand(c);
+			hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, d->element_data_type));
+			hsc_spirv_instr_add_operand(c, c->spirv.constant_base_id + d->size_constant_id.idx_plus_one - 1);
+			hsc_spirv_instr_end(c);
+		}
+	}
 
 	{
 		c->spirv.shader_stage_function_type_spirv_id = c->spirv.next_id;

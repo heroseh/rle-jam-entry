@@ -117,8 +117,8 @@ HSC_NORETURN void _hsc_abort(const char* file, int line, const char* message, ..
 HSC_DEFINE_ID(HscFileId);
 HSC_DEFINE_ID(HscStringId);
 HSC_DEFINE_ID(HscConstantId);
-HSC_DEFINE_ID(HscCompoundTypeId);
-HSC_DEFINE_ID(HscArrayTypeId);
+HSC_DEFINE_ID(HscCompoundDataTypeId);
+HSC_DEFINE_ID(HscArrayDataTypeId);
 HSC_DEFINE_ID(HscFunctionId);
 HSC_DEFINE_ID(HscFunctionTypeId);
 HSC_DEFINE_ID(HscExprId);
@@ -244,20 +244,22 @@ enum {
 	HSC_DATA_TYPE_COUNT,
 };
 
-#define HSC_DATA_TYPE_SCALAR(type)            ((type) & (HSC_DATA_TYPE_VEC2_START - 1))
-#define HSC_DATA_TYPE_IS_BASIC(type)          ((type) < HSC_DATA_TYPE_BASIC_END)
-#define HSC_DATA_TYPE_IS_VECTOR(type)         ((type) >= HSC_DATA_TYPE_VECTOR_START && (type) < HSC_DATA_TYPE_VECTOR_END)
-#define HSC_DATA_TYPE_IS_MATRIX(type)         ((type) >= HSC_DATA_TYPE_MATRIX_START && (type) < HSC_DATA_TYPE_MATRIX_END)
-#define HSC_DATA_TYPE_IS_STRUCT(type)         (((type) & 0xff) == HSC_DATA_TYPE_STRUCT)
-#define HSC_DATA_TYPE_IS_UNION(type)          (((type) & 0xff) == HSC_DATA_TYPE_UNION)
-#define HSC_DATA_TYPE_IS_COMPOUND_TYPE(type)  (HSC_DATA_TYPE_IS_STRUCT(type) || HSC_DATA_TYPE_IS_UNION(type))
-#define HSC_DATA_TYPE_IS_ARRAY(type)          (((type) & 0xff) == HSC_DATA_TYPE_ARRAY)
-#define HSC_DATA_TYPE_IS_GENERIC(type)        ((type) >= HSC_DATA_TYPE_GENERIC_START && (type) < HSC_DATA_TYPE_GENERIC_END)
-#define HSC_DATA_TYPE_VECTOR_COMPONENTS(type) (((type) / HSC_DATA_TYPE_VEC2_START) + 1)
-#define HSC_DATA_TYPE_MATRX_COLUMNS(type)     (((type) + 32) / 48)
-#define HSC_DATA_TYPE_MATRX_ROWS(type)        ((((((type) - 64) / 16) + 1) & 3) + 2)
-#define HSC_DATA_TYPE_COMPOUND_TYPE_ID(type)  ((HscCompoundTypeId) { .idx_plus_one = (type) >> 8 })
-#define HSC_DATA_TYPE_ARRAY_TYPE_ID(type)     ((HscArrayId) { .idx_plus_one = (type) >> 8 })
+#define HSC_DATA_TYPE_SCALAR(type)                ((type) & (HSC_DATA_TYPE_VEC2_START - 1))
+#define HSC_DATA_TYPE_IS_BASIC(type)              ((type) < HSC_DATA_TYPE_BASIC_END)
+#define HSC_DATA_TYPE_IS_INT(type)                ((type) >= HSC_DATA_TYPE_U8 && (type) <= HSC_DATA_TYPE_S64)
+#define HSC_DATA_TYPE_IS_VECTOR(type)             ((type) >= HSC_DATA_TYPE_VECTOR_START && (type) < HSC_DATA_TYPE_VECTOR_END)
+#define HSC_DATA_TYPE_IS_MATRIX(type)             ((type) >= HSC_DATA_TYPE_MATRIX_START && (type) < HSC_DATA_TYPE_MATRIX_END)
+#define HSC_DATA_TYPE_IS_STRUCT(type)             (((type) & 0xff) == HSC_DATA_TYPE_STRUCT)
+#define HSC_DATA_TYPE_IS_UNION(type)              (((type) & 0xff) == HSC_DATA_TYPE_UNION)
+#define HSC_DATA_TYPE_IS_COMPOUND_TYPE(type)      (HSC_DATA_TYPE_IS_STRUCT(type) || HSC_DATA_TYPE_IS_UNION(type))
+#define HSC_DATA_TYPE_IS_ARRAY(type)              (((type) & 0xff) == HSC_DATA_TYPE_ARRAY)
+#define HSC_DATA_TYPE_IS_GENERIC(type)            ((type) >= HSC_DATA_TYPE_GENERIC_START && (type) < HSC_DATA_TYPE_GENERIC_END)
+#define HSC_DATA_TYPE_VECTOR_COMPONENTS(type)     (((type) / HSC_DATA_TYPE_VEC2_START) + 1)
+#define HSC_DATA_TYPE_MATRX_COLUMNS(type)         (((type) + 32) / 48)
+#define HSC_DATA_TYPE_MATRX_ROWS(type)            ((((((type) - 64) / 16) + 1) & 3) + 2)
+#define HSC_DATA_TYPE_COMPOUND_DATA_TYPE_ID(type) ((HscCompoundDataTypeId) { .idx_plus_one = (type) >> 8 })
+#define HSC_DATA_TYPE_ARRAY_DATA_TYPE_ID(type)    ((HscArrayDataTypeId) { .idx_plus_one = (type) >> 8 })
+#define HSC_DATA_TYPE_ARRAY(id)                   (((id).idx_plus_one << 8) | HSC_DATA_TYPE_ARRAY)
 
 //
 // 'basic_type' must be HSC_DATA_TYPE_IS_BASIC(basic_type) == true
@@ -273,6 +275,12 @@ enum {
 #define HSC_DATA_TYPE_MAT4x2(basic_type) (HSC_DATA_TYPE_MAT4x2_START + (basic_type))
 #define HSC_DATA_TYPE_MAT4x3(basic_type) (HSC_DATA_TYPE_MAT4x3_START + (basic_type))
 #define HSC_DATA_TYPE_MAT4x4(basic_type) (HSC_DATA_TYPE_MAT4x4_START + (basic_type))
+
+typedef struct HscArrayDataType HscArrayDataType;
+struct HscArrayDataType {
+	HscDataType element_data_type;
+	HscConstantId size_constant_id;
+};
 
 //
 // inherits HscDataType
@@ -321,6 +329,8 @@ enum {
 	HSC_TOKEN_CURLY_CLOSE,
 	HSC_TOKEN_PARENTHESIS_OPEN,
 	HSC_TOKEN_PARENTHESIS_CLOSE,
+	HSC_TOKEN_SQUARE_OPEN,
+	HSC_TOKEN_SQUARE_CLOSE,
 	HSC_TOKEN_FULL_STOP,
 	HSC_TOKEN_COMMA,
 	HSC_TOKEN_SEMICOLON,
@@ -609,6 +619,9 @@ enum {
 	HSC_EXPR_TYPE_LOGICAL_AND,
 	HSC_EXPR_TYPE_LOGICAL_OR,
 	HSC_EXPR_TYPE_CALL,
+	HSC_EXPR_TYPE_ARRAY_SUBSCRIPT,
+	HSC_EXPR_TYPE_ARRAY_LIT,
+	HSC_EXPR_TYPE_ARRAY_DESIGNATOR,
 	HSC_EXPR_TYPE_CAST,
 
 	HSC_EXPR_TYPE_LOCAL_VARIABLE,
@@ -673,6 +686,12 @@ struct HscExpr {
 			U32 first_expr_rel_idx: 6;
 			U32 local_variables_count: 6;
 		} stmt_block;
+		struct {
+			U32 type: 6; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 first_expr_rel_idx: 12;
+			U32 values_count: 13;
+		} array_lit;
 		struct {
 			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
@@ -770,6 +789,12 @@ struct HscAstGen {
 	U32 exprs_count;
 	U32 exprs_cap;
 
+	HscArrayDataType* array_data_types;
+	U32 array_data_types_count;
+	U32 array_data_types_cap;
+
+	HscDataType assign_data_type;
+
 	HscExpr* stmt_block;
 	HscFunction* print_function;
 	U32 print_variable_base_idx;
@@ -836,6 +861,7 @@ void hsc_constant_table_deduplicate_composite_add(HscConstantTable* constant_tab
 HscConstantId hsc_constant_table_deduplicate_composite_end(HscConstantTable* constant_table);
 HscConstantId hsc_constant_table_deduplicate_zero(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type);
 HscConstant hsc_constant_table_get(HscConstantTable* constant_table, HscConstantId id);
+bool hsc_constant_as_uint(HscConstant constant, U64* out);
 
 typedef struct HscCompilerSetup HscCompilerSetup;
 void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup);
@@ -997,6 +1023,7 @@ struct HscIR {
 
 	HscIROperand last_operand;
 	bool do_not_load_variable;
+	HscDataType assign_data_type;
 
 	HscIRBranchState branch_state;
 };
@@ -1024,6 +1051,7 @@ enum {
 	HSC_SPIRV_OP_TYPE_INT = 21,
 	HSC_SPIRV_OP_TYPE_FLOAT = 22,
 	HSC_SPIRV_OP_TYPE_VECTOR = 23,
+	HSC_SPIRV_OP_TYPE_ARRAY = 28,
 	HSC_SPIRV_OP_TYPE_POINTER = 32,
 	HSC_SPIRV_OP_TYPE_FUNCTION = 33,
 
@@ -1038,6 +1066,7 @@ enum {
 	HSC_SPIRV_OP_VARIABLE = 59,
 	HSC_SPIRV_OP_LOAD = 61,
 	HSC_SPIRV_OP_STORE = 62,
+	HSC_SPIRV_OP_ACCESS_CHAIN = 65,
 	HSC_SPIRV_OP_DECORATE = 71,
 	HSC_SPIRV_OP_COMPOSITE_CONSTRUCT = 80,
 	HSC_SPIRV_OP_CONVERT_F_TO_U = 109,
@@ -1157,6 +1186,7 @@ typedef U8 HscSpirvTypeKind;
 enum {
 	HSC_SPIRV_TYPE_KIND_FUNCTION,
 	HSC_SPIRV_TYPE_KIND_FUNCTION_VARIABLE,
+	HSC_SPIRV_TYPE_KIND_FUNCTION_VARIABLE_POINTER,
 };
 
 typedef struct HscSpirvTypeEntry HscSpirvTypeEntry;
@@ -1211,6 +1241,7 @@ struct HscSpirv {
 	U32 pointer_type_outputs_base_id;
 	U64 pointer_type_inputs_made_bitset[4];
 	U64 pointer_type_outputs_made_bitset[4];
+	U32 array_type_base_id;
 
 	U32 value_base_id;
 	U32 constant_base_id;
