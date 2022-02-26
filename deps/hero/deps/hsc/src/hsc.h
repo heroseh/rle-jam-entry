@@ -117,8 +117,6 @@ HSC_NORETURN void _hsc_abort(const char* file, int line, const char* message, ..
 HSC_DEFINE_ID(HscFileId);
 HSC_DEFINE_ID(HscStringId);
 HSC_DEFINE_ID(HscConstantId);
-HSC_DEFINE_ID(HscCompoundDataTypeId);
-HSC_DEFINE_ID(HscArrayDataTypeId);
 HSC_DEFINE_ID(HscFunctionId);
 HSC_DEFINE_ID(HscFunctionTypeId);
 HSC_DEFINE_ID(HscExprId);
@@ -162,6 +160,8 @@ typedef double    F64;
 
 typedef struct HscCompiler HscCompiler;
 
+#define HSC_COMPOUND_TYPE_NESTED_FIELD_CAP 16
+
 // ===========================================
 //
 //
@@ -183,6 +183,8 @@ struct HscHashTable {
 void hsc_hash_table_init(HscHashTable* hash_table);
 bool hsc_hash_table_find(HscHashTable* hash_table, U32 key, U32* value_out);
 bool hsc_hash_table_find_or_insert(HscHashTable* hash_table, U32 key, U32** value_ptr_out);
+bool hsc_hash_table_remove(HscHashTable* hash_table, U32 key, U32* value_out);
+void hsc_hash_table_clear(HscHashTable* hash_table);
 
 // ===========================================
 //
@@ -233,6 +235,7 @@ enum {
 	HSC_DATA_TYPE_STRUCT = HSC_DATA_TYPE_MAT4x4_START + HSC_DATA_TYPE_VEC2_START,
 	HSC_DATA_TYPE_UNION,
 	HSC_DATA_TYPE_ARRAY,
+	HSC_DATA_TYPE_TYPEDEF,
 
 #define HSC_DATA_TYPE_GENERIC_START HSC_DATA_TYPE_GENERIC_SCALAR
 	HSC_DATA_TYPE_GENERIC_SCALAR,
@@ -253,13 +256,13 @@ enum {
 #define HSC_DATA_TYPE_IS_UNION(type)              (((type) & 0xff) == HSC_DATA_TYPE_UNION)
 #define HSC_DATA_TYPE_IS_COMPOUND_TYPE(type)      (HSC_DATA_TYPE_IS_STRUCT(type) || HSC_DATA_TYPE_IS_UNION(type))
 #define HSC_DATA_TYPE_IS_ARRAY(type)              (((type) & 0xff) == HSC_DATA_TYPE_ARRAY)
+#define HSC_DATA_TYPE_IS_TYPEDEF(type)            (((type) & 0xff) == HSC_DATA_TYPE_TYPEDEF)
 #define HSC_DATA_TYPE_IS_GENERIC(type)            ((type) >= HSC_DATA_TYPE_GENERIC_START && (type) < HSC_DATA_TYPE_GENERIC_END)
 #define HSC_DATA_TYPE_VECTOR_COMPONENTS(type)     (((type) / HSC_DATA_TYPE_VEC2_START) + 1)
 #define HSC_DATA_TYPE_MATRX_COLUMNS(type)         (((type) + 32) / 48)
 #define HSC_DATA_TYPE_MATRX_ROWS(type)            ((((((type) - 64) / 16) + 1) & 3) + 2)
-#define HSC_DATA_TYPE_COMPOUND_DATA_TYPE_ID(type) ((HscCompoundDataTypeId) { .idx_plus_one = (type) >> 8 })
-#define HSC_DATA_TYPE_ARRAY_DATA_TYPE_ID(type)    ((HscArrayDataTypeId) { .idx_plus_one = (type) >> 8 })
-#define HSC_DATA_TYPE_ARRAY(id)                   (((id).idx_plus_one << 8) | HSC_DATA_TYPE_ARRAY)
+#define HSC_DATA_TYPE_INIT(type, idx)             (((idx) << 8) | (type))
+#define HSC_DATA_TYPE_IDX(type)                   ((type) >> 8)
 
 //
 // 'basic_type' must be HSC_DATA_TYPE_IS_BASIC(basic_type) == true
@@ -282,13 +285,45 @@ struct HscArrayDataType {
 	HscConstantId size_constant_id;
 };
 
+typedef U16 HscCompoundDataTypeFlags;
+enum {
+	HSC_COMPOUND_DATA_TYPE_FLAGS_IS_UNION = 0x1,
+};
+
+typedef struct HscCompoundDataType HscCompoundDataType;
+struct HscCompoundDataType {
+	Uptr                     size;
+	Uptr                     align;
+	U32                      identifier_token_idx;
+	HscStringId              identifier_string_id;
+	U32                      fields_start_idx;
+	U16                      fields_count;
+	U16                      largest_sized_field_idx;
+	HscCompoundDataTypeFlags flags;
+};
+
+typedef struct HscCompoundField HscCompoundField;
+struct HscCompoundField {
+	HscStringId identifier_string_id;
+	HscDataType data_type;
+	U32         identifier_token_idx;
+};
+
+typedef struct HscTypedef HscTypedef;
+struct HscTypedef {
+	U32 identifier_token_idx;
+	HscStringId identifier_string_id;
+	HscDataType aliased_data_type;
+};
+
 //
 // inherits HscDataType
 typedef U32 HscDecl;
 enum {
 	HSC_DECL_FUNCTION = HSC_DATA_TYPE_COUNT,
 };
-#define HSC_DECL_IS_FUNCTION(type) (((type) & 0xff) & HSC_DECL_FUNCTION)
+#define HSC_DECL_IS_DATA_TYPE(type) (((type) & 0xff) < HSC_DATA_TYPE_COUNT)
+#define HSC_DECL_IS_FUNCTION(type) (((type) & 0xff) == HSC_DECL_FUNCTION)
 #define HSC_DECL_FUNCTION(function_id) (((function_id).idx_plus_one << 8) | HSC_DECL_FUNCTION)
 #define HSC_DECL_FUNCTION_RAW(function_id) (((function_id) << 8) | HSC_DECL_FUNCTION)
 #define HSC_DECL_FUNCTION_ID(type) ((HscFunctionId) { .idx_plus_one = (type) >> 8 })
@@ -401,6 +436,8 @@ enum {
 	HSC_TOKEN_KEYWORD_COMPUTE,
 	HSC_TOKEN_KEYWORD_MESHTASK,
 	HSC_TOKEN_KEYWORD_STRUCT,
+	HSC_TOKEN_KEYWORD_UNION,
+	HSC_TOKEN_KEYWORD_TYPEDEF,
 	HSC_TOKEN_KEYWORD_RO_BUFFER,
 	HSC_TOKEN_KEYWORD_RW_BUFFER,
 	HSC_TOKEN_KEYWORD_RO_IMAGE1D,
@@ -454,6 +491,9 @@ struct HscString {
 	char* data;
 	uintptr_t size;
 };
+#define hsc_string(data, size) ((HscString) { data, size });
+#define hsc_string_lit(lit) ((HscString) { lit, sizeof(lit) - 1 });
+#define hsc_string_c(string) ((HscString) { string, strlen(string) });
 
 typedef struct HscStringEntry HscStringEntry;
 struct HscStringEntry {
@@ -622,6 +662,7 @@ enum {
 	HSC_EXPR_TYPE_ARRAY_SUBSCRIPT,
 	HSC_EXPR_TYPE_ARRAY_LIT,
 	HSC_EXPR_TYPE_ARRAY_DESIGNATOR,
+	HSC_EXPR_TYPE_FIELD_ACCESS,
 	HSC_EXPR_TYPE_CAST,
 
 	HSC_EXPR_TYPE_LOCAL_VARIABLE,
@@ -776,6 +817,12 @@ struct HscSwitchState {
 	U32 case_stmts_count;
 };
 
+typedef struct HscFieldAccess HscFieldAccess;
+struct HscFieldAccess {
+	HscDataType data_type;
+	U32 idx;
+};
+
 typedef struct HscAstGen HscAstGen;
 struct HscAstGen {
 	HscLocalVariable* function_params_and_local_variables;
@@ -793,7 +840,25 @@ struct HscAstGen {
 	U32 array_data_types_count;
 	U32 array_data_types_cap;
 
+	HscCompoundDataType* compound_data_types;
+	U32 compound_data_types_count;
+	U32 compound_data_types_cap;
+	HscCompoundField* compound_fields;
+	U32 compound_fields_count;
+	U32 compound_fields_cap;
+
+	HscTypedef* typedefs;
+	U32 typedefs_count;
+	U32 typedefs_cap;
+
+	HscDataType* ordered_data_types;
+	U32 ordered_data_types_count;
+	U32 ordered_data_types_cap;
+
 	HscDataType assign_data_type;
+
+	HscFieldAccess compound_type_find_fields[HSC_COMPOUND_TYPE_NESTED_FIELD_CAP];
+	U16 compound_type_find_fields_count;
 
 	HscExpr* stmt_block;
 	HscFunction* print_function;
@@ -813,6 +878,10 @@ struct HscAstGen {
 	U32          next_var_idx;
 
 	HscHashTable(HscStringId, HscDecl) global_declarations;
+	HscHashTable(HscStringId, HscDataType) struct_declarations;
+	HscHashTable(HscStringId, HscDataType) union_declarations;
+
+	HscHashTable(HscStringId, U32) field_name_to_token_idx;
 
 	char* error_info;
 
@@ -915,6 +984,7 @@ enum {
 	HSC_IR_OP_CODE_SWITCH,
 
 	HSC_IR_OP_CODE_CONVERT,
+	HSC_IR_OP_CODE_BITCAST,
 
 	HSC_IR_OP_CODE_COMPOSITE_INIT,
 	HSC_IR_OP_CODE_ACCESS_CHAIN,
@@ -1052,6 +1122,7 @@ enum {
 	HSC_SPIRV_OP_TYPE_FLOAT = 22,
 	HSC_SPIRV_OP_TYPE_VECTOR = 23,
 	HSC_SPIRV_OP_TYPE_ARRAY = 28,
+	HSC_SPIRV_OP_TYPE_STRUCT = 30,
 	HSC_SPIRV_OP_TYPE_POINTER = 32,
 	HSC_SPIRV_OP_TYPE_FUNCTION = 33,
 
@@ -1241,6 +1312,7 @@ struct HscSpirv {
 	U32 pointer_type_outputs_base_id;
 	U64 pointer_type_inputs_made_bitset[4];
 	U64 pointer_type_outputs_made_bitset[4];
+	U32 compound_type_base_id;
 	U32 array_type_base_id;
 
 	U32 value_base_id;

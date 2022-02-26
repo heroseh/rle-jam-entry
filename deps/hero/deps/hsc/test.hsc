@@ -3,35 +3,48 @@ vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
 	return vec4(0.f);
 }
 
+typedef S32 signed_int;
+typedef struct Named { S32 i[1]; } named_wrapped_signed_int;
+typedef struct { F32 i[2]; } wrapped_float2;
+typedef struct { F32 i[4]; } wrapped_float4;
 fragment Vec4 billboard_shader_fragment(Vec4 state) {
-	U32 test = 0u;
-	U32 testa;
-	F32 rgb[3][3] = {0};
-	return vec4(rgb[0][0], rgb[1][1], rgb[2][2], 1.f);
-}
+	typedef struct Struct TypedefStruct;
+	struct Struct {
+		U32 a;
+		struct {
+			U32 k;
+			U32 d;
+		};
+		union {
+			U32 k;
+			wrapped_float2 d;
+		} named;
+		union {
+			U32 another;
+			struct {
+				U32 something;
+				U32 something_else;
+				union {
+					wrapped_float2 f2[22];
+					wrapped_float4 f4[11];
+				};
+			};
+		};
+	};
 
-/*
-fragment Vec4 billboard_shader_fragment(Vec4 state) {
-	Vec4 color;
-	color = vec4(1.f, 0.f, 0.f, 1.f);
-	%0 = vec4(...);
-	if (1) { BLOCK_0:
-		color = vec4(1.f, 0.f, 0.f, 1.f);
-		%1 = vec4(...);
-	} else if (0) {BLOCK_1:
-		color = vec4(0.f, 0.f, 1.f, 1.f);
-		%2 = vec4(...);
-	} else if (true) {
-		color = vec4(1.f, 0.f, 1.f, 1.f);
-		%3 = vec4(...);
-	} else {
-		color = vec4(0.f, 1.f, 1.f, 1.f);
-	}
-	%5 = PHI BLOCK_0 %1, BLOCK_1 %2
+	struct Struct test;
+	U32 nnnn;
+	TypedefStruct typedef_test;
+	struct Inline { S32 a; struct Struct b[3]; } testa;
+	struct Inline reuse;
 
-	return color;
+	test.f2[0].i[0] = 1.f;
+	test.f2[1].i[1] = 0.5f;
+
+	F32 red = test.f4[0].i[0];
+	F32 blue = test.f4[0].i[3];
+	return vec4(red, 0.f, blue, 1.f);
 }
-*/
 
 /*
 struct Globals {
