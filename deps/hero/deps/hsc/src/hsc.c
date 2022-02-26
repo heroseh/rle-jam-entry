@@ -2097,6 +2097,7 @@ HscDataType hsc_astgen_generate_typedef(HscAstGen* astgen) {
 		typedef_->aliased_data_type = aliased_data_type;
 		astgen->typedefs_count += 1;
 
+		hsc_found_data_type(astgen, data_type);
 		*insert_value_ptr = data_type;
 	}
 
@@ -3533,6 +3534,11 @@ void hsc_astgen_generate_function(HscAstGen* astgen) {
 
 				HSC_DEBUG_ASSERT(hsc_hash_table_remove(declarations, d->identifier_string_id.idx_plus_one, NULL), "internal error: compound type should have existed");
 			}
+			break;
+		};
+		case HSC_DATA_TYPE_TYPEDEF: {
+			HscTypedef* typedef_ = hsc_typedef_get(astgen, data_type);
+			HSC_DEBUG_ASSERT(hsc_hash_table_remove(&astgen->global_declarations, typedef_->identifier_string_id.idx_plus_one, NULL), "internal error: typedef should have existed");
 			break;
 		};
 		}
