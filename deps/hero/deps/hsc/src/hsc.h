@@ -117,7 +117,6 @@ HSC_NORETURN void _hsc_abort(const char* file, int line, const char* message, ..
 HSC_DEFINE_ID(HscFileId);
 HSC_DEFINE_ID(HscStringId);
 HSC_DEFINE_ID(HscConstantId);
-HSC_DEFINE_ID(HscFunctionId);
 HSC_DEFINE_ID(HscFunctionTypeId);
 HSC_DEFINE_ID(HscExprId);
 
@@ -232,7 +231,8 @@ enum {
 	HSC_DATA_TYPE_MAT4x3_START = HSC_DATA_TYPE_MAT4x2_START + HSC_DATA_TYPE_VEC2_START,
 	HSC_DATA_TYPE_MAT4x4_START = HSC_DATA_TYPE_MAT4x3_START + HSC_DATA_TYPE_VEC2_START,
 #define HSC_DATA_TYPE_MATRIX_END HSC_DATA_TYPE_STRUCT
-	HSC_DATA_TYPE_STRUCT = HSC_DATA_TYPE_MAT4x4_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_ENUM = HSC_DATA_TYPE_MAT4x4_START + HSC_DATA_TYPE_VEC2_START,
+	HSC_DATA_TYPE_STRUCT,
 	HSC_DATA_TYPE_UNION,
 	HSC_DATA_TYPE_ARRAY,
 	HSC_DATA_TYPE_TYPEDEF,
@@ -257,6 +257,7 @@ enum {
 #define HSC_DATA_TYPE_IS_COMPOUND_TYPE(type)      (HSC_DATA_TYPE_IS_STRUCT(type) || HSC_DATA_TYPE_IS_UNION(type))
 #define HSC_DATA_TYPE_IS_ARRAY(type)              (((type) & 0xff) == HSC_DATA_TYPE_ARRAY)
 #define HSC_DATA_TYPE_IS_TYPEDEF(type)            (((type) & 0xff) == HSC_DATA_TYPE_TYPEDEF)
+#define HSC_DATA_TYPE_IS_ENUM_TYPE(type)          (((type) & 0xff) == HSC_DATA_TYPE_ENUM)
 #define HSC_DATA_TYPE_IS_GENERIC(type)            ((type) >= HSC_DATA_TYPE_GENERIC_START && (type) < HSC_DATA_TYPE_GENERIC_END)
 #define HSC_DATA_TYPE_VECTOR_COMPONENTS(type)     (((type) / HSC_DATA_TYPE_VEC2_START) + 1)
 #define HSC_DATA_TYPE_MATRX_COLUMNS(type)         (((type) + 32) / 48)
@@ -309,6 +310,21 @@ struct HscCompoundField {
 	U32         identifier_token_idx;
 };
 
+typedef struct HscEnumDataType HscEnumDataType;
+struct HscEnumDataType {
+	U32         identifier_token_idx;
+	HscStringId identifier_string_id;
+	U32         values_start_idx;
+	U32         values_count;
+};
+
+typedef struct HscEnumValue HscEnumValue;
+struct HscEnumValue {
+	U32           identifier_token_idx;
+	HscStringId   identifier_string_id;
+	HscConstantId value_constant_id;
+};
+
 typedef struct HscTypedef HscTypedef;
 struct HscTypedef {
 	U32 identifier_token_idx;
@@ -321,12 +337,13 @@ struct HscTypedef {
 typedef U32 HscDecl;
 enum {
 	HSC_DECL_FUNCTION = HSC_DATA_TYPE_COUNT,
+	HSC_DECL_ENUM_VALUE,
 };
 #define HSC_DECL_IS_DATA_TYPE(type) (((type) & 0xff) < HSC_DATA_TYPE_COUNT)
 #define HSC_DECL_IS_FUNCTION(type) (((type) & 0xff) == HSC_DECL_FUNCTION)
-#define HSC_DECL_FUNCTION(function_id) (((function_id).idx_plus_one << 8) | HSC_DECL_FUNCTION)
-#define HSC_DECL_FUNCTION_RAW(function_id) (((function_id) << 8) | HSC_DECL_FUNCTION)
-#define HSC_DECL_FUNCTION_ID(type) ((HscFunctionId) { .idx_plus_one = (type) >> 8 })
+#define HSC_DECL_IS_ENUM_VALUE(type) (((type) & 0xff) == HSC_DECL_ENUM_VALUE)
+#define HSC_DECL_INIT(type, idx) HSC_DATA_TYPE_INIT(type, idx)
+#define HSC_DECL_IDX(type) HSC_DATA_TYPE_IDX(type)
 
 typedef U8 HscToken;
 enum {
@@ -435,6 +452,7 @@ enum {
 	HSC_TOKEN_KEYWORD_TESSELLATION,
 	HSC_TOKEN_KEYWORD_COMPUTE,
 	HSC_TOKEN_KEYWORD_MESHTASK,
+	HSC_TOKEN_KEYWORD_ENUM,
 	HSC_TOKEN_KEYWORD_STRUCT,
 	HSC_TOKEN_KEYWORD_UNION,
 	HSC_TOKEN_KEYWORD_TYPEDEF,
@@ -523,6 +541,7 @@ struct HscConstantEntry {
 	uint32_t start_idx;
 	uint32_t size;
 	HscDataType data_type;
+	HscStringId debug_string_id;
 };
 
 typedef struct HscConstantTable HscConstantTable;
@@ -574,25 +593,24 @@ struct HscFunction {
 };
 
 enum {
-	HSC_FUNCTION_ID_NULL,
-	HSC_FUNCTION_ID_VEC2_SINGLE,
-	HSC_FUNCTION_ID_VEC2_MULTI,
-	HSC_FUNCTION_ID_VEC3_SINGLE,
-	HSC_FUNCTION_ID_VEC3_MULTI,
-	HSC_FUNCTION_ID_VEC4_SINGLE,
-	HSC_FUNCTION_ID_VEC4_MULTI,
-	HSC_FUNCTION_ID_MAT2x2,
-	HSC_FUNCTION_ID_MAT2x3,
-	HSC_FUNCTION_ID_MAT2x4,
-	HSC_FUNCTION_ID_MAT3x2,
-	HSC_FUNCTION_ID_MAT3x3,
-	HSC_FUNCTION_ID_MAT3x4,
-	HSC_FUNCTION_ID_MAT4x2,
-	HSC_FUNCTION_ID_MAT4x3,
-	HSC_FUNCTION_ID_MAT4x4,
+	HSC_FUNCTION_IDX_VEC2_SINGLE,
+	HSC_FUNCTION_IDX_VEC2_MULTI,
+	HSC_FUNCTION_IDX_VEC3_SINGLE,
+	HSC_FUNCTION_IDX_VEC3_MULTI,
+	HSC_FUNCTION_IDX_VEC4_SINGLE,
+	HSC_FUNCTION_IDX_VEC4_MULTI,
+	HSC_FUNCTION_IDX_MAT2x2,
+	HSC_FUNCTION_IDX_MAT2x3,
+	HSC_FUNCTION_IDX_MAT2x4,
+	HSC_FUNCTION_IDX_MAT3x2,
+	HSC_FUNCTION_IDX_MAT3x3,
+	HSC_FUNCTION_IDX_MAT3x4,
+	HSC_FUNCTION_IDX_MAT4x2,
+	HSC_FUNCTION_IDX_MAT4x3,
+	HSC_FUNCTION_IDX_MAT4x4,
 
-#define HSC_FUNCTION_ID_INTRINSIC_END HSC_FUNCTION_ID_USER_START
-	HSC_FUNCTION_ID_USER_START,
+#define HSC_FUNCTION_IDX_INTRINSIC_END HSC_FUNCTION_IDX_USER_START
+	HSC_FUNCTION_IDX_USER_START,
 };
 
 typedef struct HscIntrinsicFunction HscIntrinsicFunction;
@@ -603,11 +621,11 @@ struct HscIntrinsicFunction {
 	HscLocalVariable params[16];
 };
 
-extern U32 hsc_intrinsic_function_overloads_count[HSC_FUNCTION_ID_INTRINSIC_END];
-extern HscIntrinsicFunction hsc_intrinsic_functions[HSC_FUNCTION_ID_INTRINSIC_END];
+extern U32 hsc_intrinsic_function_overloads_count[HSC_FUNCTION_IDX_INTRINSIC_END];
+extern HscIntrinsicFunction hsc_intrinsic_functions[HSC_FUNCTION_IDX_INTRINSIC_END];
 
 enum {
-	HSC_INTRINSIC_FUNCTION_ID_USER_START,
+	HSC_INTRINSIC_FUNCTION_IDX_USER_START,
 };
 
 typedef U8 HscBinaryOp;
@@ -700,7 +718,7 @@ struct HscExpr {
 		struct {
 			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
-			U32 id: 25; // HscFunctionId
+			U32 idx: 25;
 		} function;
 		struct {
 			U32 type: 6; // HscExprType
@@ -851,6 +869,13 @@ struct HscAstGen {
 	U32 typedefs_count;
 	U32 typedefs_cap;
 
+	HscEnumDataType* enum_data_types;
+	U32 enum_data_types_count;
+	U32 enum_data_types_cap;
+	HscEnumValue* enum_values;
+	U32 enum_values_count;
+	U32 enum_values_cap;
+
 	HscDataType* ordered_data_types;
 	U32 ordered_data_types_count;
 	U32 ordered_data_types_cap;
@@ -880,6 +905,7 @@ struct HscAstGen {
 	HscHashTable(HscStringId, HscDecl) global_declarations;
 	HscHashTable(HscStringId, HscDataType) struct_declarations;
 	HscHashTable(HscStringId, HscDataType) union_declarations;
+	HscHashTable(HscStringId, HscDataType) enum_declarations;
 
 	HscHashTable(HscStringId, U32) field_name_to_token_idx;
 
@@ -931,6 +957,7 @@ HscConstantId hsc_constant_table_deduplicate_composite_end(HscConstantTable* con
 HscConstantId hsc_constant_table_deduplicate_zero(HscConstantTable* constant_table, HscAstGen* astgen, HscDataType data_type);
 HscConstant hsc_constant_table_get(HscConstantTable* constant_table, HscConstantId id);
 bool hsc_constant_as_uint(HscConstant constant, U64* out);
+bool hsc_constant_as_sint(HscConstant constant, S64* out);
 
 typedef struct HscCompilerSetup HscCompilerSetup;
 void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup);

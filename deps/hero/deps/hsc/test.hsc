@@ -3,6 +3,23 @@ vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
 	return vec4(0.f);
 }
 
+typedef enum NamedEnum TypedefNamedEnum;
+enum NamedEnum {
+	NAMED_ENUM_VALUE,
+};
+
+enum {
+	ZERO,
+	ONE,
+	TWO = 2,
+	THREE,
+	TEN = 10,
+	ELEVEN,
+
+	MINUS_FIVE = -5,
+	MINUS_FOUR,
+};
+
 typedef S32 signed_int;
 typedef struct Named { S32 i[1]; } named_wrapped_signed_int;
 typedef struct { F32 i[2]; } wrapped_float2;
@@ -38,12 +55,27 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 	struct Inline { S32 a; struct Struct b[3]; } testa;
 	struct Inline reuse;
 
+	struct EnumInStruct {
+		enum EnumInStruct {
+			VALUE_IN_STRUCT,
+		} enum_in_struct;
+		U32 t;
+	};
+
+	enum Named named_enum = NAMED_ENUM_VALUE;
+	named_enum = 7;
+
+	enum EnumInStruct enum_in_struct = VALUE_IN_STRUCT;
+
+	struct EnumInStruct wrapped_enum_in_struct;
+	wrapped_enum_in_struct.enum_in_struct = VALUE_IN_STRUCT;
+
 	test.f2[0].i[0] = 1.f;
 	test.f2[1].i[1] = 0.5f;
 
 	F32 red = test.f4[0].i[0];
 	F32 blue = test.f4[0].i[3];
-	return vec4(red, 0.f, blue, 1.f);
+	return vec4(red, (F32)ONE, blue, 1.f);
 }
 
 /*
