@@ -30,7 +30,7 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 		U32 a;
 		struct {
 			U32 k;
-			U32 d;
+			S32 d;
 		};
 		union {
 			U32 k;
@@ -49,6 +49,8 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 		};
 	};
 
+	//U32 all_my_ints[1024][1024][1024] = { 0 };
+
 	struct Struct test;
 	U32 nnnn;
 	TypedefStruct typedef_test;
@@ -61,6 +63,41 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 		} enum_in_struct;
 		U32 t;
 	};
+
+	TypedefStruct board[4][4] = {
+		[0][1].named.k = 7u,
+
+		[0][2] = {
+			22u,
+			.named = { 88u }
+		},
+
+		[1] = {
+			{
+				22u
+			},
+			[44].something_else = 12u,
+			[99].f2 = { [12].i[2] = 34.f },
+			[99] = { .another = 299u }
+		}
+	};
+
+	TypedefStruct st = {
+		66u,
+		{
+			.k = 44u,
+			.d = -22,
+		},
+		{
+			77u,
+			.d = { .i = { [1] = 33.f, [0] = 99.f } }
+		},
+		.something_else = 123u,
+		.f2 = { { .i = { 123.f } }, [1] = { { 12.f } } },
+		.f2[0].i[1] = 512.f
+	};
+
+	st = (TypedefStruct){ 12u };
 
 	enum Named named_enum = NAMED_ENUM_VALUE;
 	named_enum = 7;

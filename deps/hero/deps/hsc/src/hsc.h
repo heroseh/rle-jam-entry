@@ -256,6 +256,7 @@ enum {
 #define HSC_DATA_TYPE_IS_UNION(type)              (((type) & 0xff) == HSC_DATA_TYPE_UNION)
 #define HSC_DATA_TYPE_IS_COMPOUND_TYPE(type)      (HSC_DATA_TYPE_IS_STRUCT(type) || HSC_DATA_TYPE_IS_UNION(type))
 #define HSC_DATA_TYPE_IS_ARRAY(type)              (((type) & 0xff) == HSC_DATA_TYPE_ARRAY)
+#define HSC_DATA_TYPE_IS_COMPOSITE_TYPE(type)     (HSC_DATA_TYPE_IS_STRUCT(type) || HSC_DATA_TYPE_IS_UNION(type) || HSC_DATA_TYPE_IS_ARRAY(type) || HSC_DATA_TYPE_IS_VECTOR(type) || HSC_DATA_TYPE_IS_MATRIX(type))
 #define HSC_DATA_TYPE_IS_TYPEDEF(type)            (((type) & 0xff) == HSC_DATA_TYPE_TYPEDEF)
 #define HSC_DATA_TYPE_IS_ENUM_TYPE(type)          (((type) & 0xff) == HSC_DATA_TYPE_ENUM)
 #define HSC_DATA_TYPE_IS_GENERIC(type)            ((type) >= HSC_DATA_TYPE_GENERIC_START && (type) < HSC_DATA_TYPE_GENERIC_END)
@@ -678,8 +679,8 @@ enum {
 	HSC_EXPR_TYPE_LOGICAL_OR,
 	HSC_EXPR_TYPE_CALL,
 	HSC_EXPR_TYPE_ARRAY_SUBSCRIPT,
-	HSC_EXPR_TYPE_ARRAY_LIT,
-	HSC_EXPR_TYPE_ARRAY_DESIGNATOR,
+	HSC_EXPR_TYPE_CURLY_INITIALIZER,
+	HSC_EXPR_TYPE_DESIGNATED_INITIALIZER,
 	HSC_EXPR_TYPE_FIELD_ACCESS,
 	HSC_EXPR_TYPE_CAST,
 
@@ -748,9 +749,15 @@ struct HscExpr {
 		struct {
 			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
-			U32 first_expr_rel_idx: 12;
-			U32 values_count: 13;
-		} array_lit;
+			U32 first_expr_rel_idx: 25;
+		} curly_initializer;
+		struct {
+			U32 type: 6; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 entry_indices_count: 15;
+			U32 value_expr_rel_idx: 10;
+			// alt_next_expr_rel_idx is the entry_indices_start_idx
+		} designated_initializer;
 		struct {
 			U32 type: 6; // HscExprType
 			U32 is_stmt_block_entry: 1;
@@ -841,6 +848,33 @@ struct HscFieldAccess {
 	U32 idx;
 };
 
+typedef struct HscCurlyInitializerGen HscCurlyInitializerGen;
+struct HscCurlyInitializerGen {
+	union {
+		HscCompoundDataType* compound_data_type;
+		HscArrayDataType* array_data_type;
+	};
+	HscCompoundField* compound_fields;
+	U64 entries_cap;
+	HscDataType composite_data_type;
+	HscDataType entry_data_type;
+	HscDataType resolved_composite_data_type;
+	HscDataType resolved_entry_data_type;
+
+	U64* entry_indices;
+	HscDataType* data_types;
+	bool* found_designators;
+	U32 entry_indices_count;
+	U32 entry_indices_cap;
+
+	U32* nested_designators_start_entry_indices;
+	U32 nested_designators_count;
+	U32 nested_designators_cap;
+
+	HscExpr* prev_initializer_expr;
+	HscExpr* first_initializer_expr;
+};
+
 typedef struct HscAstGen HscAstGen;
 struct HscAstGen {
 	HscLocalVariable* function_params_and_local_variables;
@@ -879,6 +913,16 @@ struct HscAstGen {
 	HscDataType* ordered_data_types;
 	U32 ordered_data_types_count;
 	U32 ordered_data_types_cap;
+
+	HscCurlyInitializerGen curly_initializer_gen;
+
+	U32* field_indices;
+	U32 field_indices_count;
+	U32 field_indices_cap;
+
+	U64* entry_indices;
+	U32 entry_indices_count;
+	U32 entry_indices_cap;
 
 	HscDataType assign_data_type;
 
@@ -919,6 +963,7 @@ struct HscAstGen {
 	HscConstantTable constant_table;
 	HscConstantId false_constant_id;
 	HscConstantId true_constant_id;
+	HscConstantId s32_zero_constant_id;
 	uint32_t token_read_idx;
 	uint32_t token_value_read_idx;
 	uint32_t tokens_count;
@@ -973,6 +1018,7 @@ HscToken hsc_token_peek_ahead(HscAstGen* astgen, U32 by);
 void hsc_token_consume(HscAstGen* astgen, U32 amount);
 HscToken hsc_token_next(HscAstGen* astgen);
 void hsc_token_value_consume(HscAstGen* astgen, U32 amount);
+HscTokenValue hsc_token_value_peek(HscAstGen* astgen);
 HscTokenValue hsc_token_value_next(HscAstGen* astgen);
 
 HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence);
@@ -1059,6 +1105,8 @@ enum {
 	HSC_IR_OPERAND_BASIC_BLOCK,
 	HSC_IR_OPERAND_LOCAL_VARIABLE,
 };
+#define HSC_IR_OPERAND_IS_DATA_TYPE(operand) (((operand) & 0xff) < HSC_DATA_TYPE_COUNT)
+
 #define HSC_IR_OPERAND_VALUE_INIT(value_idx) (((value_idx) << 8) | HSC_IR_OPERAND_VALUE)
 #define HSC_IR_OPERAND_IS_VALUE(operand) (((operand) & 0xff) == HSC_IR_OPERAND_VALUE)
 #define HSC_IR_OPERAND_VALUE_IDX(operand) ((operand) >> 8)
@@ -1139,6 +1187,7 @@ void hsc_ir_generate(HscIR* ir, HscAstGen* astgen);
 typedef U16 HscSpirvOp;
 enum {
 	HSC_SPIRV_OP_NO_OP = 0,
+	HSC_SPIRV_OP_EXTENSION = 10,
 	HSC_SPIRV_OP_MEMORY_MODEL = 14,
 	HSC_SPIRV_OP_ENTRY_POINT = 15,
 	HSC_SPIRV_OP_EXECUTION_MODE = 16,
@@ -1157,6 +1206,7 @@ enum {
 	HSC_SPIRV_OP_CONSTANT_FALSE = 42,
 	HSC_SPIRV_OP_CONSTANT = 43,
 	HSC_SPIRV_OP_CONSTANT_COMPOSITE = 44,
+	HSC_SPIRV_OP_CONSTANT_NULL = 46,
 
 	HSC_SPIRV_OP_FUNCTION = 54,
 	HSC_SPIRV_OP_FUNCTION_PARAMETER = 55,
@@ -1232,6 +1282,7 @@ enum {
 
 enum {
 	HSC_SPIRV_ADDRESS_MODEL_LOGICAL = 0,
+	HSC_SPIRV_ADDRESS_MODEL_PHYSICAL_STORAGE_BUFFER_64 = 5348,
 };
 
 enum {
@@ -1246,6 +1297,7 @@ enum {
 enum {
 	HSC_SPIRV_CAPABILITY_SHADER = 1,
 	HSC_SPIRV_CAPABILITY_VULKAN_MEMORY_MODEL = 5345,
+	HSC_SPIRV_CAPABILITY_PHYSICAL_STORAGE_BUFFER = 5347,
 };
 
 enum {
