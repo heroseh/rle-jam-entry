@@ -264,7 +264,12 @@ enum {
 #define HSC_DATA_TYPE_MATRX_COLUMNS(type)         (((type) + 32) / 48)
 #define HSC_DATA_TYPE_MATRX_ROWS(type)            ((((((type) - 64) / 16) + 1) & 3) + 2)
 #define HSC_DATA_TYPE_INIT(type, idx)             (((idx) << 8) | (type))
-#define HSC_DATA_TYPE_IDX(type)                   ((type) >> 8)
+#define HSC_DATA_TYPE_IS_CONST(type)              (!!((type) & HSC_DATA_TYPE_CONST_MASK))
+#define HSC_DATA_TYPE_IDX(type)                   (((type) & HSC_DATA_TYPE_IDX_MASK) >> 8)
+#define HSC_DATA_TYPE_CONST(type)                 ((type) | HSC_DATA_TYPE_CONST_MASK)
+#define HSC_DATA_TYPE_STRIP_CONST(type)           ((type) & ~HSC_DATA_TYPE_CONST_MASK)
+#define HSC_DATA_TYPE_CONST_MASK                  0x80000000
+#define HSC_DATA_TYPE_IDX_MASK                    0x7fffff00
 
 //
 // 'basic_type' must be HSC_DATA_TYPE_IS_BASIC(basic_type) == true
@@ -339,10 +344,14 @@ typedef U32 HscDecl;
 enum {
 	HSC_DECL_FUNCTION = HSC_DATA_TYPE_COUNT,
 	HSC_DECL_ENUM_VALUE,
+	HSC_DECL_LOCAL_VARIABLE,
+	HSC_DECL_GLOBAL_VARIABLE,
 };
 #define HSC_DECL_IS_DATA_TYPE(type) (((type) & 0xff) < HSC_DATA_TYPE_COUNT)
 #define HSC_DECL_IS_FUNCTION(type) (((type) & 0xff) == HSC_DECL_FUNCTION)
 #define HSC_DECL_IS_ENUM_VALUE(type) (((type) & 0xff) == HSC_DECL_ENUM_VALUE)
+#define HSC_DECL_IS_LOCAL_VARIABLE(type) (((type) & 0xff) == HSC_DECL_LOCAL_VARIABLE)
+#define HSC_DECL_IS_GLOBAL_VARIABLE(type) (((type) & 0xff) == HSC_DECL_GLOBAL_VARIABLE)
 #define HSC_DECL_INIT(type, idx) HSC_DATA_TYPE_INIT(type, idx)
 #define HSC_DECL_IDX(type) HSC_DATA_TYPE_IDX(type)
 
@@ -457,6 +466,8 @@ enum {
 	HSC_TOKEN_KEYWORD_STRUCT,
 	HSC_TOKEN_KEYWORD_UNION,
 	HSC_TOKEN_KEYWORD_TYPEDEF,
+	HSC_TOKEN_KEYWORD_STATIC,
+	HSC_TOKEN_KEYWORD_CONST,
 	HSC_TOKEN_KEYWORD_RO_BUFFER,
 	HSC_TOKEN_KEYWORD_RW_BUFFER,
 	HSC_TOKEN_KEYWORD_RO_IMAGE1D,
@@ -560,11 +571,14 @@ struct HscConstantTable {
 	HscConstantId*    data_write_ptr;
 };
 
-typedef struct HscLocalVariable HscLocalVariable;
-struct HscLocalVariable {
-	HscStringId identifier_string_id;
-	HscDataType data_type;
-	U32         identifier_token_idx;
+typedef struct HscVariable HscVariable;
+struct HscVariable {
+	HscStringId   identifier_string_id;
+	HscDataType   data_type;
+	HscConstantId initializer_constant_id; // if is_static
+	U32           identifier_token_idx: 30;
+	U32           is_static: 1;
+	U32           is_const: 1;
 };
 
 typedef U8 HscFunctionShaderStage;
@@ -587,10 +601,12 @@ struct HscFunction {
 	HscStringId            identifier_string_id;
 	HscDataType            return_data_type;
 	U32                    params_start_idx;
-	U16                    local_variables_count;
+	U16                    variables_count;
 	U8                     params_count;
 	HscFunctionShaderStage shader_stage;
 	HscExprId              block_expr_id;
+	U32                    used_static_variables_start_idx;
+	U32                    used_static_variables_count;
 };
 
 enum {
@@ -619,7 +635,7 @@ struct HscIntrinsicFunction {
 	char* name;
 	HscDataType return_data_type;
 	U32 params_count;
-	HscLocalVariable params[16];
+	HscVariable params[16];
 };
 
 extern U32 hsc_intrinsic_function_overloads_count[HSC_FUNCTION_IDX_INTRINSIC_END];
@@ -685,6 +701,7 @@ enum {
 	HSC_EXPR_TYPE_CAST,
 
 	HSC_EXPR_TYPE_LOCAL_VARIABLE,
+	HSC_EXPR_TYPE_GLOBAL_VARIABLE,
 
 	HSC_EXPR_TYPE_CONSTANT,
 	HSC_EXPR_TYPE_DATA_TYPE,
@@ -744,7 +761,7 @@ struct HscExpr {
 			U32 has_return_stmt: 1;
 			U32 stmts_count: 11;
 			U32 first_expr_rel_idx: 6;
-			U32 local_variables_count: 6;
+			U32 variables_count: 6;
 		} stmt_block;
 		struct {
 			U32 type: 6; // HscExprType
@@ -875,18 +892,34 @@ struct HscCurlyInitializerGen {
 	HscExpr* first_initializer_expr;
 };
 
+typedef U16 HscAstGenFlags;
+enum {
+	HSC_ASTGEN_FLAGS_FOUND_STATIC = 0x1,
+	HSC_ASTGEN_FLAGS_FOUND_CONST = 0x2,
+};
+
 typedef struct HscAstGen HscAstGen;
 struct HscAstGen {
-	HscLocalVariable* function_params_and_local_variables;
+	HscAstGenFlags flags;
+
+	HscVariable* function_params_and_variables;
 	HscFunction*      functions;
 	HscExpr*          exprs;
 	HscLocation*      expr_locations;
-	U32 function_params_and_local_variables_count;
-	U32 function_params_and_local_variables_cap;
+	U32 function_params_and_variables_count;
+	U32 function_params_and_variables_cap;
 	U32 functions_count;
 	U32 functions_cap;
 	U32 exprs_count;
 	U32 exprs_cap;
+
+	HscVariable* global_variables;
+	U32 global_variables_count;
+	U32 global_variables_cap;
+
+	HscDecl* used_static_variables;
+	U32 used_static_variables_count;
+	U32 used_static_variables_cap;
 
 	HscArrayDataType* array_data_types;
 	U32 array_data_types_count;
@@ -1104,24 +1137,25 @@ enum {
 	HSC_IR_OPERAND_CONSTANT,
 	HSC_IR_OPERAND_BASIC_BLOCK,
 	HSC_IR_OPERAND_LOCAL_VARIABLE,
+	HSC_IR_OPERAND_GLOBAL_VARIABLE,
 };
 #define HSC_IR_OPERAND_IS_DATA_TYPE(operand) (((operand) & 0xff) < HSC_DATA_TYPE_COUNT)
 
 #define HSC_IR_OPERAND_VALUE_INIT(value_idx) (((value_idx) << 8) | HSC_IR_OPERAND_VALUE)
 #define HSC_IR_OPERAND_IS_VALUE(operand) (((operand) & 0xff) == HSC_IR_OPERAND_VALUE)
-#define HSC_IR_OPERAND_VALUE_IDX(operand) ((operand) >> 8)
+#define HSC_IR_OPERAND_VALUE_IDX(operand) HSC_DATA_TYPE_IDX(operand)
 
 #define HSC_IR_OPERAND_CONSTANT_INIT(constant_id) (((constant_id) << 8) | HSC_IR_OPERAND_CONSTANT)
 #define HSC_IR_OPERAND_IS_CONSTANT(operand) (((operand) & 0xff) == HSC_IR_OPERAND_CONSTANT)
-#define HSC_IR_OPERAND_CONSTANT_ID(operand) ((HscConstantId) { .idx_plus_one = ((operand) >> 8) })
+#define HSC_IR_OPERAND_CONSTANT_ID(operand) ((HscConstantId) { .idx_plus_one = HSC_DATA_TYPE_IDX(operand) })
 
 #define HSC_IR_OPERAND_BASIC_BLOCK_INIT(basic_block_idx) (((basic_block_idx) << 8) | HSC_IR_OPERAND_BASIC_BLOCK)
 #define HSC_IR_OPERAND_IS_BASIC_BLOCK(operand) (((operand) & 0xff) == HSC_IR_OPERAND_BASIC_BLOCK)
-#define HSC_IR_OPERAND_BASIC_BLOCK_IDX(operand) ((operand) >> 8)
+#define HSC_IR_OPERAND_BASIC_BLOCK_IDX(operand) HSC_DATA_TYPE_IDX(operand)
 
-#define HSC_IR_OPERAND_LOCAL_VARIABLE_INIT(local_variable_idx) (((local_variable_idx) << 8) | HSC_IR_OPERAND_LOCAL_VARIABLE)
-#define HSC_IR_OPERAND_IS_VARIABLE(operand) (((operand) & 0xff) == HSC_IR_OPERAND_LOCAL_VARIABLE)
-#define HSC_IR_OPERAND_LOCAL_VARIABLE_IDX(operand) ((operand) >> 8)
+#define HSC_IR_OPERAND_LOCAL_VARIABLE_INIT(variable_idx) (((variable_idx) << 8) | HSC_IR_OPERAND_LOCAL_VARIABLE)
+#define HSC_IR_OPERAND_GLOBAL_VARIABLE_INIT(variable_idx) (((variable_idx) << 8) | HSC_IR_OPERAND_GLOBAL_VARIABLE)
+#define HSC_IR_OPERAND_VARIABLE_IDX(operand) HSC_DATA_TYPE_IDX(operand)
 
 typedef struct HscIRFunction HscIRFunction;
 struct HscIRFunction {
@@ -1304,6 +1338,7 @@ enum {
 	HSC_SPIRV_STORAGE_CLASS_INPUT = 1,
 	HSC_SPIRV_STORAGE_CLASS_UNIFORM = 2,
 	HSC_SPIRV_STORAGE_CLASS_OUTPUT = 3,
+	HSC_SPIRV_STORAGE_CLASS_PRIVATE = 6,
 	HSC_SPIRV_STORAGE_CLASS_FUNCTION = 7,
 };
 
@@ -1336,6 +1371,7 @@ typedef U8 HscSpirvTypeKind;
 enum {
 	HSC_SPIRV_TYPE_KIND_FUNCTION,
 	HSC_SPIRV_TYPE_KIND_FUNCTION_VARIABLE,
+	HSC_SPIRV_TYPE_KIND_STATIC_VARIABLE,
 	HSC_SPIRV_TYPE_KIND_FUNCTION_VARIABLE_POINTER,
 };
 
@@ -1398,6 +1434,7 @@ struct HscSpirv {
 	U32 constant_base_id;
 	U32 basic_block_base_spirv_id;
 	U32 local_variable_base_spirv_id;
+	U32 global_variable_base_spirv_id;
 	U32 next_id;
 	HscSpirvOp instr_op;
 	U16 instr_operands_count;
@@ -1426,7 +1463,7 @@ struct HscCompilerSetup {
 	uint32_t tokens_cap;
 	uint32_t lines_cap;
 	uint32_t functions_cap;
-	uint32_t function_params_and_local_variables_cap;
+	uint32_t function_params_and_variables_cap;
 	uint32_t exprs_cap;
 	uint32_t variable_stack_cap;
 	uint32_t string_table_data_cap;

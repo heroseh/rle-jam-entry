@@ -5,7 +5,7 @@ int main(int argc, char** argv) {
 		.tokens_cap = 64 * 1024,
 		.lines_cap = 64 * 1024,
 		.functions_cap = 64 * 1024,
-		.function_params_and_local_variables_cap = 64 * 1024,
+		.function_params_and_variables_cap = 64 * 1024,
 		.exprs_cap = 64 * 1024,
 		.variable_stack_cap = 64 * 1024,
 		.string_table_data_cap = 64 * 1024 * 1024,

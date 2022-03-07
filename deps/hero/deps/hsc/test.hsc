@@ -20,6 +20,12 @@ enum {
 	MINUS_FOUR,
 };
 
+S32 global = 7;
+
+struct {
+	U32 omg;
+} global_struct;
+
 typedef S32 signed_int;
 typedef struct Named { S32 i[1]; } named_wrapped_signed_int;
 typedef struct { F32 i[2]; } wrapped_float2;
@@ -48,8 +54,6 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 			};
 		};
 	};
-
-	//U32 all_my_ints[1024][1024][1024] = { 0 };
 
 	struct Struct test;
 	U32 nnnn;
@@ -108,11 +112,14 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 	wrapped_enum_in_struct.enum_in_struct = VALUE_IN_STRUCT;
 
 	test.f2[0].i[0] = 1.f;
-	test.f2[1].i[1] = 0.5f;
+	test.f2[1].i[1] = 0.3f;
 
 	F32 red = test.f4[0].i[0];
 	F32 blue = test.f4[0].i[3];
-	return vec4(red, (F32)ONE, blue, 1.f);
+
+	static const F32 static_red = 0.5f;
+
+	return vec4(static_red, (F32)(global - 6), blue, 1.f);
 }
 
 /*
