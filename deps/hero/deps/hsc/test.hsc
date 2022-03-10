@@ -1,6 +1,6 @@
 
 vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
-	return vec4(0.f);
+	return vec4(0.f, 0.f, 0.f, 0.f);
 }
 
 typedef enum NamedEnum TypedefNamedEnum;
@@ -119,7 +119,32 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 
 	static const F32 static_red = 0.5f;
 
-	return vec4(static_red, (F32)(global - 6), blue, 1.f);
+	Bool bool_ = 79798789;
+	U32 uint = 0;
+	S32 sint = 0;
+	F32 float_ = 0;
+
+	bool_ = uint;
+	bool_ = uint;
+	bool_ = sint;
+	bool_ = float_;
+
+	uint = uint;
+	uint = bool_;
+	uint = sint;
+	uint = float_;
+
+	sint = bool_;
+	sint = uint;
+	sint = float_;
+
+	float_ = bool_;
+	float_ = uint;
+	float_ = sint;
+
+	uint = uint * bool_ ? sint ? sint - 1 : sint + 1 : uint;
+
+	return vec4(static_red, (F32)(global - 6), blue * (F32)_Alignof(struct EnumInStruct) - 0.6f, 1.f);
 }
 
 /*

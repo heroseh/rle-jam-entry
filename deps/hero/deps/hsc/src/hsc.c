@@ -166,6 +166,7 @@ char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_TOKEN_PIPE] = "|",
 	[HSC_TOKEN_CARET] = "^",
 	[HSC_TOKEN_EXCLAMATION_MARK] = "!",
+	[HSC_TOKEN_QUESTION_MARK] = "?",
 	[HSC_TOKEN_TILDE] = "~",
 	[HSC_TOKEN_EQUAL] = "=",
 	[HSC_TOKEN_LESS_THAN] = "<",
@@ -218,6 +219,17 @@ char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_TOKEN_KEYWORD_TYPEDEF] = "typedef",
 	[HSC_TOKEN_KEYWORD_STATIC] = "static",
 	[HSC_TOKEN_KEYWORD_CONST] = "const",
+	[HSC_TOKEN_KEYWORD_AUTO] = "auto",
+	[HSC_TOKEN_KEYWORD_REGISTER] = "register",
+	[HSC_TOKEN_KEYWORD_VOLATILE] = "volatile",
+	[HSC_TOKEN_KEYWORD_EXTERN] = "extern",
+	[HSC_TOKEN_KEYWORD_INLINE] = "inline",
+	[HSC_TOKEN_KEYWORD_NO_RETURN] = "_Noreturn",
+	[HSC_TOKEN_KEYWORD_SIZEOF] = "sizeof",
+	[HSC_TOKEN_KEYWORD_ALIGNOF] = "_Alignof",
+	[HSC_TOKEN_KEYWORD_ALIGNAS] = "_Alignas",
+	[HSC_TOKEN_KEYWORD_STATIC_ASSERT] = "_Static_assert",
+	[HSC_TOKEN_KEYWORD_RESTRICT] = "restrict",
 	[HSC_TOKEN_KEYWORD_RO_BUFFER] = "ro_buffer",
 	[HSC_TOKEN_KEYWORD_RW_BUFFER] = "rw_buffer",
 	[HSC_TOKEN_KEYWORD_RO_IMAGE1D] = "ro_image1d",
@@ -250,80 +262,35 @@ char* hsc_function_shader_stage_strings[HSC_FUNCTION_SHADER_STAGE_COUNT] = {
 	[HSC_FUNCTION_SHADER_STAGE_MESHTASK] = "meshtask",
 };
 
-U32 hsc_intrinsic_function_overloads_count[HSC_FUNCTION_IDX_INTRINSIC_END] = {
-	[HSC_FUNCTION_IDX_VEC2_SINGLE] = 2,
-	[HSC_FUNCTION_IDX_VEC2_MULTI] = 0,
-
-	[HSC_FUNCTION_IDX_VEC3_SINGLE] = 2,
-	[HSC_FUNCTION_IDX_VEC3_MULTI] = 0,
-
-	[HSC_FUNCTION_IDX_VEC4_SINGLE] = 2,
-	[HSC_FUNCTION_IDX_VEC4_MULTI] = 0,
-
-	[HSC_FUNCTION_IDX_MAT2x2] = 1,
-	[HSC_FUNCTION_IDX_MAT2x3] = 1,
-	[HSC_FUNCTION_IDX_MAT2x4] = 1,
-	[HSC_FUNCTION_IDX_MAT3x2] = 1,
-	[HSC_FUNCTION_IDX_MAT3x3] = 1,
-	[HSC_FUNCTION_IDX_MAT3x4] = 1,
-	[HSC_FUNCTION_IDX_MAT4x2] = 1,
-	[HSC_FUNCTION_IDX_MAT4x3] = 1,
-	[HSC_FUNCTION_IDX_MAT4x4] = 1,
-};
-
 HscIntrinsicFunction hsc_intrinsic_functions[HSC_FUNCTION_IDX_INTRINSIC_END] = {
-	[HSC_FUNCTION_IDX_VEC2_SINGLE] = {
-		.name = "vec2",
-		.return_data_type = HSC_DATA_TYPE_GENERIC_VEC2,
-		.params_count = 1,
-		.params = {
-			{ .identifier_string_id = HSC_STRING_ID_SCALAR, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
-		},
-	},
-	[HSC_FUNCTION_IDX_VEC2_MULTI] = {
+	[HSC_FUNCTION_IDX_VEC2] = {
 		.name = "vec2",
 		.return_data_type = HSC_DATA_TYPE_GENERIC_VEC2,
 		.params_count = 2,
 		.params = {
-			{ .identifier_string_id = HSC_STRING_ID_X, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
-			{ .identifier_string_id = HSC_STRING_ID_Y, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
+			{ .identifier_string_id = { HSC_STRING_ID_X }, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
+			{ .identifier_string_id = { HSC_STRING_ID_Y }, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
 		},
 	},
-	[HSC_FUNCTION_IDX_VEC3_SINGLE] = {
-		.name = "vec3",
-		.return_data_type = HSC_DATA_TYPE_GENERIC_VEC3,
-		.params_count = 1,
-		.params = {
-			{ .identifier_string_id = HSC_STRING_ID_SCALAR, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
-		},
-	},
-	[HSC_FUNCTION_IDX_VEC3_MULTI] = {
+	[HSC_FUNCTION_IDX_VEC3] = {
 		.name = "vec3",
 		.return_data_type = HSC_DATA_TYPE_GENERIC_VEC3,
 		.params_count = 3,
 		.params = {
-			{ .identifier_string_id = HSC_STRING_ID_X, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
-			{ .identifier_string_id = HSC_STRING_ID_Y, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
-			{ .identifier_string_id = HSC_STRING_ID_Z, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
+			{ .identifier_string_id = { HSC_STRING_ID_X }, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
+			{ .identifier_string_id = { HSC_STRING_ID_Y }, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
+			{ .identifier_string_id = { HSC_STRING_ID_Z }, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
 		},
 	},
-	[HSC_FUNCTION_IDX_VEC4_SINGLE] = {
-		.name = "vec4",
-		.return_data_type = HSC_DATA_TYPE_GENERIC_VEC4,
-		.params_count = 1,
-		.params = {
-			{ .identifier_string_id = HSC_STRING_ID_SCALAR, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
-		},
-	},
-	[HSC_FUNCTION_IDX_VEC4_MULTI] = {
+	[HSC_FUNCTION_IDX_VEC4] = {
 		.name = "vec4",
 		.return_data_type = HSC_DATA_TYPE_GENERIC_VEC4,
 		.params_count = 4,
 		.params = {
-			{ .identifier_string_id = HSC_STRING_ID_X, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
-			{ .identifier_string_id = HSC_STRING_ID_Y, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
-			{ .identifier_string_id = HSC_STRING_ID_Z, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
-			{ .identifier_string_id = HSC_STRING_ID_W, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
+			{ .identifier_string_id = { HSC_STRING_ID_X }, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
+			{ .identifier_string_id = { HSC_STRING_ID_Y }, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
+			{ .identifier_string_id = { HSC_STRING_ID_Z }, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
+			{ .identifier_string_id = { HSC_STRING_ID_W }, .data_type = HSC_DATA_TYPE_GENERIC_SCALAR, },
 		},
 	},
 };
@@ -686,7 +653,9 @@ UINT:
 SINT:
 			fprintf(f, "%zd", sint);
 			break;
-		case HSC_DATA_TYPE_F16: HSC_ABORT("TODO");
+		case HSC_DATA_TYPE_F16:
+			fprintf(f, "F16 TODO");
+			break;
 		case HSC_DATA_TYPE_F32: float_ = *(F32*)data; goto FLOAT;
 		case HSC_DATA_TYPE_F64: float_ = *(F64*)data; goto FLOAT;
 FLOAT:
@@ -720,33 +689,6 @@ void hsc_constant_print(HscAstGen* astgen, HscConstantId constant_id, FILE* f) {
 	if (constant.data_type < HSC_DATA_TYPE_BASIC_END) {
 		hsc_data_type_print_basic(astgen, constant.data_type, constant.data, f);
 	} else if (HSC_DATA_TYPE_VECTOR_START <= constant.data_type && constant.data_type < HSC_DATA_TYPE_MATRIX_END) {
-		U32 componment_size;
-		switch (HSC_DATA_TYPE_SCALAR(constant.data_type)) {
-			case HSC_DATA_TYPE_VOID:
-				componment_size = 0;
-				break;
-			case HSC_DATA_TYPE_BOOL:
-			case HSC_DATA_TYPE_U8:
-			case HSC_DATA_TYPE_S8:
-				componment_size = 1;
-				break;
-			case HSC_DATA_TYPE_U16:
-			case HSC_DATA_TYPE_S16:
-			case HSC_DATA_TYPE_F16:
-				componment_size = 2;
-				break;
-			case HSC_DATA_TYPE_U32:
-			case HSC_DATA_TYPE_S32:
-			case HSC_DATA_TYPE_F32:
-				componment_size = 4;
-				break;
-			case HSC_DATA_TYPE_U64:
-			case HSC_DATA_TYPE_S64:
-			case HSC_DATA_TYPE_F64:
-				componment_size = 8;
-				break;
-		}
-
 		U32 componments_count;
 		if (constant.data_type < HSC_DATA_TYPE_VECTOR_END) {
 			componments_count = HSC_DATA_TYPE_VECTOR_COMPONENTS(constant.data_type);
@@ -770,6 +712,13 @@ void hsc_constant_print(HscAstGen* astgen, HscConstantId constant_id, FILE* f) {
 
 bool hsc_data_type_is_condition(HscAstGen* astgen, HscDataType data_type) {
 	return HSC_DATA_TYPE_BOOL <= data_type && data_type < HSC_DATA_TYPE_BASIC_END;
+}
+
+void hsc_data_type_ensure_is_condition(HscAstGen* astgen, HscDataType data_type) {
+	if (!hsc_data_type_is_condition(astgen, data_type)) {
+		HscString data_type_name = hsc_data_type_string(astgen, data_type);
+		hsc_astgen_error_1(astgen, "the condition expression must be convertable to a 'bool' but got '%.*s'", (int)data_type_name.size, data_type_name.data);
+	}
 }
 
 U32 hsc_data_type_composite_fields_count(HscAstGen* astgen, HscDataType data_type) {
@@ -886,7 +835,7 @@ void hsc_constant_table_deduplicate_composite_start(HscConstantTable* constant_t
 	constant_table->data_type = data_type;
 	constant_table->fields_count = 0;
 	constant_table->fields_cap = fields_count;
-	constant_table->data_write_ptr = HSC_PTR_ROUND_UP_ALIGN(constant_table->data + constant_table->data_used_size, alignof(HscConstantId));
+	constant_table->data_write_ptr = HSC_PTR_ROUND_UP_ALIGN(HSC_PTR_ADD(constant_table->data, constant_table->data_used_size), alignof(HscConstantId));
 }
 
 void hsc_constant_table_deduplicate_composite_add(HscConstantTable* constant_table, HscConstantId constant_id) {
@@ -925,7 +874,7 @@ HscConstantId _hsc_constant_table_deduplicate_end(HscConstantTable* constant_tab
 	// TODO: make this a hash table look up
 	for (uint32_t entry_idx = 0; entry_idx < constant_table->entries_count; entry_idx += 1) {
 		HscConstantEntry* entry = &constant_table->entries[entry_idx];
-		if (entry->data_type == data_type && data_size == entry->size && memcmp(constant_table->data + entry->start_idx, data, data_size) == 0) {
+		if (entry->data_type == data_type && data_size == entry->size && memcmp(HSC_PTR_ADD(constant_table->data, entry->start_idx), data, data_size) == 0) {
 			return (HscConstantId) { .idx_plus_one = entry_idx + 1 };
 		}
 	}
@@ -965,7 +914,7 @@ HscConstant hsc_constant_table_get(HscConstantTable* constant_table, HscConstant
 
 	HscConstant constant;
 	constant.data_type = entry->data_type;
-	constant.data = constant_table->data + entry->start_idx;
+	constant.data = HSC_PTR_ADD(constant_table->data, entry->start_idx);
 	constant.size = entry->size;
 	return constant;
 }
@@ -1002,7 +951,6 @@ SIGNED_VALUE:
 }
 
 bool hsc_constant_as_sint(HscConstant constant, S64* out) {
-	S64 signed_value = 0;
 	switch (constant.data_type) {
 		case HSC_DATA_TYPE_U8: *out = *(U8*)constant.data; break;
 		case HSC_DATA_TYPE_U16: *out = *(U16*)constant.data; break;
@@ -1018,19 +966,34 @@ bool hsc_constant_as_sint(HscConstant constant, S64* out) {
 	return true;
 }
 
+bool hsc_constant_as_float(HscConstant constant, F64* out) {
+	switch (constant.data_type) {
+		case HSC_DATA_TYPE_U8: *out = *(U8*)constant.data; break;
+		case HSC_DATA_TYPE_U16: *out = *(U16*)constant.data; break;
+		case HSC_DATA_TYPE_U32: *out = *(U32*)constant.data; break;
+		case HSC_DATA_TYPE_S8: *out = *(S8*)constant.data; break;
+		case HSC_DATA_TYPE_S16: *out = *(S16*)constant.data; break;
+		case HSC_DATA_TYPE_S32: *out = *(S32*)constant.data; break;
+		case HSC_DATA_TYPE_S64: *out = *(S64*)constant.data; break;
+		case HSC_DATA_TYPE_F32: *out = *(F32*)constant.data; break;
+		case HSC_DATA_TYPE_F64: *out = *(F64*)constant.data; break;
+		default:
+			return false;
+	}
+
+	return true;
+}
+
 void hsc_add_intrinsic_function(HscAstGen* astgen, U32 function_idx) {
 	HscIntrinsicFunction* intrinsic_function = &hsc_intrinsic_functions[function_idx];
 
 	U32 name_size = strlen(intrinsic_function->name);
 	HscStringId identifier_string_id = hsc_string_table_deduplicate(&astgen->string_table, intrinsic_function->name, name_size);
-	if (hsc_intrinsic_function_overloads_count[function_idx]) {
-		//
-		// this is the first overloaded function so add it to the global declarations
-		HscDecl* decl_ptr;
-		bool result = hsc_hash_table_find_or_insert(&astgen->global_declarations, identifier_string_id.idx_plus_one, &decl_ptr);
-		HSC_ASSERT(!result, "internal error: intrinsic function '%.*s' already declared", name_size, intrinsic_function->name);
-		*decl_ptr = HSC_DECL_INIT(HSC_DECL_FUNCTION, function_idx);
-	}
+
+	HscDecl* decl_ptr;
+	bool result = hsc_hash_table_find_or_insert(&astgen->global_declarations, identifier_string_id.idx_plus_one, &decl_ptr);
+	HSC_ASSERT(!result, "internal error: intrinsic function '%.*s' already declared", name_size, intrinsic_function->name);
+	*decl_ptr = HSC_DECL_INIT(HSC_DECL_FUNCTION, function_idx);
 
 	HscFunction* function = &astgen->functions[function_idx];
 	HSC_ZERO_ELMT(function);
@@ -1131,7 +1094,7 @@ void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup) {
 
 	hsc_hash_table_init(&astgen->global_declarations);
 	{
-		for (U32 function_idx = 0; function_idx <= HSC_FUNCTION_IDX_VEC4_MULTI; function_idx += 1) {
+		for (U32 function_idx = 0; function_idx <= HSC_FUNCTION_IDX_VEC4; function_idx += 1) {
 			hsc_add_intrinsic_function(astgen, function_idx);
 		}
 		astgen->functions_count = HSC_FUNCTION_IDX_USER_START;
@@ -1163,8 +1126,6 @@ void hsc_astgen_print_code_line(HscAstGen* astgen, U32 display_line_num_size, U3
 	}
 
 	if (code_end_idx <= code_start_idx) {
-		U32 code_size = code_end_idx - code_start_idx;
-		char* code = (char*)&astgen->bytes[code_start_idx];
 		const char* fmt = astgen->print_color
 			? "\x1b[1;94m%*u|\x1b[0m\n"
 			: "%*u|\n";
@@ -1631,9 +1592,6 @@ void hsc_astgen_tokenize(HscAstGen* astgen) {
 	HscLocation brackets_to_close_locations[_HSC_TOKENIZER_NESTED_BRACKETS_CAP];
 	uint32_t brackets_to_close_count = 0;
 
-	bool is_negative;
-	char num_buf[20];
-
 	astgen->line_code_start_indices[0] = 0;
 	astgen->line_code_start_indices[1] = 0;
 	astgen->lines_count += 2;
@@ -1675,6 +1633,7 @@ void hsc_astgen_tokenize(HscAstGen* astgen) {
 			case ';': token = HSC_TOKEN_SEMICOLON; break;
 			case ':': token = HSC_TOKEN_COLON; break;
 			case '~': token = HSC_TOKEN_TILDE; break;
+			case '?': token = HSC_TOKEN_QUESTION_MARK; break;
 			case '+':
 				if (astgen->bytes[astgen->location.code_end_idx + 1] == '=') {
 					token_size = 2;
@@ -1898,7 +1857,8 @@ CLOSE_BRACKETS:
 
 				if (
 					(byte < 'a' || 'z' < byte) &&
-					(byte < 'A' || 'Z' < byte)
+					(byte < 'A' || 'Z' < byte) &&
+					byte != '_'
 				) {
 					hsc_astgen_token_error_1(astgen, "invalid token '%c'", byte);
 				}
@@ -2151,7 +2111,6 @@ MAKE_NEW: {}
 		astgen->enum_values_count += 1;
 	}
 
-END:{}
 	enum_data_type->values_count = value_idx;
 
 	token = hsc_token_next(astgen);
@@ -2445,10 +2404,141 @@ HscExpr* hsc_astgen_alloc_expr_many(HscAstGen* astgen, U32 amount) {
 	return exprs;
 }
 
-bool hsc_data_type_check_compatible(HscAstGen* astgen, HscDataType target_data_type, HscDataType source_data_type) {
+static U8 hsc_data_type_basic_type_ranks[HSC_DATA_TYPE_BASIC_COUNT] = {
+	[HSC_DATA_TYPE_BOOL] = 1,
+	[HSC_DATA_TYPE_U8] = 2,
+	[HSC_DATA_TYPE_S8] = 2,
+	[HSC_DATA_TYPE_U16] = 3,
+	[HSC_DATA_TYPE_S16] = 3,
+	[HSC_DATA_TYPE_S32] = 4,
+	[HSC_DATA_TYPE_U32] = 4,
+	[HSC_DATA_TYPE_U64] = 5,
+	[HSC_DATA_TYPE_S64] = 5,
+	[HSC_DATA_TYPE_F16] = 6,
+	[HSC_DATA_TYPE_F32] = 7,
+	[HSC_DATA_TYPE_F64] = 8,
+};
+
+#define HSC_DEBUG_ASSERT_EVAL(expr) HSC_DEBUG_ASSERT(expr->type == HSC_EXPR_TYPE_CONSTANT, "internal error: expected to be evaluating a constant")
+
+void hsc_astgen_eval_cast(HscAstGen* astgen, HscExpr* expr, HscDataType dst_data_type) {
+	HSC_DEBUG_ASSERT_EVAL(expr);
+	HscConstantId constant_id = { .idx_plus_one = expr->constant.id };
+	HscConstant constant = hsc_constant_table_get(&astgen->constant_table, constant_id);
+
+	union {
+		_Bool bool_;
+		U64 uint;
+		S8 s8;
+		S16 s16;
+		S32 s32;
+		S64 s64;
+		F32 f32;
+		F64 f64;
+	} dst;
+
+	if (HSC_DATA_TYPE_IS_UINT(expr->data_type)) {
+		U64 uint;
+		hsc_constant_as_uint(constant, &uint);
+
+		switch (dst_data_type) {
+			case HSC_DATA_TYPE_BOOL: dst.bool_ = uint; break;
+			case HSC_DATA_TYPE_U8:
+			case HSC_DATA_TYPE_U16:
+			case HSC_DATA_TYPE_U32:
+			case HSC_DATA_TYPE_U64:
+				dst.uint = uint;
+				break;
+			case HSC_DATA_TYPE_S8: dst.s8 = uint; break;
+			case HSC_DATA_TYPE_S16: dst.s16 = uint; break;
+			case HSC_DATA_TYPE_S32: dst.s32 = uint; break;
+			case HSC_DATA_TYPE_S64: dst.s64 = uint; break;
+			case HSC_DATA_TYPE_F32: dst.f32 = uint; break;
+			case HSC_DATA_TYPE_F64: dst.f64 = uint; break;
+			default:
+				HSC_ABORT("unhandled data type '%u'", dst_data_type);
+		}
+	} else if (HSC_DATA_TYPE_IS_SINT(expr->data_type)) {
+		S64 sint;
+		hsc_constant_as_sint(constant, &sint);
+
+		switch (dst_data_type) {
+			case HSC_DATA_TYPE_BOOL: dst.bool_ = sint; break;
+			case HSC_DATA_TYPE_U8:
+			case HSC_DATA_TYPE_U16:
+			case HSC_DATA_TYPE_U32:
+			case HSC_DATA_TYPE_U64:
+				dst.uint = sint;
+				break;
+			case HSC_DATA_TYPE_S8: dst.s8 = sint; break;
+			case HSC_DATA_TYPE_S16: dst.s16 = sint; break;
+			case HSC_DATA_TYPE_S32: dst.s32 = sint; break;
+			case HSC_DATA_TYPE_S64: dst.s64 = sint; break;
+			case HSC_DATA_TYPE_F32: dst.f32 = sint; break;
+			case HSC_DATA_TYPE_F64: dst.f64 = sint; break;
+			default:
+				HSC_ABORT("unhandled data type '%u'", dst_data_type);
+		}
+	} else if (HSC_DATA_TYPE_IS_FLOAT(expr->data_type)) {
+		F64 float_;
+		hsc_constant_as_float(constant, &float_);
+
+		switch (dst_data_type) {
+			case HSC_DATA_TYPE_BOOL: dst.bool_ = (_Bool)float_; break;
+			case HSC_DATA_TYPE_U8:
+			case HSC_DATA_TYPE_U16:
+			case HSC_DATA_TYPE_U32:
+			case HSC_DATA_TYPE_U64:
+				dst.uint = (U64)float_;
+				break;
+			case HSC_DATA_TYPE_S8: dst.s8 = (S8)float_; break;
+			case HSC_DATA_TYPE_S16: dst.s16 = (S16)float_; break;
+			case HSC_DATA_TYPE_S32: dst.s32 = (S32)float_; break;
+			case HSC_DATA_TYPE_S64: dst.s64 = (S64)float_; break;
+			case HSC_DATA_TYPE_F32: dst.f32 = float_; break;
+			case HSC_DATA_TYPE_F64: dst.f64 = float_; break;
+			default:
+				HSC_ABORT("unhandled data type '%u'", dst_data_type);
+		}
+	} else {
+		HSC_ABORT("unhandled data type '%u'", expr->data_type);
+	}
+
+	constant_id = hsc_constant_table_deduplicate_basic(&astgen->constant_table, astgen, dst_data_type, &dst.uint);
+	expr->constant.id = constant_id.idx_plus_one;
+	expr->data_type = dst_data_type;
+}
+
+void hsc_astgen_implicit_cast(HscAstGen* astgen, HscDataType dst_data_type, HscExpr** expr_mut) {
+	HscExpr* expr = *expr_mut;
+	if (expr->type == HSC_EXPR_TYPE_CONSTANT) {
+		hsc_astgen_eval_cast(astgen, expr, dst_data_type);
+		return;
+	}
+
+	HscExpr* cast_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_CAST);
+	cast_expr->unary.expr_rel_idx = cast_expr - expr;
+	cast_expr->data_type = dst_data_type;
+	*expr_mut = cast_expr;
+}
+
+bool hsc_data_type_check_compatible_assignment(HscAstGen* astgen, HscDataType target_data_type, HscExpr** source_expr_mut) {
+	HscExpr* source_expr = *source_expr_mut;
+	HscDataType source_data_type = source_expr->data_type;
+	if (HSC_DATA_TYPE_IS_CONST(target_data_type) && !HSC_DATA_TYPE_IS_CONST(source_data_type)) {
+		return false;
+	}
+
+	target_data_type = hsc_typedef_resolve(astgen, target_data_type);
+	source_data_type = hsc_typedef_resolve(astgen, source_data_type);
 	target_data_type = HSC_DATA_TYPE_STRIP_CONST(target_data_type);
 	source_data_type = HSC_DATA_TYPE_STRIP_CONST(source_data_type);
 	if (target_data_type == source_data_type) {
+		return true;
+	}
+
+	if (HSC_DATA_TYPE_IS_BASIC(target_data_type) && HSC_DATA_TYPE_IS_BASIC(source_data_type)) {
+		hsc_astgen_implicit_cast(astgen, target_data_type, source_expr_mut);
 		return true;
 	}
 
@@ -2498,36 +2588,113 @@ bool hsc_data_type_check_compatible(HscAstGen* astgen, HscDataType target_data_t
 	return false;
 }
 
-void hsc_astgen_error_data_type_mismatch(HscAstGen* astgen, HscLocation* other_location, HscDataType target_data_type, HscDataType source_data_type) {
-	HscString target_data_type_name = hsc_data_type_string(astgen, target_data_type);
-	HscString source_data_type_name = hsc_data_type_string(astgen, source_data_type);
-	hsc_astgen_error_2(astgen, other_location, "type mismatch '%.*s' is does not implicitly cast to '%.*s'", (int)source_data_type_name.size, source_data_type_name.data, (int)target_data_type_name.size, target_data_type_name.data);
-}
-
-void hsc_data_type_ensure_compatible(HscAstGen* astgen, HscLocation* other_location, HscDataType target_data_type, HscDataType source_data_type) {
-	if (!hsc_data_type_check_compatible(astgen, hsc_typedef_resolve(astgen, target_data_type), hsc_typedef_resolve(astgen, source_data_type))) {
-		hsc_astgen_error_data_type_mismatch(astgen, other_location, target_data_type, source_data_type);
+void hsc_data_type_ensure_compatible_assignment(HscAstGen* astgen, HscLocation* other_location, HscDataType target_data_type, HscExpr** source_expr_mut) {
+	if (!hsc_data_type_check_compatible_assignment(astgen, target_data_type, source_expr_mut)) {
+		HscString target_data_type_name = hsc_data_type_string(astgen, target_data_type);
+		HscString source_data_type_name = hsc_data_type_string(astgen, (*source_expr_mut)->data_type);
+		hsc_astgen_error_2(astgen, other_location, "type mismatch '%.*s' is does not implicitly cast to '%.*s'", (int)source_data_type_name.size, source_data_type_name.data, (int)target_data_type_name.size, target_data_type_name.data);
 	}
 }
 
-void _hsc_astgen_ensure_no_unused_type_qualifiers(HscAstGen* astgen, char* what) {
-	if (astgen->flags & (HSC_ASTGEN_FLAGS_FOUND_STATIC | HSC_ASTGEN_FLAGS_FOUND_CONST)) {
-		const char* message;
-		if (astgen->flags & HSC_ASTGEN_FLAGS_FOUND_STATIC) {
-			message = "the 'static' keyword was used, so we are expecting %s to declare a variable but got '%s'";
+bool hsc_data_type_check_compatible_arithmetic(HscAstGen* astgen, HscExpr** left_expr_mut, HscExpr** right_expr_mut) {
+	HscExpr* left_expr = *left_expr_mut;
+	HscExpr* right_expr = *right_expr_mut;
+
+	HscDataType left_data_type = hsc_typedef_resolve(astgen, left_expr->data_type);
+	HscDataType right_data_type = hsc_typedef_resolve(astgen, right_expr->data_type);
+	left_data_type = HSC_DATA_TYPE_STRIP_CONST(left_data_type);
+	right_data_type = HSC_DATA_TYPE_STRIP_CONST(right_data_type);
+	if (left_data_type == right_data_type) {
+		return true;
+	}
+
+	if (HSC_DATA_TYPE_IS_BASIC(left_data_type) && HSC_DATA_TYPE_IS_BASIC(right_data_type)) {
+		bool left_is_float = HSC_DATA_TYPE_IS_FLOAT(left_data_type);
+		bool right_is_float = HSC_DATA_TYPE_IS_FLOAT(right_data_type);
+		U8 left_rank = hsc_data_type_basic_type_ranks[left_data_type];
+		U8 right_rank = hsc_data_type_basic_type_ranks[right_data_type];
+		if (left_is_float || right_is_float) {
+			//
+			// if one of operands is a float, then cast lower ranked operand
+			// into the type of the higher ranked operand
+			if (left_rank < right_rank) {
+				hsc_astgen_implicit_cast(astgen, right_data_type, left_expr_mut);
+			} else if (left_rank > right_rank) {
+				hsc_astgen_implicit_cast(astgen, left_data_type, right_expr_mut);
+			}
 		} else {
-			message = "the 'const' keyword was used, so we are expecting %s to declare a variable but got '%s'";
+			//
+			// both operands are integers
+			//
+
+			{
+				//
+				// promote each operand to an int if it has a lower rank
+				//
+
+				U8 int_rank = hsc_data_type_basic_type_ranks[HSC_DATA_TYPE_S32];
+				if (left_rank < int_rank) {
+					hsc_astgen_implicit_cast(astgen, HSC_DATA_TYPE_S32, left_expr_mut);
+					left_data_type = HSC_DATA_TYPE_S32;
+					left_rank = int_rank;
+				}
+
+				if (right_rank < int_rank) {
+					hsc_astgen_implicit_cast(astgen, HSC_DATA_TYPE_S32, right_expr_mut);
+					right_data_type = HSC_DATA_TYPE_S32;
+					right_rank = int_rank;
+				}
+			}
+
+			if (left_data_type != right_data_type) {
+				bool left_is_unsigned = HSC_DATA_TYPE_IS_UINT(left_data_type);
+				bool right_is_unsigned = HSC_DATA_TYPE_IS_UINT(right_data_type);
+				if (left_is_unsigned || right_is_unsigned) {
+					//
+					// one of the operands is unsigned, convert the other operand
+					// into the unsigned data type if it's rank if less than or
+					// equal to the unsigned's data type rank.
+					//
+
+					if (!left_is_unsigned && left_rank <= right_rank) {
+						hsc_astgen_implicit_cast(astgen, right_data_type, left_expr_mut);
+						return true;
+					} else if (!right_is_unsigned && left_rank >= right_rank) {
+						hsc_astgen_implicit_cast(astgen, left_data_type, right_expr_mut);
+						return true;
+					}
+				}
+
+				bool left_is_signed = !left_is_unsigned;
+				bool right_is_signed = !right_is_unsigned;
+				if ((left_is_signed || right_is_signed)) {
+					//
+					// one of the operands is signed, convert the other operand
+					// into the signed data type if it's rank if less than or
+					// equal to the signed's data type rank.
+					//
+
+					if (!left_is_signed && left_rank <= right_rank) {
+						hsc_astgen_implicit_cast(astgen, right_data_type, left_expr_mut);
+					} else if (!right_is_signed && left_rank >= right_rank) {
+						hsc_astgen_implicit_cast(astgen, left_data_type, right_expr_mut);
+					}
+				}
+			}
 		}
-		hsc_astgen_error_1(astgen, message, what, hsc_token_strings[hsc_token_peek(astgen)]);
+
+		return true;
 	}
+
+	return false;
 }
 
-void hsc_astgen_ensure_no_unused_type_qualifiers_data_type(HscAstGen* astgen) {
-	_hsc_astgen_ensure_no_unused_type_qualifiers(astgen, "a data type");
-}
-
-void hsc_astgen_ensure_no_unused_type_qualifiers_identifier(HscAstGen* astgen) {
-	_hsc_astgen_ensure_no_unused_type_qualifiers(astgen, "an identifier");
+void hsc_data_type_ensure_compatible_arithmetic(HscAstGen* astgen, HscLocation* other_location, HscExpr** left_expr_mut, HscExpr** right_expr_mut, HscToken operator_token) {
+	if (!hsc_data_type_check_compatible_arithmetic(astgen, left_expr_mut, right_expr_mut)) {
+		HscString left_data_type_name = hsc_data_type_string(astgen, (*left_expr_mut)->data_type);
+		HscString right_data_type_name = hsc_data_type_string(astgen, (*right_expr_mut)->data_type);
+		hsc_astgen_error_2(astgen, other_location, "operator '%s' is not supported for data type '%.*s' and '%.*s'", hsc_token_strings[operator_token], (int)right_data_type_name.size, right_data_type_name.data, (int)left_data_type_name.size, left_data_type_name.data);
+	}
 }
 
 void hsc_curly_initializer_gen_init_composite(HscAstGen* astgen, HscDataType data_type, bool add_null_entry) {
@@ -2623,9 +2790,10 @@ HscToken hsc_curly_initializer_gen_designator_entry_indices(HscAstGen* astgen) {
 					HscString data_type_name = hsc_data_type_string(astgen, gen->composite_data_type);
 					hsc_astgen_error_1(astgen, "expected an the field identifier that you wish to initialize from '%.*s'", (int)data_type_name.size, data_type_name.data);
 				}
-				HscStringId identifier_string_id = hsc_token_value_next(astgen).string_id;
 
-				HscCompoundField* field = hsc_compound_data_type_find_field_by_name_checked(astgen, gen->composite_data_type, gen->compound_data_type, identifier_string_id);
+
+				HscStringId identifier_string_id = hsc_token_value_next(astgen).string_id;
+				hsc_compound_data_type_find_field_by_name_checked(astgen, gen->composite_data_type, gen->compound_data_type, identifier_string_id);
 				for (U32 i = 0; i < astgen->compound_type_find_fields_count; i += 1) {
 					U32 entry_idx = gen->entry_indices_count;
 					HSC_ASSERT_ARRAY_BOUNDS(entry_idx + 1, astgen->entry_indices_cap);
@@ -2675,9 +2843,9 @@ HscToken hsc_curly_initializer_gen_designator_entry_indices(HscAstGen* astgen) {
 			default: {
 				const char* message;
 				if (HSC_DATA_TYPE_IS_ARRAY(gen->resolved_composite_data_type)) {
-					message = "expected a '=' to assign a value or a '[' for an array designator";
+					message = "expected an '=' to assign a value or a '[' for an array designator";
 				} else {
-					message = "expected a '=' to assign a value or a '.' for an field designator";
+					message = "expected an '=' to assign a value or a '.' for an field designator";
 				}
 				hsc_astgen_error_1(astgen, message);
 			};
@@ -2686,7 +2854,7 @@ HscToken hsc_curly_initializer_gen_designator_entry_indices(HscAstGen* astgen) {
 		if (token == HSC_TOKEN_EQUAL) {
 			goto END;
 		} else if (!HSC_DATA_TYPE_IS_COMPOSITE_TYPE(gen->resolved_entry_data_type)) {
-			hsc_astgen_error_1(astgen, "expected a '=' to assign a value");
+			hsc_astgen_error_1(astgen, "expected an '=' to assign a value");
 		}
 
 		hsc_curly_initializer_gen_init_composite(astgen, gen->entry_data_type, false);
@@ -2754,7 +2922,7 @@ bool hsc_curly_initializer_gen_consume_if_zero(HscAstGen* astgen) {
 	bool consume = gen->entries_cap > 1
 		&& hsc_token_peek(astgen) == HSC_TOKEN_LIT_S32
 		&& hsc_token_peek_ahead(astgen, 1) == HSC_TOKEN_CURLY_CLOSE
-		&& hsc_token_value_peek(astgen).constant_id.idx_plus_one == astgen->s32_zero_constant_id.idx_plus_one
+		&& hsc_token_value_peek(astgen).constant_id.idx_plus_one == astgen->basic_type_zero_constant_ids[HSC_DATA_TYPE_S32].idx_plus_one
 		;
 
 	if (consume) {
@@ -2796,15 +2964,14 @@ HscExpr* hsc_astgen_generate_unary_expr(HscAstGen* astgen) {
 		case HSC_TOKEN_LIT_F64: {
 			HscDataType data_type;
 			HscConstantId constant_id;
-			HscTokenValue value;
 			switch (token) {
 				case HSC_TOKEN_KEYWORD_TRUE:
 					data_type = HSC_DATA_TYPE_BOOL;
-					constant_id = astgen->true_constant_id;
+					constant_id = astgen->basic_type_one_constant_ids[HSC_DATA_TYPE_BOOL];
 					break;
 				case HSC_TOKEN_KEYWORD_FALSE:
 					data_type = HSC_DATA_TYPE_BOOL;
-					constant_id = astgen->false_constant_id;
+					constant_id = astgen->basic_type_zero_constant_ids[HSC_DATA_TYPE_BOOL];
 					break;
 				case HSC_TOKEN_LIT_U32: data_type = HSC_DATA_TYPE_U32; break;
 				case HSC_TOKEN_LIT_U64: data_type = HSC_DATA_TYPE_U64; break;
@@ -2882,10 +3049,27 @@ HscExpr* hsc_astgen_generate_unary_expr(HscAstGen* astgen) {
 		case HSC_TOKEN_MINUS: unary_op = HSC_UNARY_OP_NEGATE; goto UNARY;
 UNARY:
 		{
+			HscToken operator_token = token;
 			HscExpr* expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_UNARY_OP_START + unary_op);
 			hsc_token_consume(astgen, 1);
 
 			HscExpr* inner_expr = hsc_astgen_generate_unary_expr(astgen);
+
+			if (!HSC_DATA_TYPE_IS_NON_VOID_BASIC(inner_expr->data_type)) {
+				HscString data_type_name = hsc_data_type_string(astgen, inner_expr->data_type);
+				hsc_astgen_error_1(astgen, "operator '%s' is not supported for the '%s' data type", hsc_token_strings[operator_token], (int)data_type_name.size, data_type_name.data);
+			}
+
+			if (unary_op != HSC_UNARY_OP_LOGICAL_NOT) {
+				if (HSC_DATA_TYPE_IS_INT(inner_expr->data_type)) {
+					U8 rank = hsc_data_type_basic_type_ranks[inner_expr->data_type];
+					U8 int_rank = hsc_data_type_basic_type_ranks[HSC_DATA_TYPE_S32];
+					if (rank < int_rank) {
+						hsc_astgen_implicit_cast(astgen, HSC_DATA_TYPE_S32, &inner_expr);
+					}
+				}
+			}
+
 			expr->unary.expr_rel_idx = inner_expr - expr;
 			expr->data_type = token == HSC_TOKEN_EXCLAMATION_MARK ? HSC_DATA_TYPE_BOOL : inner_expr->data_type;
 			return expr;
@@ -2906,8 +3090,7 @@ UNARY:
 					astgen->assign_data_type = expr->data_type;
 					return hsc_astgen_generate_unary_expr(astgen);
 				} else {
-					HscExpr* cast_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_CAST);
-					HscExpr* right_expr = hsc_astgen_generate_expr(astgen, 0);
+					HscExpr* right_expr = hsc_astgen_generate_expr(astgen, 2);
 					if (expr->data_type != right_expr->data_type) {
 						if (expr->data_type >= HSC_DATA_TYPE_VECTOR_END || right_expr->data_type >= HSC_DATA_TYPE_VECTOR_END) {
 							HscString target_data_type_name = hsc_data_type_string(astgen, expr->data_type);
@@ -2915,7 +3098,8 @@ UNARY:
 							hsc_astgen_error_1(astgen, "cannot cast '%.*s' to '%.*s'", (int)source_data_type_name.size, source_data_type_name.data, (int)target_data_type_name.size, target_data_type_name.data);
 						}
 
-						cast_expr->unary.expr_rel_idx = right_expr - cast_expr;
+						HscExpr* cast_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_CAST);
+						cast_expr->unary.expr_rel_idx = cast_expr - right_expr;
 						cast_expr->data_type = expr->data_type;
 						return cast_expr;
 					}
@@ -2926,11 +3110,12 @@ UNARY:
 			return expr;
 		};
 		case HSC_TOKEN_CURLY_OPEN: {
-			HscDataType assign_data_type = hsc_typedef_resolve(astgen, astgen->assign_data_type);
+			HscDataType assign_data_type = astgen->assign_data_type;
+			HscDataType resolved_assign_data_type = hsc_typedef_resolve(astgen, assign_data_type);
 			astgen->assign_data_type = HSC_DATA_TYPE_VOID;
 			HscCurlyInitializerGen* gen = &astgen->curly_initializer_gen;
 
-			if (HSC_DATA_TYPE_IS_COMPOSITE_TYPE(assign_data_type)) {
+			if (HSC_DATA_TYPE_IS_COMPOSITE_TYPE(resolved_assign_data_type)) {
 				HscExpr* curly_initializer_expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_CURLY_INITIALIZER);
 				curly_initializer_expr->data_type = assign_data_type;
 				token = hsc_token_next(astgen);
@@ -2952,13 +3137,12 @@ UNARY:
 					variable_expr->next_expr_rel_idx = 0;
 				}
 
-				hsc_curly_initializer_gen_init(astgen, assign_data_type, variable_expr);
+				hsc_curly_initializer_gen_init(astgen, resolved_assign_data_type, variable_expr);
 
 				if (hsc_curly_initializer_gen_consume_if_zero(astgen)) {
 					goto CURLY_INITIALIZER_END;
 				}
 
-				U32 entry_idx = 0;
 				astgen->compound_type_find_fields_count = 0;
 				U32 nested_count = 0;
 				while (1) {
@@ -2990,7 +3174,7 @@ UNARY:
 
 					HscExpr* value_expr = hsc_astgen_generate_expr(astgen, 0);
 					HscLocation* other_location = NULL;
-					hsc_data_type_ensure_compatible(astgen, other_location, astgen->curly_initializer_gen.entry_data_type, value_expr->data_type);
+					hsc_data_type_ensure_compatible_assignment(astgen, other_location, astgen->curly_initializer_gen.entry_data_type, &value_expr);
 
 					initializer_expr->designated_initializer.value_expr_rel_idx = value_expr - initializer_expr;
 
@@ -3038,6 +3222,38 @@ CURLY_INITIALIZER_END:
 
 			HSC_UNREACHABLE();
 		};
+		case HSC_TOKEN_KEYWORD_SIZEOF:
+		case HSC_TOKEN_KEYWORD_ALIGNOF:
+		{
+			bool is_sizeof = token == HSC_TOKEN_KEYWORD_SIZEOF;
+			token = hsc_token_next(astgen);
+			bool has_curly = token == HSC_TOKEN_PARENTHESIS_OPEN;
+			if (has_curly) {
+				token = hsc_token_next(astgen);
+			}
+			HscExpr* expr = hsc_astgen_generate_unary_expr(astgen);
+			if (has_curly) {
+				token = hsc_token_peek(astgen);
+				if (token != HSC_TOKEN_PARENTHESIS_CLOSE) {
+					hsc_astgen_error_1(astgen, "expected a ')' here to finish the expression");
+				}
+				token = hsc_token_next(astgen);
+			} else if (expr->type == HSC_EXPR_TYPE_DATA_TYPE) {
+				hsc_astgen_error_1(astgen, "the type after 'sizeof' be wrapped in parenthesis. eg. sizeof(uint32_t)");
+			}
+
+			Uptr size;
+			Uptr align;
+			hsc_data_type_size_align(astgen, expr->data_type, &size, &align);
+
+			U32 TODO_int_64_support_plz = is_sizeof ? size : align;
+
+			expr->type = HSC_EXPR_TYPE_CONSTANT;
+			expr->constant.id = hsc_constant_table_deduplicate_basic(&astgen->constant_table, astgen, HSC_DATA_TYPE_U32, &TODO_int_64_support_plz).idx_plus_one;
+			expr->data_type = HSC_DATA_TYPE_U32;
+			return expr;
+		};
+
 		case HSC_DATA_TYPE_VOID:
 		case HSC_DATA_TYPE_BOOL:
 		case HSC_DATA_TYPE_U8:
@@ -3065,8 +3281,6 @@ CURLY_INITIALIZER_END:
 		case HSC_TOKEN_INTRINSIC_TYPE_MAT4X4:
 		case HSC_TOKEN_KEYWORD_STRUCT:
 		case HSC_TOKEN_KEYWORD_UNION:
-		{
-		};
 		default: {
 			HscDataType data_type;
 			if (hsc_astgen_generate_data_type(astgen, &data_type)) {
@@ -3099,8 +3313,8 @@ void hsc_astgen_generate_binary_op(HscAstGen* astgen, HscExprType* binary_op_typ
 			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(MULTIPLY);
 			*precedence_out = 3;
 			break;
-		case HSC_TOKEN_FORWARD_SLASH:
-			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(DIVIDE);
+	case HSC_TOKEN_FORWARD_SLASH:
+		*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(DIVIDE);
 			*precedence_out = 3;
 			break;
 		case HSC_TOKEN_PERCENT:
@@ -3167,6 +3381,10 @@ void hsc_astgen_generate_binary_op(HscAstGen* astgen, HscExprType* binary_op_typ
 			*binary_op_type_out = HSC_EXPR_TYPE_LOGICAL_OR;
 			*precedence_out = 12;
 			break;
+		case HSC_TOKEN_QUESTION_MARK:
+			*binary_op_type_out = HSC_EXPR_TYPE_TERNARY;
+			*precedence_out = 13;
+			break;
 		case HSC_TOKEN_EQUAL:
 			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(ASSIGN);
 			*precedence_out = 14;
@@ -3229,39 +3447,13 @@ void hsc_astgen_generate_binary_op(HscAstGen* astgen, HscExprType* binary_op_typ
 	}
 }
 
-bool hsc_astgen_check_function_args(HscAstGen* astgen, HscFunction* function, HscExpr* call_args_expr, U32 args_count, bool report_errors) {
+void hsc_astgen_ensure_function_args_count(HscAstGen* astgen, HscFunction* function, U32 args_count) {
 	if (args_count < function->params_count) {
-		if (report_errors) {
-			HscString string = hsc_string_table_get(&astgen->string_table, function->identifier_string_id);
-			hsc_astgen_error_2(astgen, &function->location, "not enough arguments, expected '%u' but got '%u' for '%.*s'", function->params_count, args_count, (int)string.size, string.data);
-		}
-		return false;
+		HscString string = hsc_string_table_get(&astgen->string_table, function->identifier_string_id);
+		hsc_astgen_error_2(astgen, &function->location, "not enough arguments, expected '%u' but got '%u' for '%.*s'", function->params_count, args_count, (int)string.size, string.data);
 	} else if (args_count > function->params_count) {
-		if (report_errors) {
-			HscString string = hsc_string_table_get(&astgen->string_table, function->identifier_string_id);
-			hsc_astgen_error_2(astgen, &function->location, "too many arguments, expected '%u' but got '%u' for '%.*s'", function->params_count, args_count, (int)string.size, string.data);
-		}
-		return false;
-	} else {
-		HscVariable* params = &astgen->function_params_and_variables[function->params_start_idx];
-		U8* next_arg_expr_rel_indices = &((U8*)call_args_expr)[2];
-		HscExpr* arg_expr = call_args_expr;
-		bool result = true;
-		astgen->generic_data_type_state = (HscGenericDataTypeState){0};
-		for (U32 i = 0; i < args_count; i += 1) {
-			arg_expr = &arg_expr[next_arg_expr_rel_indices[i]];
-			HscVariable* param = &params[i];
-
-			if (!hsc_data_type_check_compatible(astgen, param->data_type, arg_expr->data_type)) {
-				if (report_errors) {
-					hsc_astgen_error_data_type_mismatch(astgen, &function->location, arg_expr->data_type, param->data_type);
-					result = false;
-				} else {
-					return false;
-				}
-			}
-		}
-		return result;
+		HscString string = hsc_string_table_get(&astgen->string_table, function->identifier_string_id);
+		hsc_astgen_error_2(astgen, &function->location, "too many arguments, expected '%u' but got '%u' for '%.*s'", function->params_count, args_count, (int)string.size, string.data);
 	}
 }
 
@@ -3273,16 +3465,16 @@ U32 hsc_variable_to_string(HscAstGen* astgen, HscVariable* variable, char* buf, 
 		fmt = "%s%.*s %.*s";
 	}
 
-	char* type_qualifiers;
+	char* specifiers;
 	if (variable->is_static) {
-		type_qualifiers = "static ";
+		specifiers = "static ";
 	} else {
 		// no need to handle const since hsc_data_type_string does this at a type level
-		type_qualifiers = "";
+		specifiers = "";
 	}
 	HscString type_name = hsc_data_type_string(astgen, variable->data_type);
 	HscString variable_name = hsc_string_table_get(&astgen->string_table, variable->identifier_string_id);
-	return snprintf(buf, buf_size, fmt, type_qualifiers, (int)type_name.size, type_name.data, (int)variable_name.size, variable_name.data);
+	return snprintf(buf, buf_size, fmt, specifiers, (int)type_name.size, type_name.data, (int)variable_name.size, variable_name.data);
 }
 
 U32 hsc_function_to_string(HscAstGen* astgen, HscFunction* function, char* buf, U32 buf_size, bool color) {
@@ -3309,63 +3501,16 @@ U32 hsc_function_to_string(HscAstGen* astgen, HscFunction* function, char* buf, 
 	return cursor;
 }
 
-bool hsc_astgen_check_function_args_and_resolve_intrinsic_overload(HscAstGen* astgen, U32* function_idx_mut, HscExpr* call_args_expr, U32 args_count, U32 intrinsic_function_token_idx) {
-	if (*function_idx_mut < HSC_FUNCTION_IDX_INTRINSIC_END) {
-		U32 overloads_count = hsc_intrinsic_function_overloads_count[*function_idx_mut];
-		HSC_DEBUG_ASSERT(overloads_count, "internal error: intrinsic function should not have 0 overloads");
-
-		U32 found_overload_id = 0;
-		for (U32 i = 0; i < overloads_count; i += 1) {
-			HscFunction* function = &astgen->functions[*function_idx_mut + i];
-			if (hsc_astgen_check_function_args(astgen, function, call_args_expr, args_count, false)) {
-				found_overload_id = i + 1;
-			}
-		}
-
-		if (found_overload_id) {
-			function_idx_mut += found_overload_id - 1;
-			return true;
-		}
-
-		char* info;
-		if (astgen->print_color) {
-			info = "\x1b[1;97mhere are the available candidates:\n";
-		} else {
-			info = "here are the available candidates:\n";
-		}
-
-		char buf[2048];
-		U32 cursor = 0;
-		cursor += snprintf(buf + cursor, sizeof(buf) - cursor, "%s", info);
-		for (U32 i = 0; i < overloads_count; i += 1) {
-			HscFunction* function = &astgen->functions[*function_idx_mut + i];
-			cursor += snprintf(buf + cursor, sizeof(buf) - cursor, "\t");
-			cursor += hsc_function_to_string(astgen, function, buf + cursor, sizeof(buf) - cursor, astgen->print_color);
-			cursor += snprintf(buf + cursor, sizeof(buf) - cursor, "\n");
-		}
-
-		astgen->error_info = buf;
-		astgen->token_read_idx = intrinsic_function_token_idx;
-		HscFunction* function = &astgen->functions[*function_idx_mut];
-		HscString name = hsc_string_table_get(&astgen->string_table, function->identifier_string_id);
-		hsc_astgen_error_1(astgen, "could not find the overload for the '%.*s' intrinsic function", (int)name.size, name.data);
-		return false;
-	} else {
-		HscFunction* function = &astgen->functions[*function_idx_mut];
-		return hsc_astgen_check_function_args(astgen, function, call_args_expr, args_count, true);
-	}
-}
-
 HscExpr* hsc_astgen_generate_call_expr(HscAstGen* astgen, HscExpr* function_expr) {
 	U32 args_count = 0;
 	HscExpr* call_args_expr = NULL;
 
 	U32 function_idx = function_expr->function.idx;
+	HscFunction* function = hsc_function_get(astgen, HSC_DECL_INIT(HSC_DECL_FUNCTION, function_idx));
 
 	HscToken token = hsc_token_peek(astgen);
-	U32 intrinsic_function_token_idx = astgen->token_read_idx - 2;
 	if (token == HSC_TOKEN_PARENTHESIS_CLOSE) {
-		hsc_astgen_check_function_args_and_resolve_intrinsic_overload(astgen, &function_idx, call_args_expr, args_count, intrinsic_function_token_idx);
+		hsc_astgen_ensure_function_args_count(astgen, function, 0);
 		return NULL;
 	}
 
@@ -3409,12 +3554,17 @@ END_ARG_COUNT: {}
 
 	U32 arg_idx = 0;
 	token = hsc_token_peek(astgen);
-	bool is_constant = true;
+	HscVariable* params_array = &astgen->function_params_and_variables[function->params_start_idx];
+	astgen->generic_data_type_state = (HscGenericDataTypeState){0};
 	while (1) {
 		HscExpr* arg_expr = hsc_astgen_generate_expr(astgen, 0);
+		HscVariable* param = &params_array[arg_idx];
+		HscLocation* other_location = &astgen->token_locations[param->identifier_token_idx];
+		HscDataType param_data_type = HSC_DATA_TYPE_STRIP_CONST(param->data_type);
+		hsc_data_type_ensure_compatible_assignment(astgen, other_location, param_data_type, &arg_expr);
+
 		next_arg_expr_rel_indices[arg_idx] = arg_expr - prev_arg_expr;
 		arg_idx += 1;
-		is_constant &= arg_expr->type == HSC_EXPR_TYPE_CONSTANT;
 
 		token = hsc_token_peek(astgen);
 		if (token != HSC_TOKEN_COMMA) {
@@ -3428,46 +3578,10 @@ END_ARG_COUNT: {}
 		prev_arg_expr = arg_expr;
 	}
 
-	hsc_astgen_check_function_args_and_resolve_intrinsic_overload(astgen, &function_idx, call_args_expr, args_count, intrinsic_function_token_idx);
+	hsc_astgen_ensure_function_args_count(astgen, function, arg_idx);
 
 	HscDataType return_data_type = astgen->functions[function_idx].return_data_type;
 	return_data_type = hsc_data_type_resolve_generic(astgen, return_data_type);
-
-	if (hsc_opt_is_enabled(&astgen->opts, HSC_OPT_CONSTANT_FOLDING) && is_constant) {
-		bool is_single = false;
-		U32 componments_count = 0;
-		switch (function_idx) {
-			case HSC_FUNCTION_IDX_VEC2_SINGLE: is_single = true; componments_count = 2; break;
-			case HSC_FUNCTION_IDX_VEC2_MULTI: is_single = false; componments_count = 2; break;
-			case HSC_FUNCTION_IDX_VEC3_SINGLE: is_single = true; componments_count = 3; break;
-			case HSC_FUNCTION_IDX_VEC3_MULTI: is_single = false; componments_count = 3; break;
-			case HSC_FUNCTION_IDX_VEC4_SINGLE: is_single = true; componments_count = 4; break;
-			case HSC_FUNCTION_IDX_VEC4_MULTI: is_single = false; componments_count = 4; break;
-				break;
-		}
-		if (componments_count) {
-			hsc_constant_table_deduplicate_composite_start(&astgen->constant_table, astgen, return_data_type);
-			HscExpr* arg_expr = call_args_expr;
-			U32 args_count = ((U8*)call_args_expr)[1];
-			U8* next_arg_expr_rel_indices = &((U8*)call_args_expr)[2];
-			for (U32 i = 0; i < args_count; i += 1) {
-				arg_expr = &arg_expr[next_arg_expr_rel_indices[i]];
-				HscConstantId constant_id = { .idx_plus_one = arg_expr->constant.id };
-				U32 repeat_count = is_single ? componments_count : 1;
-				for (U32 j = 0; j < repeat_count; j += 1) {
-					hsc_constant_table_deduplicate_composite_add(&astgen->constant_table, constant_id);
-				}
-			}
-			HscConstantId constant_id = hsc_constant_table_deduplicate_composite_end(&astgen->constant_table);
-
-			//
-			// recycle the function expression and change it into a constant
-			function_expr->type = HSC_EXPR_TYPE_CONSTANT;
-			function_expr->constant.id = constant_id.idx_plus_one;
-			function_expr->data_type = return_data_type;
-			return function_expr;
-		}
-	}
 
 	function_expr->function.idx = function_idx;
 
@@ -3508,7 +3622,7 @@ HscExpr* hsc_astgen_generate_field_access_expr(HscAstGen* astgen, HscExpr* left_
 	HscCompoundDataType* compound_data_type = hsc_compound_data_type_get(astgen, left_expr->data_type);
 
 	HscStringId identifier_string_id = hsc_token_value_next(astgen).string_id;
-	HscCompoundField* field = hsc_compound_data_type_find_field_by_name_checked(astgen, left_expr->data_type, compound_data_type, identifier_string_id);
+	hsc_compound_data_type_find_field_by_name_checked(astgen, left_expr->data_type, compound_data_type, identifier_string_id);
 
 	hsc_token_next(astgen);
 
@@ -3530,8 +3644,35 @@ HscExpr* hsc_astgen_generate_field_access_expr(HscAstGen* astgen, HscExpr* left_
 	return field_access_expr;
 }
 
+HscExpr* hsc_astgen_generate_ternary_expr(HscAstGen* astgen, HscExpr* cond_expr) {
+	hsc_data_type_ensure_is_condition(astgen, cond_expr->data_type);
+
+	HscExpr* true_expr = hsc_astgen_generate_expr(astgen, 0);
+
+	HscToken token = hsc_token_peek(astgen);
+	if (token != HSC_TOKEN_COLON) {
+		hsc_astgen_error_1(astgen, "expected a ':' for the false side of the ternary expression");
+	}
+	token = hsc_token_next(astgen);
+
+	HscExpr* false_expr = hsc_astgen_generate_expr(astgen, 0);
+
+	HscLocation* other_location = NULL;
+	if (!hsc_data_type_check_compatible_arithmetic(astgen, &true_expr, &false_expr)) {
+		HscString true_data_type_name = hsc_data_type_string(astgen, true_expr->data_type);
+		HscString false_data_type_name = hsc_data_type_string(astgen, false_expr->data_type);
+		hsc_astgen_error_2(astgen, other_location, "type mismatch '%.*s' and '%.*s'", (int)false_data_type_name.size, false_data_type_name.data, (int)true_data_type_name.size, true_data_type_name.data);
+	}
+
+	HscExpr* expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_TERNARY);
+	expr->ternary.cond_expr_rel_idx = expr - cond_expr;
+	expr->ternary.true_expr_rel_idx = expr - true_expr;
+	expr->ternary.false_expr_rel_idx = expr - false_expr;
+	expr->data_type = true_expr->data_type;
+	return expr;
+}
+
 HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
-	U32 expr_idx = astgen->exprs_count;
 	U32 callee_token_idx = astgen->token_read_idx;
 	HscExpr* left_expr = hsc_astgen_generate_unary_expr(astgen);
 	if (left_expr->type == HSC_EXPR_TYPE_DATA_TYPE) {
@@ -3542,6 +3683,7 @@ HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 		HscExprType binary_op_type;
 		U32 precedence;
 		bool is_assignment;
+		HscToken operator_token = hsc_token_peek(astgen);
 		hsc_astgen_generate_binary_op(astgen, &binary_op_type, &precedence, &is_assignment);
 		if (binary_op_type == HSC_EXPR_TYPE_NONE || (min_precedence && min_precedence < precedence)) {
 			return left_expr;
@@ -3571,18 +3713,22 @@ HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 			}
 
 			left_expr = hsc_astgen_generate_field_access_expr(astgen, left_expr);
+		} else if (binary_op_type == HSC_EXPR_TYPE_TERNARY) {
+			left_expr = hsc_astgen_generate_ternary_expr(astgen, left_expr);
 		} else {
 			HscExpr* right_expr = hsc_astgen_generate_expr(astgen, precedence);
+
+			HscLocation* other_location = NULL;
+			if (is_assignment) {
+				hsc_data_type_ensure_compatible_assignment(astgen, other_location, left_expr->data_type, &right_expr);
+			} else {
+				hsc_data_type_ensure_compatible_arithmetic(astgen, other_location, &left_expr, &right_expr, operator_token);
+			}
 
 			HscDataType data_type;
 			if (HSC_EXPR_TYPE_BINARY_OP(EQUAL) <= binary_op_type && binary_op_type <= HSC_EXPR_TYPE_LOGICAL_OR) {
 				data_type = HSC_DATA_TYPE_BOOL;
 			} else {
-				if (!hsc_data_type_check_compatible(astgen, hsc_typedef_resolve(astgen, left_expr->data_type), hsc_typedef_resolve(astgen, right_expr->data_type))) {
-					HscString left_data_type_name = hsc_data_type_string(astgen, left_expr->data_type);
-					HscString right_data_type_name = hsc_data_type_string(astgen, right_expr->data_type);
-					hsc_astgen_error_1(astgen, "type mismatch '%.*s' is does not implicitly cast to '%.*s'", (int)left_data_type_name.size, left_data_type_name.data, (int)right_data_type_name.size, right_data_type_name.data);
-				}
 				data_type = left_expr->data_type; // TODO make implicit conversions explicit in the AST and make the error above work correctly
 			}
 			if (HSC_DATA_TYPE_IS_CONST(left_expr->data_type)) {
@@ -3594,8 +3740,8 @@ HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 				left_expr->type == HSC_EXPR_TYPE_CONSTANT &&
 				right_expr->type == HSC_EXPR_TYPE_CONSTANT
 			) {
-				HscConstantId left_constant_id = { .idx_plus_one = left_expr->constant.id };
-				HscConstantId right_constant_id = { .idx_plus_one = right_expr->constant.id };
+				//HscConstantId left_constant_id = { .idx_plus_one = left_expr->constant.id };
+				//HscConstantId right_constant_id = { .idx_plus_one = right_expr->constant.id };
 				HSC_ABORT("TODO CONSTANT FOLDING");
 				//
 				// combine left_expr and right_expr and store them in the left_expr
@@ -3636,10 +3782,7 @@ HscExpr* hsc_astgen_generate_cond_expr(HscAstGen* astgen) {
 	token = hsc_token_next(astgen);
 
 	HscExpr* cond_expr = hsc_astgen_generate_expr(astgen, 0);
-	if (!hsc_data_type_is_condition(astgen, cond_expr->data_type)) {
-		HscString data_type_name = hsc_data_type_string(astgen, cond_expr->data_type);
-		hsc_astgen_error_1(astgen, "the condition expression must be convertable to a 'bool' but got '%.*s'", (int)data_type_name.size, data_type_name.data);
-	}
+	hsc_data_type_ensure_is_condition(astgen, cond_expr->data_type);
 
 	token = hsc_token_peek(astgen);
 	if (token != HSC_TOKEN_PARENTHESIS_CLOSE) {
@@ -3707,28 +3850,66 @@ HscDataType hsc_astgen_generate_variable_decl_array(HscAstGen* astgen, HscDataTy
 	return data_type;
 }
 
-HscToken hsc_astgen_consume_type_qualifiers(HscAstGen* astgen) {
+HscToken hsc_astgen_consume_specifiers(HscAstGen* astgen) {
 	HscToken token = hsc_token_peek(astgen);
 	while (1) {
 		HscAstGenFlags flag = 0;
 		switch (token) {
 			case HSC_TOKEN_KEYWORD_STATIC: flag = HSC_ASTGEN_FLAGS_FOUND_STATIC; break;
 			case HSC_TOKEN_KEYWORD_CONST: flag = HSC_ASTGEN_FLAGS_FOUND_CONST; break;
+			case HSC_TOKEN_KEYWORD_INLINE: flag = HSC_ASTGEN_FLAGS_FOUND_INLINE; break;
+			case HSC_TOKEN_KEYWORD_NO_RETURN: flag = HSC_ASTGEN_FLAGS_FOUND_NO_RETURN; break;
+			case HSC_TOKEN_KEYWORD_AUTO: break;
+			case HSC_TOKEN_KEYWORD_VOLATILE:
+			case HSC_TOKEN_KEYWORD_EXTERN:
+				hsc_astgen_error_1(astgen, "'%s' is currently unsupported", hsc_token_strings[token]);
 			default: return token;
 		}
 
 		if (astgen->flags & flag) {
-			hsc_astgen_error_1(astgen, "'%s' has already been used for this variable declaration", hsc_token_strings[token]);
+			hsc_astgen_error_1(astgen, "'%s' has already been used for this declaration", hsc_token_strings[token]);
 		}
 		astgen->flags |= flag;
 		token = hsc_token_next(astgen);
 	}
 }
 
+void _hsc_astgen_ensure_no_unused_specifiers(HscAstGen* astgen, char* what) {
+	if (astgen->flags & (HSC_ASTGEN_FLAGS_FOUND_STATIC | HSC_ASTGEN_FLAGS_FOUND_CONST | HSC_ASTGEN_FLAGS_FOUND_INLINE)) {
+		const char* message = NULL;
+		if (astgen->flags & HSC_ASTGEN_FLAGS_FOUND_STATIC) {
+			message = "the 'static' keyword was used, so we are expecting %s for a declaration but got '%s'";
+		} else if (astgen->flags & HSC_ASTGEN_FLAGS_FOUND_CONST) {
+			message = "the 'const' keyword was used, so we are expecting %s to declare a variable but got '%s'";
+		} else if (astgen->flags & HSC_ASTGEN_FLAGS_FOUND_INLINE) {
+			message = "the 'inline' keyword was used, so we are expecting %s to declare a function but got '%s'";
+		} else if (astgen->flags & HSC_ASTGEN_FLAGS_FOUND_NO_RETURN) {
+			message = "the '_Noreturn' keyword was used, so we are expecting %s to declare a function but got '%s'";
+		}
+		hsc_astgen_error_1(astgen, message, what, hsc_token_strings[hsc_token_peek(astgen)]);
+	}
+}
+
+void hsc_astgen_ensure_no_unused_specifiers_data_type(HscAstGen* astgen) {
+	_hsc_astgen_ensure_no_unused_specifiers(astgen, "a data type");
+}
+
+void hsc_astgen_ensure_no_unused_specifiers_identifier(HscAstGen* astgen) {
+	_hsc_astgen_ensure_no_unused_specifiers(astgen, "an identifier");
+}
+
 U32 hsc_astgen_generate_variable_decl(HscAstGen* astgen, bool is_global, HscDataType* data_type_mut, HscExpr** init_expr_out) {
 	HscToken token = hsc_token_peek(astgen);
 	HSC_DEBUG_ASSERT(token == HSC_TOKEN_IDENT, "internal error: expected an identifier for a variable declaration");
 	HscStringId identifier_string_id = hsc_token_value_next(astgen).string_id;
+
+	if (astgen->flags & HSC_ASTGEN_FLAGS_FOUND_INLINE) {
+		hsc_astgen_error_1(astgen, "the 'inline' keyword cannot be used on this variable declaration as it is a function specifier");
+	}
+
+	if (astgen->flags & HSC_ASTGEN_FLAGS_FOUND_NO_RETURN) {
+		hsc_astgen_error_1(astgen, "the '_Noreturn' keyword cannot be used on this variable declaration as it is a function specifier");
+	}
 
 	U32 existing_variable_id = hsc_astgen_variable_stack_find(astgen, identifier_string_id);
 	if (existing_variable_id) {
@@ -3786,7 +3967,8 @@ U32 hsc_astgen_generate_variable_decl(HscAstGen* astgen, bool is_global, HscData
 			astgen->assign_data_type = variable->data_type;
 			HscExpr* init_expr = hsc_astgen_generate_expr(astgen, 0);
 			HscLocation* other_location = NULL; // TODO
-			hsc_data_type_ensure_compatible(astgen, other_location, variable->data_type, init_expr->data_type);
+			HscDataType variable_data_type = HSC_DATA_TYPE_STRIP_CONST(variable->data_type);
+			hsc_data_type_ensure_compatible_assignment(astgen, other_location, variable_data_type, &init_expr);
 			astgen->assign_data_type = HSC_DATA_TYPE_VOID;
 
 			if (variable->is_static) {
@@ -4037,7 +4219,7 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 				hsc_astgen_error_1(astgen, "the value of a switch case statement must be a constant");
 			}
 			HscLocation* other_location = NULL; // TODO: the switch condition expr
-			hsc_data_type_ensure_compatible(astgen, NULL, astgen->switch_state.switch_condition_type, expr->data_type);
+			hsc_data_type_ensure_compatible_assignment(astgen, other_location, astgen->switch_state.switch_condition_type, &expr);
 
 			expr->type = HSC_EXPR_TYPE_STMT_CASE;
 			expr->is_stmt_block_entry = true;
@@ -4109,7 +4291,7 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 			return NULL;
 		case HSC_TOKEN_KEYWORD_STATIC:
 		case HSC_TOKEN_KEYWORD_CONST:
-			hsc_astgen_consume_type_qualifiers(astgen);
+			hsc_astgen_consume_specifiers(astgen);
 			goto EXPR;
 		default: {
 EXPR: {}
@@ -4119,18 +4301,18 @@ EXPR: {}
 				switch (token) {
 					case HSC_TOKEN_KEYWORD_STATIC:
 					case HSC_TOKEN_KEYWORD_CONST:
-						token = hsc_astgen_consume_type_qualifiers(astgen);
+						token = hsc_astgen_consume_specifiers(astgen);
 						break;
 				}
 
 				if (token == HSC_TOKEN_IDENT) {
 					expr = hsc_astgen_generate_variable_decl_expr(astgen, expr->data_type);
 				} else {
-					hsc_astgen_ensure_no_unused_type_qualifiers_identifier(astgen);
+					hsc_astgen_ensure_no_unused_specifiers_identifier(astgen);
 					expr = NULL;
 				}
 			} else {
-				hsc_astgen_ensure_no_unused_type_qualifiers_data_type(astgen);
+				hsc_astgen_ensure_no_unused_specifiers_data_type(astgen);
 			}
 
 			hsc_astgen_ensure_semicolon(astgen);
@@ -4283,7 +4465,7 @@ void hsc_astgen_generate(HscAstGen* astgen) {
 				break;
 			case HSC_TOKEN_KEYWORD_STATIC:
 			case HSC_TOKEN_KEYWORD_CONST:
-				hsc_astgen_consume_type_qualifiers(astgen);
+				hsc_astgen_consume_specifiers(astgen);
 				// fallthrough
 			default: {
 				HscDataType data_type;
@@ -4292,18 +4474,18 @@ void hsc_astgen_generate(HscAstGen* astgen) {
 					switch (token) {
 						case HSC_TOKEN_KEYWORD_STATIC:
 						case HSC_TOKEN_KEYWORD_CONST:
-							token = hsc_astgen_consume_type_qualifiers(astgen);
+							token = hsc_astgen_consume_specifiers(astgen);
 							break;
 					}
 					if (token == HSC_TOKEN_IDENT) {
 						hsc_astgen_generate_variable_decl(astgen, true, &data_type, NULL);
 					} else {
-						hsc_astgen_ensure_no_unused_type_qualifiers_identifier(astgen);
+						hsc_astgen_ensure_no_unused_specifiers_identifier(astgen);
 					}
 					hsc_astgen_ensure_semicolon(astgen);
 					break;
 				} else {
-					hsc_astgen_ensure_no_unused_type_qualifiers_data_type(astgen);
+					hsc_astgen_ensure_no_unused_specifiers_data_type(astgen);
 				}
 				HSC_ABORT("TODO at scope see if this token is a type and varify it is a function, and support enums found token '%s'", hsc_token_strings[token]);
 			};
@@ -4356,7 +4538,6 @@ void hsc_tokens_print(HscAstGen* astgen, FILE* f) {
 		HscToken token = astgen->tokens[i];
 		HscTokenValue value;
 		HscString string;
-		HscDataType data_type;
 		switch (token) {
 			case HSC_TOKEN_IDENT:
 				value = astgen->token_values[token_value_idx];
@@ -4364,13 +4545,12 @@ void hsc_tokens_print(HscAstGen* astgen, FILE* f) {
 				string = hsc_string_table_get(&astgen->string_table, value.string_id);
 				fprintf(f, "%s -> %.*s\n", hsc_token_strings[token], (int)string.size, string.data);
 				break;
-			case HSC_TOKEN_LIT_U32: data_type = HSC_DATA_TYPE_U32; goto PRINT_LIT;
-			case HSC_TOKEN_LIT_U64: data_type = HSC_DATA_TYPE_U64; goto PRINT_LIT;
-			case HSC_TOKEN_LIT_S32: data_type = HSC_DATA_TYPE_S32; goto PRINT_LIT;
-			case HSC_TOKEN_LIT_S64: data_type = HSC_DATA_TYPE_S64; goto PRINT_LIT;
-			case HSC_TOKEN_LIT_F32: data_type = HSC_DATA_TYPE_F32; goto PRINT_LIT;
-			case HSC_TOKEN_LIT_F64: data_type = HSC_DATA_TYPE_F64; goto PRINT_LIT;
-PRINT_LIT:
+			case HSC_TOKEN_LIT_U32:
+			case HSC_TOKEN_LIT_U64:
+			case HSC_TOKEN_LIT_S32:
+			case HSC_TOKEN_LIT_S64:
+			case HSC_TOKEN_LIT_F32:
+			case HSC_TOKEN_LIT_F64:
 				value = astgen->token_values[token_value_idx];
 				hsc_constant_print(astgen, value.constant_id, stdout);
 				fprintf(f, "\n");
@@ -4441,11 +4621,17 @@ CONSTANT: {
 		case HSC_EXPR_TYPE_UNARY_OP(BIT_NOT): expr_name = "EXPR_BIT_NOT"; goto UNARY;
 		case HSC_EXPR_TYPE_UNARY_OP(PLUS): expr_name = "EXPR_PLUS"; goto UNARY;
 		case HSC_EXPR_TYPE_UNARY_OP(NEGATE): expr_name = "EXPR_NEGATE"; goto UNARY;
-		case HSC_EXPR_TYPE_CAST: expr_name = "EXPR_CAST"; goto UNARY;
 UNARY:
 		{
 			fprintf(f, "%s: {\n", expr_name);
 			HscExpr* unary_expr = &expr[expr->unary.expr_rel_idx];
+			hsc_astgen_print_expr(astgen, unary_expr, indent + 1, false, f);
+			fprintf(f, "%.*s}", indent, indent_chars);
+			break;
+		};
+		case HSC_EXPR_TYPE_CAST: {
+			fprintf(f, "EXPR_CAST: {\n");
+			HscExpr* unary_expr = expr - expr->unary.expr_rel_idx;
 			hsc_astgen_print_expr(astgen, unary_expr, indent + 1, false, f);
 			fprintf(f, "%.*s}", indent, indent_chars);
 			break;
@@ -4656,6 +4842,24 @@ BINARY:
 			fprintf(f, "GLOBAL_VARIABLE(#%u): %s", expr->variable.idx, buf);
 			break;
 		};
+		case HSC_EXPR_TYPE_TERNARY: {
+			fprintf(f, "%s: {\n", "STMT_TERNARY");
+
+			HscExpr* cond_expr = expr - expr->ternary.cond_expr_rel_idx;
+			fprintf(f, "%.*sCONDITION_EXPR:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, cond_expr, indent + 2, false, f);
+
+			HscExpr* true_stmt = expr - expr->ternary.true_expr_rel_idx;
+			fprintf(f, "%.*sTRUE_STMT:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, true_stmt, indent + 2, false, f);
+
+			HscExpr* false_stmt = expr - expr->ternary.false_expr_rel_idx;
+			fprintf(f, "%.*sFALSE_STMT:\n", indent + 1, indent_chars);
+			hsc_astgen_print_expr(astgen, false_stmt, indent + 2, false, f);
+
+			fprintf(f, "%.*s}", indent, indent_chars);
+			break;
+		};
 		default:
 			HSC_ABORT("unhandle expr type %u\n", expr->type);
 	}
@@ -4730,7 +4934,6 @@ void hsc_astgen_print_ast(HscAstGen* astgen, FILE* f) {
 
 	for (U32 variable_idx = 0; variable_idx < astgen->global_variables_count; variable_idx += 1) {
 		HscVariable* variable = &astgen->global_variables[variable_idx];
-		HscString name = hsc_string_table_get(&astgen->string_table, variable->identifier_string_id);
 
 		char buf[1024];
 		hsc_variable_to_string(astgen, variable, buf, sizeof(buf), false);
@@ -4841,7 +5044,6 @@ void hsc_ir_remove_last_instruction(HscIR* ir) {
 	HscIRBasicBlock* basic_block = &ir->basic_blocks[ir->basic_blocks_count - 1];
 
 	U16 operands_count = ir->instructions[ir->instructions_count - 1].operands_count;
-	HscIROperand* operands = &ir->operands[ir->operands_count - operands_count];
 
 	ir->instructions_count -= 1;
 	ir->operands_count -= operands_count;
@@ -4896,7 +5098,6 @@ U16 hsc_ir_basic_block_idx(HscIR* ir, HscIRFunction* ir_function, HscIRBasicBloc
 }
 
 HscDataType hsc_ir_operand_data_type(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIROperand ir_operand) {
-	U32 word;
 	switch (ir_operand & 0xff) {
 		case HSC_IR_OPERAND_VALUE: {
 			HscIRValue* value = &ir->values[ir_function->values_start_idx + HSC_IR_OPERAND_VALUE_IDX(ir_operand)];
@@ -5273,7 +5474,7 @@ UNARY:
 				case_idx += 1;
 			}
 
-			HscIROperand* default_branch_operands;
+			//HscIROperand* default_branch_operands;
 			if (expr->alt_next_expr_rel_idx) {
 				HscExpr* default_case_expr = &expr[expr->alt_next_expr_rel_idx];
 
@@ -5366,15 +5567,17 @@ UNARY:
 			cond_branch_operands[1] = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, loop_basic_block));
 
 			HscIROpCode last_op_code = ir->instructions[ir->instructions_count - 1].op_code;
-			HscIROperand* loop_branch_operands;
-			if (last_op_code != HSC_IR_OP_CODE_BRANCH || last_op_code != HSC_IR_OP_CODE_FUNCTION_RETURN) {
+			HscIROperand* loop_branch_operands = NULL;
+			if (last_op_code != HSC_IR_OP_CODE_BRANCH && last_op_code != HSC_IR_OP_CODE_FUNCTION_RETURN) {
 				loop_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
 				hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, loop_branch_operands, 1);
 			}
 
 			basic_block = hsc_ir_add_basic_block(ir, ir_function);
 			HscIROperand continue_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
-			loop_branch_operands[0] = continue_basic_block_operand;
+			if (loop_branch_operands) {
+				loop_branch_operands[0] = continue_basic_block_operand;
+			}
 			loop_merge_operands[1] = continue_basic_block_operand;
 			if (inc_expr) {
 				basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, inc_expr);
@@ -5656,7 +5859,7 @@ UNARY:
 			break;
 		};
 		case HSC_EXPR_TYPE_CAST: {
-			HscExpr* unary_expr = &expr[expr->unary.expr_rel_idx];
+			HscExpr* unary_expr = expr - expr->unary.expr_rel_idx;
 			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, unary_expr);
 
 			HscBasicTypeClass dst_type_class = hsc_basic_type_class(HSC_DATA_TYPE_SCALAR(expr->data_type));
@@ -5749,6 +5952,31 @@ UNARY:
 			}
 			break;
 		};
+		case HSC_EXPR_TYPE_TERNARY: {
+			HscExpr* cond_expr = expr - expr->ternary.cond_expr_rel_idx;
+			basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, cond_expr);
+			HscIROperand cond_operand = ir->last_operand;
+
+			HscExpr* true_expr = expr - expr->ternary.true_expr_rel_idx;
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, true_expr);
+			HscIROperand true_operand = ir->last_operand;
+
+			HscExpr* false_expr = expr - expr->ternary.false_expr_rel_idx;
+			basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, false_expr);
+			HscIROperand false_operand = ir->last_operand;
+
+			HscIROperand* operands = hsc_ir_add_operands_many(ir, ir_function, 4);
+			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_SELECT, operands, 4);
+
+			U16 return_value_idx = hsc_ir_add_value(ir, ir_function, expr->data_type);
+			operands[0] = HSC_IR_OPERAND_VALUE_INIT(return_value_idx);
+			operands[1] = cond_operand;
+			operands[2] = true_operand;
+			operands[3] = false_operand;
+
+			ir->last_operand = operands[0];
+			break;
+		};
 		default:
 			HSC_ABORT("unhandle expr type %u\n", expr->type);
 	}
@@ -5808,7 +6036,6 @@ void hsc_ir_print_operand(HscIR* ir, HscAstGen* astgen, HscIROperand operand, FI
 void hsc_ir_print(HscIR* ir, HscAstGen* astgen, FILE* f) {
 	HscConstantTable* constant_table = &astgen->constant_table;
 	for (U32 idx = 0; idx < constant_table->entries_count; idx += 1) {
-		HscConstantEntry* entry = &constant_table->entries[idx];
 		fprintf(f, "Constant(c%u): ", idx);
 		HscConstantId constant_id = { .idx_plus_one = idx + 1 };
 		hsc_constant_print(astgen, constant_id, stdout);
@@ -6013,6 +6240,19 @@ BINARY_OP:
 					};
 					case HSC_IR_OP_CODE_UNREACHABLE: {
 						fprintf(f, "\t\tOP_UNREACHABLE:\n");
+						break;
+					};
+					case HSC_IR_OP_CODE_SELECT: {
+						HscIROperand* operands = &ir->operands[ir_function->operands_start_idx + (U32)instruction->operands_start_idx];
+						fprintf(f, "\t\t");
+						hsc_ir_print_operand(ir, astgen, operands[0], f);
+						fprintf(f, " = OP_SELECT: ");
+						hsc_ir_print_operand(ir, astgen, operands[1], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[2], f);
+						fprintf(f, ", ");
+						hsc_ir_print_operand(ir, astgen, operands[3], f);
+						fprintf(f, "\n");
 						break;
 					};
 					default:
@@ -6475,7 +6715,7 @@ void hsc_spirv_generate_pointer_type_input(HscCompiler* c, HscDataType data_type
 	U32 id = c->spirv.pointer_type_inputs_base_id + data_type;
 
 	hsc_spirv_instr_start(c, HSC_SPIRV_OP_TYPE_POINTER);
-	hsc_spirv_instr_add_result_operand(c);
+	hsc_spirv_instr_add_operand(c, id);
 	hsc_spirv_instr_add_operand(c, HSC_SPIRV_STORAGE_CLASS_INPUT);
 	hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, data_type));
 	hsc_spirv_instr_end(c);
@@ -6541,6 +6781,16 @@ U32 hsc_spirv_generate_variable_type(HscCompiler* c, HscDataType data_type, bool
 	}
 
 	return type_id;
+}
+
+void hsc_spirv_generate_select(HscCompiler* c, U32 result_spirv_operand, HscDataType dst_type, U32 cond_value_spirv_operand, U32 a_spirv_operand, U32 b_spirv_operand) {
+	hsc_spirv_instr_start(c, HSC_SPIRV_OP_SELECT);
+	hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, dst_type));
+	hsc_spirv_instr_add_operand(c, result_spirv_operand);
+	hsc_spirv_instr_add_operand(c, cond_value_spirv_operand);
+	hsc_spirv_instr_add_operand(c, a_spirv_operand);
+	hsc_spirv_instr_add_operand(c, b_spirv_operand);
+	hsc_spirv_instr_end(c);
 }
 
 void hsc_spirv_generate_convert(HscCompiler* c, HscSpirvOp spirv_convert_op, U32 result_spirv_operand, HscDataType dst_type, U32 value_spirv_operand) {
@@ -6641,7 +6891,7 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 			// function parameters
 			for (U32 variable_idx = 0; variable_idx < function->params_count; variable_idx += 1) {
 				HscVariable* variable = &c->astgen.function_params_and_variables[function->params_start_idx + variable_idx];
-				U32 type_spirv_id = hsc_spirv_generate_variable_type(c, variable->data_type, false);
+				hsc_spirv_generate_variable_type(c, variable->data_type, false);
 			}
 		}
 
@@ -6649,7 +6899,7 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 		// local variables
 		for (U32 variable_idx = function->params_count; variable_idx < function->variables_count; variable_idx += 1) {
 			HscVariable* variable = &c->astgen.function_params_and_variables[function->params_start_idx + variable_idx];
-			U32 type_spirv_id = hsc_spirv_generate_variable_type(c, variable->data_type, variable->is_static);
+			hsc_spirv_generate_variable_type(c, variable->data_type, variable->is_static);
 		}
 	}
 
@@ -6889,8 +7139,19 @@ SWITCH_SINGLE_WORD_LITERAL:
 					U32 result_spirv_operand = hsc_spirv_convert_operand(c, operands[0]);
 					U32 src_spirv_operand = hsc_spirv_convert_operand(c, operands[2]);
 					switch (dst_type_class) {
+						///////////////////////////////////////
+						// case HSC_BASIC_TYPE_CLASS_BOOL:
+						// ^^ this is handled in the HscIR, see hsc_ir_generate_convert_to_bool
+						///////////////////////////////////////
+
 						case HSC_BASIC_TYPE_CLASS_UINT:
 							switch (src_type_class) {
+								case HSC_BASIC_TYPE_CLASS_BOOL: {
+									U32 true_spirv_operand = c->spirv.constant_base_id + c->astgen.basic_type_one_constant_ids[dst_type].idx_plus_one - 1;
+									U32 false_spirv_operand = c->spirv.constant_base_id + c->astgen.basic_type_zero_constant_ids[dst_type].idx_plus_one - 1;
+									hsc_spirv_generate_select(c, result_spirv_operand, dst_type, src_spirv_operand, true_spirv_operand, false_spirv_operand);
+									break;
+								};
 								case HSC_BASIC_TYPE_CLASS_UINT:
 									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_U_CONVERT, result_spirv_operand, dst_type, src_spirv_operand);
 									break;
@@ -6913,6 +7174,12 @@ SWITCH_SINGLE_WORD_LITERAL:
 							break;
 						case HSC_BASIC_TYPE_CLASS_SINT:
 							switch (src_type_class) {
+								case HSC_BASIC_TYPE_CLASS_BOOL: {
+									U32 true_spirv_operand = c->spirv.constant_base_id + c->astgen.basic_type_one_constant_ids[dst_type].idx_plus_one - 1;
+									U32 false_spirv_operand = c->spirv.constant_base_id + c->astgen.basic_type_zero_constant_ids[dst_type].idx_plus_one - 1;
+									hsc_spirv_generate_select(c, result_spirv_operand, dst_type, src_spirv_operand, true_spirv_operand, false_spirv_operand);
+									break;
+								};
 								case HSC_BASIC_TYPE_CLASS_UINT: {
 									HscDataType unsigned_dst_type = hsc_data_type_signed_to_unsigned(dst_type);
 									if (unsigned_dst_type != src_type) {
@@ -6936,6 +7203,12 @@ SWITCH_SINGLE_WORD_LITERAL:
 							break;
 						case HSC_BASIC_TYPE_CLASS_FLOAT:
 							switch (src_type_class) {
+								case HSC_BASIC_TYPE_CLASS_BOOL: {
+									U32 true_spirv_operand = c->spirv.constant_base_id + c->astgen.basic_type_one_constant_ids[dst_type].idx_plus_one - 1;
+									U32 false_spirv_operand = c->spirv.constant_base_id + c->astgen.basic_type_zero_constant_ids[dst_type].idx_plus_one - 1;
+									hsc_spirv_generate_select(c, result_spirv_operand, dst_type, src_spirv_operand, true_spirv_operand, false_spirv_operand);
+									break;
+								};
 								case HSC_BASIC_TYPE_CLASS_UINT:
 									hsc_spirv_generate_convert(c, HSC_SPIRV_OP_CONVERT_U_TO_F, result_spirv_operand, dst_type, src_spirv_operand);
 									break;
@@ -6979,6 +7252,19 @@ SWITCH_SINGLE_WORD_LITERAL:
 					hsc_spirv_instr_start(c, HSC_SPIRV_OP_UNREACHABLE);
 					hsc_spirv_instr_end(c);
 					break;
+				case HSC_IR_OP_CODE_SELECT: {
+					U32 return_value_idx = HSC_IR_OPERAND_VALUE_IDX(operands[0]);
+					HscIRValue* return_value = &c->ir.values[ir_function->values_start_idx + return_value_idx];
+
+					hsc_spirv_instr_start(c, HSC_SPIRV_OP_SELECT);
+					hsc_spirv_instr_add_converted_operand(c, return_value->data_type);
+					hsc_spirv_instr_add_converted_operand(c, operands[0]);
+					hsc_spirv_instr_add_converted_operand(c, operands[1]);
+					hsc_spirv_instr_add_converted_operand(c, operands[2]);
+					hsc_spirv_instr_add_converted_operand(c, operands[3]);
+					hsc_spirv_instr_end(c);
+					break;
+				};
 				default:
 					HSC_ABORT("unhandled instruction '%u'", instruction->op_code);
 			}
@@ -7087,7 +7373,7 @@ void hsc_spirv_generate_basic_type_constants(HscCompiler* c) {
 			hsc_spirv_instr_add_operand(c, c->spirv.constant_base_id + idx);
 			hsc_spirv_instr_end(c);
 		} else if (entry->data_type == HSC_DATA_TYPE_BOOL) {
-			bool is_true = c->astgen.true_constant_id.idx_plus_one == idx + 1;
+			bool is_true = c->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_BOOL].idx_plus_one == idx + 1;
 			hsc_spirv_instr_start(c, is_true ? HSC_SPIRV_OP_CONSTANT_TRUE : HSC_SPIRV_OP_CONSTANT_FALSE);
 			hsc_spirv_instr_add_operand(c, hsc_spirv_resolve_type_id(c, HSC_DATA_TYPE_BOOL));
 			hsc_spirv_instr_add_operand(c, c->spirv.constant_base_id + idx);
@@ -7269,7 +7555,7 @@ void hsc_spirv_generate(HscCompiler* c) {
 	// generate the global variable types before we make the global variables as the global variables have a linear spirv id range
 	for (U32 global_variable_idx = 0; global_variable_idx < c->astgen.global_variables_count; global_variable_idx += 1) {
 		HscVariable* variable = &c->astgen.global_variables[global_variable_idx];
-		U32 type_spirv_id = hsc_spirv_generate_variable_type(c, variable->data_type, true);
+		hsc_spirv_generate_variable_type(c, variable->data_type, true);
 	}
 
 	c->spirv.global_variable_base_spirv_id = c->spirv.next_id;
@@ -7301,13 +7587,81 @@ void hsc_spirv_generate(HscCompiler* c) {
 // ===========================================
 
 void hsc_compiler_init(HscCompiler* compiler, HscCompilerSetup* setup) {
+	compiler->available_basic_types = 0xffff;
+	compiler->available_basic_types &= ~( // remove support for these types for now, this is because they require SPIR-V capaibilities/vulkan features
+		(1 << HSC_DATA_TYPE_U8)  |
+		(1 << HSC_DATA_TYPE_S8)  |
+		(1 << HSC_DATA_TYPE_U16) |
+		(1 << HSC_DATA_TYPE_S16) |
+		(1 << HSC_DATA_TYPE_F16) |
+		(1 << HSC_DATA_TYPE_U64) |
+		(1 << HSC_DATA_TYPE_S64) |
+		(1 << HSC_DATA_TYPE_F64)
+	);
+
 	hsc_constant_table_init(&compiler->astgen.constant_table, setup->string_table_data_cap, setup->string_table_entries_cap);
 	{
-		U8 value = false;
-		compiler->astgen.false_constant_id = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_BOOL, &value);
-		value = true;
-		compiler->astgen.true_constant_id = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_BOOL, &value);
-		compiler->astgen.s32_zero_constant_id = hsc_constant_table_deduplicate_zero(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_S32);
+		for (HscDataType data_type = HSC_DATA_TYPE_BOOL; data_type < HSC_DATA_TYPE_BASIC_COUNT; data_type += 1) {
+			if (!(compiler->available_basic_types & (1 << data_type))) {
+				continue;
+			}
+			compiler->astgen.basic_type_zero_constant_ids[data_type] = hsc_constant_table_deduplicate_zero(&compiler->astgen.constant_table, &compiler->astgen, data_type);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_BOOL)) {
+			U8 one = 1;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_BOOL] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_BOOL, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_U8)) {
+			U8 one = 1;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_U8] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_U8, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_U16)) {
+			U16 one = 1;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_U16] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_U16, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_U32)) {
+			U32 one = 1;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_U32] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_U32, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_U64)) {
+			U64 one = 1;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_U64] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_U64, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_S8)) {
+			S8 one = 1;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_S8] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_S8, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_S16)) {
+			S16 one = 1;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_S16] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_S16, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_S32)) {
+			S32 one = 1;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_S32] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_S32, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_S64)) {
+			S64 one = 1;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_S64] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_S64, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_F32)) {
+			F32 one = 1.f;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_F32] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_F32, &one);
+		}
+
+		if (compiler->available_basic_types & (1 << HSC_DATA_TYPE_F64)) {
+			F64 one = 1.f;
+			compiler->astgen.basic_type_one_constant_ids[HSC_DATA_TYPE_F64] = hsc_constant_table_deduplicate_basic(&compiler->astgen.constant_table, &compiler->astgen, HSC_DATA_TYPE_F64, &one);
+		}
 	}
 
 	hsc_string_table_init(&compiler->astgen.string_table, setup->string_table_data_cap, setup->string_table_entries_cap);
@@ -7338,18 +7692,6 @@ void hsc_compiler_init(HscCompiler* compiler, HscCompilerSetup* setup) {
 	hsc_astgen_init(&compiler->astgen, setup);
 	hsc_ir_init(&compiler->ir);
 	hsc_spirv_init(compiler);
-
-	compiler->available_basic_types = 0xffff;
-	compiler->available_basic_types &= ~( // remove support for these types for now, this is because they require SPIR-V capaibilities/vulkan features
-		(1 << HSC_DATA_TYPE_U8)  |
-		(1 << HSC_DATA_TYPE_S8)  |
-		(1 << HSC_DATA_TYPE_U16) |
-		(1 << HSC_DATA_TYPE_S16) |
-		(1 << HSC_DATA_TYPE_F16) |
-		(1 << HSC_DATA_TYPE_U64) |
-		(1 << HSC_DATA_TYPE_S64) |
-		(1 << HSC_DATA_TYPE_F64)
-	);
 }
 
 void hsc_compiler_compile(HscCompiler* compiler, const char* file_path) {

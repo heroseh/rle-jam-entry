@@ -113,7 +113,7 @@ HSC_NORETURN void _hsc_abort(const char* file, int line, const char* message, ..
 
 #define HSC_DIV_ROUND_UP(a, b) (((a) / (b)) + ((a) % (b) != 0))
 
-#define HSC_DEFINE_ID(Name) typedef struct Name { uint32_t idx_plus_one; } Name;
+#define HSC_DEFINE_ID(Name) typedef struct Name { uint32_t idx_plus_one; } Name
 HSC_DEFINE_ID(HscFileId);
 HSC_DEFINE_ID(HscStringId);
 HSC_DEFINE_ID(HscConstantId);
@@ -249,7 +249,11 @@ enum {
 
 #define HSC_DATA_TYPE_SCALAR(type)                ((type) & (HSC_DATA_TYPE_VEC2_START - 1))
 #define HSC_DATA_TYPE_IS_BASIC(type)              ((type) < HSC_DATA_TYPE_BASIC_END)
+#define HSC_DATA_TYPE_IS_NON_VOID_BASIC(type)     ((type) > HSC_DATA_TYPE_VOID && (type) < HSC_DATA_TYPE_BASIC_END)
 #define HSC_DATA_TYPE_IS_INT(type)                ((type) >= HSC_DATA_TYPE_U8 && (type) <= HSC_DATA_TYPE_S64)
+#define HSC_DATA_TYPE_IS_UINT(type)               ((type) >= HSC_DATA_TYPE_U8 && (type) <= HSC_DATA_TYPE_U64)
+#define HSC_DATA_TYPE_IS_SINT(type)               ((type) >= HSC_DATA_TYPE_S8 && (type) <= HSC_DATA_TYPE_S64)
+#define HSC_DATA_TYPE_IS_FLOAT(type)              ((type) >= HSC_DATA_TYPE_F16 && (type) <= HSC_DATA_TYPE_F64)
 #define HSC_DATA_TYPE_IS_VECTOR(type)             ((type) >= HSC_DATA_TYPE_VECTOR_START && (type) < HSC_DATA_TYPE_VECTOR_END)
 #define HSC_DATA_TYPE_IS_MATRIX(type)             ((type) >= HSC_DATA_TYPE_MATRIX_START && (type) < HSC_DATA_TYPE_MATRIX_END)
 #define HSC_DATA_TYPE_IS_STRUCT(type)             (((type) & 0xff) == HSC_DATA_TYPE_STRUCT)
@@ -406,6 +410,7 @@ enum {
 	HSC_TOKEN_PIPE,
 	HSC_TOKEN_CARET,
 	HSC_TOKEN_EXCLAMATION_MARK,
+	HSC_TOKEN_QUESTION_MARK,
 	HSC_TOKEN_TILDE,
 	HSC_TOKEN_EQUAL,
 	HSC_TOKEN_LESS_THAN,
@@ -468,6 +473,17 @@ enum {
 	HSC_TOKEN_KEYWORD_TYPEDEF,
 	HSC_TOKEN_KEYWORD_STATIC,
 	HSC_TOKEN_KEYWORD_CONST,
+	HSC_TOKEN_KEYWORD_AUTO,
+	HSC_TOKEN_KEYWORD_REGISTER,
+	HSC_TOKEN_KEYWORD_VOLATILE,
+	HSC_TOKEN_KEYWORD_EXTERN,
+	HSC_TOKEN_KEYWORD_INLINE,
+	HSC_TOKEN_KEYWORD_NO_RETURN,
+	HSC_TOKEN_KEYWORD_SIZEOF,
+	HSC_TOKEN_KEYWORD_ALIGNOF,
+	HSC_TOKEN_KEYWORD_ALIGNAS,
+	HSC_TOKEN_KEYWORD_STATIC_ASSERT,
+	HSC_TOKEN_KEYWORD_RESTRICT,
 	HSC_TOKEN_KEYWORD_RO_BUFFER,
 	HSC_TOKEN_KEYWORD_RW_BUFFER,
 	HSC_TOKEN_KEYWORD_RO_IMAGE1D,
@@ -610,12 +626,9 @@ struct HscFunction {
 };
 
 enum {
-	HSC_FUNCTION_IDX_VEC2_SINGLE,
-	HSC_FUNCTION_IDX_VEC2_MULTI,
-	HSC_FUNCTION_IDX_VEC3_SINGLE,
-	HSC_FUNCTION_IDX_VEC3_MULTI,
-	HSC_FUNCTION_IDX_VEC4_SINGLE,
-	HSC_FUNCTION_IDX_VEC4_MULTI,
+	HSC_FUNCTION_IDX_VEC2,
+	HSC_FUNCTION_IDX_VEC3,
+	HSC_FUNCTION_IDX_VEC4,
 	HSC_FUNCTION_IDX_MAT2x2,
 	HSC_FUNCTION_IDX_MAT2x3,
 	HSC_FUNCTION_IDX_MAT2x4,
@@ -638,7 +651,6 @@ struct HscIntrinsicFunction {
 	HscVariable params[16];
 };
 
-extern U32 hsc_intrinsic_function_overloads_count[HSC_FUNCTION_IDX_INTRINSIC_END];
 extern HscIntrinsicFunction hsc_intrinsic_functions[HSC_FUNCTION_IDX_INTRINSIC_END];
 
 enum {
@@ -698,6 +710,7 @@ enum {
 	HSC_EXPR_TYPE_CURLY_INITIALIZER,
 	HSC_EXPR_TYPE_DESIGNATED_INITIALIZER,
 	HSC_EXPR_TYPE_FIELD_ACCESS,
+	HSC_EXPR_TYPE_TERNARY,
 	HSC_EXPR_TYPE_CAST,
 
 	HSC_EXPR_TYPE_LOCAL_VARIABLE,
@@ -807,6 +820,13 @@ struct HscExpr {
 			U32 is_stmt_block_entry: 1;
 			U32 idx: 25;
 		} variable;
+		struct {
+			U32 type: 6; // HscExprType
+			U32 is_stmt_block_entry: 1;
+			U32 cond_expr_rel_idx: 6;
+			U32 true_expr_rel_idx: 9;
+			U32 false_expr_rel_idx: 10;
+		} ternary;
 	};
 
 	union {
@@ -896,6 +916,8 @@ typedef U16 HscAstGenFlags;
 enum {
 	HSC_ASTGEN_FLAGS_FOUND_STATIC = 0x1,
 	HSC_ASTGEN_FLAGS_FOUND_CONST = 0x2,
+	HSC_ASTGEN_FLAGS_FOUND_INLINE = 0x4,
+	HSC_ASTGEN_FLAGS_FOUND_NO_RETURN = 0x8,
 };
 
 typedef struct HscAstGen HscAstGen;
@@ -994,9 +1016,8 @@ struct HscAstGen {
 	U32* line_code_start_indices;
 	HscStringTable string_table;
 	HscConstantTable constant_table;
-	HscConstantId false_constant_id;
-	HscConstantId true_constant_id;
-	HscConstantId s32_zero_constant_id;
+	HscConstantId basic_type_zero_constant_ids[HSC_DATA_TYPE_BASIC_COUNT];
+	HscConstantId basic_type_one_constant_ids[HSC_DATA_TYPE_BASIC_COUNT];
 	uint32_t token_read_idx;
 	uint32_t token_value_read_idx;
 	uint32_t tokens_count;
@@ -1101,6 +1122,7 @@ enum {
 	HSC_IR_OP_CODE_BRANCH,
 	HSC_IR_OP_CODE_BRANCH_CONDITIONAL,
 	HSC_IR_OP_CODE_UNREACHABLE,
+	HSC_IR_OP_CODE_SELECT,
 };
 
 typedef struct HscIRConst HscIRConst;
