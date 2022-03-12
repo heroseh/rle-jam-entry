@@ -121,30 +121,30 @@ void hsc_hash_table_clear(HscHashTable* hash_table) {
 
 char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_DATA_TYPE_VOID] = "void",
-	[HSC_DATA_TYPE_BOOL] = "Bool",
-	[HSC_DATA_TYPE_U8] = "U8",
-	[HSC_DATA_TYPE_U16] = "U16",
-	[HSC_DATA_TYPE_U32] = "U32",
-	[HSC_DATA_TYPE_U64] = "U64",
-	[HSC_DATA_TYPE_S8] = "S8",
-	[HSC_DATA_TYPE_S16] = "S16",
-	[HSC_DATA_TYPE_S32] = "S32",
-	[HSC_DATA_TYPE_S64] = "S64",
-	[HSC_DATA_TYPE_F16] = "F16",
-	[HSC_DATA_TYPE_F32] = "F32",
-	[HSC_DATA_TYPE_F64] = "F64",
-	[HSC_TOKEN_INTRINSIC_TYPE_VEC2] = "Vec2",
-	[HSC_TOKEN_INTRINSIC_TYPE_VEC3] = "Vec3",
-	[HSC_TOKEN_INTRINSIC_TYPE_VEC4] = "Vec4",
-	[HSC_TOKEN_INTRINSIC_TYPE_MAT2X2] = "Mat2x2",
-	[HSC_TOKEN_INTRINSIC_TYPE_MAT2X3] = "Mat2x3",
-	[HSC_TOKEN_INTRINSIC_TYPE_MAT2X4] = "Mat2x4",
-	[HSC_TOKEN_INTRINSIC_TYPE_MAT3X2] = "Mat3x2",
-	[HSC_TOKEN_INTRINSIC_TYPE_MAT3X3] = "Mat3x3",
-	[HSC_TOKEN_INTRINSIC_TYPE_MAT3X4] = "Mat3x4",
-	[HSC_TOKEN_INTRINSIC_TYPE_MAT4X2] = "Mat4x2",
-	[HSC_TOKEN_INTRINSIC_TYPE_MAT4X3] = "Mat4x3",
-	[HSC_TOKEN_INTRINSIC_TYPE_MAT4X4] = "Mat4x4",
+	[HSC_DATA_TYPE_BOOL] = "_Bool",
+	[HSC_DATA_TYPE_U8] = "uint8_t",
+	[HSC_DATA_TYPE_U16] = "uint16_t",
+	[HSC_DATA_TYPE_U32] = "uint32_t",
+	[HSC_DATA_TYPE_U64] = "uint64_t",
+	[HSC_DATA_TYPE_S8] = "int8_t",
+	[HSC_DATA_TYPE_S16] = "int16_t",
+	[HSC_DATA_TYPE_S32] = "int32_t",
+	[HSC_DATA_TYPE_S64] = "int64_t",
+	[HSC_DATA_TYPE_F16] = "half",
+	[HSC_DATA_TYPE_F32] = "float",
+	[HSC_DATA_TYPE_F64] = "double",
+	[HSC_TOKEN_INTRINSIC_TYPE_VEC2] = "vec2_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_VEC3] = "vec3_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_VEC4] = "vec4_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_MAT2X2] = "mat2x2_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_MAT2X3] = "mat2x3_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_MAT2X4] = "mat2x4_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_MAT3X2] = "mat3x2_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_MAT3X3] = "mat3x3_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_MAT3X4] = "mat3x4_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_MAT4X2] = "mat4x2_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_MAT4X3] = "mat4x3_t",
+	[HSC_TOKEN_INTRINSIC_TYPE_MAT4X4] = "mat4x4_t",
 	[HSC_TOKEN_EOF] = "end of file",
 	[HSC_TOKEN_IDENT] = "identifier",
 	[HSC_TOKEN_CURLY_OPEN] = "{",
@@ -715,9 +715,10 @@ bool hsc_data_type_is_condition(HscAstGen* astgen, HscDataType data_type) {
 }
 
 void hsc_data_type_ensure_is_condition(HscAstGen* astgen, HscDataType data_type) {
+	data_type = hsc_typedef_resolve(astgen, data_type);
 	if (!hsc_data_type_is_condition(astgen, data_type)) {
 		HscString data_type_name = hsc_data_type_string(astgen, data_type);
-		hsc_astgen_error_1(astgen, "the condition expression must be convertable to a 'bool' but got '%.*s'", (int)data_type_name.size, data_type_name.data);
+		hsc_astgen_error_1(astgen, "the condition expression must be convertable to a boolean but got '%.*s'", (int)data_type_name.size, data_type_name.data);
 	}
 }
 
@@ -3092,7 +3093,10 @@ UNARY:
 				} else {
 					HscExpr* right_expr = hsc_astgen_generate_expr(astgen, 2);
 					if (expr->data_type != right_expr->data_type) {
-						if (expr->data_type >= HSC_DATA_TYPE_VECTOR_END || right_expr->data_type >= HSC_DATA_TYPE_VECTOR_END) {
+						HscDataType resolved_cast_data_type = hsc_typedef_resolve(astgen, expr->data_type);
+						HscDataType resolved_castee_data_type = hsc_typedef_resolve(astgen, right_expr->data_type);
+
+						if (resolved_cast_data_type >= HSC_DATA_TYPE_VECTOR_END || resolved_castee_data_type >= HSC_DATA_TYPE_VECTOR_END) {
 							HscString target_data_type_name = hsc_data_type_string(astgen, expr->data_type);
 							HscString source_data_type_name = hsc_data_type_string(astgen, right_expr->data_type);
 							hsc_astgen_error_1(astgen, "cannot cast '%.*s' to '%.*s'", (int)source_data_type_name.size, source_data_type_name.data, (int)target_data_type_name.size, target_data_type_name.data);

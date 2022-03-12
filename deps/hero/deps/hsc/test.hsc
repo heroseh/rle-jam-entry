@@ -1,4 +1,12 @@
 
+typedef _Bool Bool;
+typedef uint32_t U32;
+typedef int32_t S32;
+typedef float F32;
+typedef vec2_t Vec2;
+typedef vec3_t Vec3;
+typedef vec4_t Vec4;
+
 vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
 	return vec4(0.f, 0.f, 0.f, 0.f);
 }
