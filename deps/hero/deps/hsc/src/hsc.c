@@ -198,6 +198,7 @@ char* hsc_token_strings[HSC_TOKEN_COUNT] = {
 	[HSC_TOKEN_KEYWORD_RETURN] = "return",
 	[HSC_TOKEN_KEYWORD_IF] = "if",
 	[HSC_TOKEN_KEYWORD_ELSE] = "else",
+	[HSC_TOKEN_KEYWORD_DO] = "do",
 	[HSC_TOKEN_KEYWORD_WHILE] = "while",
 	[HSC_TOKEN_KEYWORD_FOR] = "for",
 	[HSC_TOKEN_KEYWORD_SWITCH] = "switch",
@@ -4144,6 +4145,30 @@ HscExpr* hsc_astgen_generate_stmt(HscAstGen* astgen) {
 			astgen->switch_state = prev_switch_state;
 			return stmt;
 		};
+		case HSC_TOKEN_KEYWORD_DO: {
+			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_STMT_WHILE);
+			hsc_token_next(astgen);
+
+			bool prev_is_in_loop = astgen->is_in_loop;
+			astgen->is_in_loop = true;
+			HscExpr* loop_stmt = hsc_astgen_generate_stmt(astgen);
+			loop_stmt->is_stmt_block_entry = true;
+			astgen->is_in_loop = prev_is_in_loop;
+
+			token = hsc_token_peek(astgen);
+			if (token != HSC_TOKEN_KEYWORD_WHILE) {
+				hsc_astgen_error_1(astgen, "expected 'while' to define the condition of the do while loop");
+			}
+			token = hsc_token_next(astgen);
+
+			HscExpr* cond_expr = hsc_astgen_generate_cond_expr(astgen);
+
+			stmt->while_.cond_expr_rel_idx = cond_expr - stmt;
+			stmt->while_.loop_stmt_rel_idx = loop_stmt - stmt;
+
+			hsc_astgen_ensure_semicolon(astgen);
+			return stmt;
+		};
 		case HSC_TOKEN_KEYWORD_WHILE: {
 			HscExpr* stmt = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_STMT_WHILE);
 			hsc_token_next(astgen);
@@ -4670,7 +4695,7 @@ UNARY:
 			break;
 		};
 		case HSC_EXPR_TYPE_STMT_WHILE: {
-			fprintf(f, "%s: {\n", "STMT_WHILE");
+			fprintf(f, "%s: {\n", expr->while_.cond_expr_rel_idx > expr->while_.loop_stmt_rel_idx ? "STMT_DO_WHILE" : "STMT_WHILE");
 
 			HscExpr* cond_expr = &expr[expr->while_.cond_expr_rel_idx];
 			fprintf(f, "%.*sCONDITION_EXPR:\n", indent + 1, indent_chars);
@@ -5129,7 +5154,7 @@ HscDataType hsc_ir_operand_data_type(HscIR* ir, HscAstGen* astgen, HscIRFunction
 }
 
 void hsc_ir_generate_convert_to_bool(HscIR* ir, HscAstGen* astgen, HscIRFunction* ir_function, HscIROperand cond_operand) {
-	HscDataType cond_data_type = hsc_ir_operand_data_type(ir, astgen, ir_function, cond_operand);
+	HscDataType cond_data_type = hsc_typedef_resolve(astgen, hsc_ir_operand_data_type(ir, astgen, ir_function, cond_operand));
 	if (HSC_DATA_TYPE_IS_STRUCT(cond_data_type) || HSC_DATA_TYPE_IS_MATRIX(cond_data_type)) {
 		HscString data_type_name = hsc_data_type_string(astgen, cond_operand);
 		// TODO emitt the error in the AST generation instead
@@ -5527,12 +5552,15 @@ UNARY:
 			HscExpr* cond_expr;
 			HscExpr* inc_expr;
 			HscExpr* loop_stmt;
+			bool is_do_while;
 			if (expr->type == HSC_EXPR_TYPE_STMT_FOR) {
+				is_do_while = false;
 				init_expr = &expr[expr->for_.init_expr_rel_idx];
 				cond_expr = &expr[expr->for_.cond_expr_rel_idx];
 				inc_expr = &expr[expr->for_.inc_expr_rel_idx];
 				loop_stmt = &expr[expr->for_.loop_stmt_rel_idx];
 			} else {
+				is_do_while = expr->while_.cond_expr_rel_idx > expr->while_.loop_stmt_rel_idx;
 				init_expr = NULL;
 				cond_expr = &expr[expr->while_.cond_expr_rel_idx];
 				inc_expr = NULL;
@@ -5550,15 +5578,24 @@ UNARY:
 			HscIROperand starting_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
 			operands[0] = starting_basic_block_operand;
 
-			basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, cond_expr);
-			HscIROperand cond_operand = ir->last_operand;
+			HscIROperand cond_operand;
+			if (!is_do_while) {
+				basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, cond_expr);
+				cond_operand = ir->last_operand;
+			}
 
 			HscIROperand* loop_merge_operands = hsc_ir_add_operands_many(ir, ir_function, 2);
 			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_LOOP_MERGE, loop_merge_operands, 2);
 
-			HscIROperand* cond_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 3);
-			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH_CONDITIONAL, cond_branch_operands, 3);
-			cond_branch_operands[0] = cond_operand;
+			HscIROperand* cond_branch_operands;
+			if (is_do_while) {
+				cond_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+				hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, cond_branch_operands, 1);
+			} else {
+				cond_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 3);
+				hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH_CONDITIONAL, cond_branch_operands, 3);
+				cond_branch_operands[0] = cond_operand;
+			}
 
 			HscIRBranchState prev_branch_state = ir->branch_state;
 			ir->branch_state.break_branch_linked_list_head = -1;
@@ -5568,7 +5605,8 @@ UNARY:
 
 			HscIRBasicBlock* loop_basic_block = hsc_ir_add_basic_block(ir, ir_function);
 			hsc_ir_generate_instructions(ir, astgen, ir_function, loop_basic_block, loop_stmt);
-			cond_branch_operands[1] = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, loop_basic_block));
+			HscIROperand loop_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, loop_basic_block));
+			cond_branch_operands[is_do_while ? 0 : 1] = loop_basic_block_operand;
 
 			HscIROpCode last_op_code = ir->instructions[ir->instructions_count - 1].op_code;
 			HscIROperand* loop_branch_operands = NULL;
@@ -5586,9 +5624,21 @@ UNARY:
 			if (inc_expr) {
 				basic_block = hsc_ir_generate_instructions(ir, astgen, ir_function, basic_block, inc_expr);
 			}
-			operands = hsc_ir_add_operands_many(ir, ir_function, 1);
-			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, operands, 1);
-			operands[0] = starting_basic_block_operand;
+
+			if (is_do_while) {
+				basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, cond_expr);
+				cond_operand = ir->last_operand;
+
+				cond_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 3);
+				hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH_CONDITIONAL, cond_branch_operands, 3);
+
+				cond_branch_operands[0] = cond_operand;
+				cond_branch_operands[1] = starting_basic_block_operand;
+			} else {
+				operands = hsc_ir_add_operands_many(ir, ir_function, 1);
+				hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH, operands, 1);
+				operands[0] = starting_basic_block_operand;
+			}
 
 			basic_block = hsc_ir_add_basic_block(ir, ir_function);
 			HscIROperand converging_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
@@ -7052,7 +7102,9 @@ void hsc_spirv_generate_function(HscCompiler* c, U32 function_idx) {
 					HscIRValue* return_value = &c->ir.values[ir_function->values_start_idx + return_value_idx];
 
 					HscBinaryOp binary_op = instruction->op_code - HSC_IR_OP_CODE_BINARY_OP_START;
-					HscBasicTypeClass type_class = hsc_basic_type_class(HSC_DATA_TYPE_SCALAR(hsc_ir_operand_data_type(&c->ir, &c->astgen, ir_function, operands[1])));
+					HscDataType resolved_data_type = hsc_ir_operand_data_type(&c->ir, &c->astgen, ir_function, operands[1]);
+					resolved_data_type = hsc_typedef_resolve(&c->astgen, resolved_data_type);
+					HscBasicTypeClass type_class = hsc_basic_type_class(HSC_DATA_TYPE_SCALAR(resolved_data_type));
 					printf("binary_op = %u, type_class = %u\n", binary_op, type_class);
 					HscSpirvOp spirv_op = hsc_spriv_binary_ops[binary_op][type_class];
 					HSC_DEBUG_ASSERT(spirv_op != HSC_SPIRV_OP_NO_OP, "internal error: invalid configuration for a binary op");
@@ -7137,6 +7189,8 @@ SWITCH_SINGLE_WORD_LITERAL:
 				case HSC_IR_OP_CODE_CONVERT: {
 					HscDataType dst_type = operands[1];
 					HscDataType src_type = hsc_ir_operand_data_type(&c->ir, &c->astgen, ir_function, operands[2]);
+					dst_type = hsc_typedef_resolve(&c->astgen, dst_type);
+					src_type = hsc_typedef_resolve(&c->astgen, src_type);
 					HscBasicTypeClass dst_type_class = hsc_basic_type_class(HSC_DATA_TYPE_SCALAR(dst_type));
 					HscBasicTypeClass src_type_class = hsc_basic_type_class(HSC_DATA_TYPE_SCALAR(src_type));
 

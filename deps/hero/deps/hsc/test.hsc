@@ -152,7 +152,19 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 
 	uint = uint * bool_ ? sint ? sint - 1 : sint + 1 : uint;
 
-	return vec4(static_red, (F32)(global - 6), blue * (F32)_Alignof(struct EnumInStruct) - 0.6f, 1.f);
+	uint = 0;
+	while (uint < 0) {
+		uint += 1;
+	}
+	red = uint == 0;
+
+	uint = 0;
+	do {
+		uint += 1;
+	} while (uint < 0);
+	blue = uint == 1;
+
+	return vec4(red, 0.f, blue, 1.f);
 }
 
 /*
