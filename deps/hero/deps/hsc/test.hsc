@@ -164,7 +164,23 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 	} while (uint < 0);
 	blue = uint == 1;
 
-	return vec4(red, 0.f, blue, 1.f);
+	uint = 0;
+	red = ++uint == 1;
+
+	uint = 0;
+	blue = uint++ == 0;
+
+	F32 green = uint == 1;
+
+	uint = 2;
+	red = --uint == 1;
+
+	uint = 2;
+	blue = uint-- == 2;
+
+	green = uint == 1;
+
+	return vec4(red, green, blue, 1.f);
 }
 
 /*
