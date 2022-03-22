@@ -120,17 +120,6 @@ HSC_DEFINE_ID(HscConstantId);
 HSC_DEFINE_ID(HscFunctionTypeId);
 HSC_DEFINE_ID(HscExprId);
 
-typedef struct HscLocation HscLocation;
-struct HscLocation {
-	HscFileId file_id;
-	uint32_t code_start_idx;
-	uint32_t code_end_idx;
-	uint32_t line_start;
-	uint32_t line_end;
-	uint32_t column_start;
-	uint32_t column_end;
-};
-
 typedef uint8_t   U8;
 typedef uint16_t  U16;
 typedef uint32_t  U32;
@@ -158,6 +147,18 @@ typedef double    F64;
 #define S64_MAX INT64_MAX
 
 typedef struct HscCompiler HscCompiler;
+
+typedef struct HscLocation HscLocation;
+struct HscLocation {
+	U32       span_idx;
+	U32       parent_location_idx;
+	U32       code_start_idx;
+	U32       code_end_idx;
+	U32       line_start;
+	U32       line_end;
+	U32       column_start;
+	U32       column_end;
+};
 
 #define HSC_COMPOUND_TYPE_NESTED_FIELD_CAP 16
 
@@ -543,6 +544,50 @@ struct HscString {
 #define hsc_string(data, size) ((HscString) { data, size });
 #define hsc_string_lit(lit) ((HscString) { lit, sizeof(lit) - 1 });
 #define hsc_string_c(string) ((HscString) { string, strlen(string) });
+#define hsc_string_eq(a, b) ((a).size == (b).size && memcmp((a).data, (b).data, (a).size) == 0)
+#define hsc_string_eq_c(a, c_string) ((a).size == strlen(c_string) && memcmp((a).data, c_string, (a).size) == 0)
+#define hsc_string_eq_lit(a, lit) ((a).size == sizeof(lit) - 1 && memcmp((a).data, lit, (a).size) == 0)
+static inline HscString hsc_string_slice_start(HscString string, Uptr start) {
+	HSC_ASSERT_ARRAY_BOUNDS(start, string.size + 1);
+	return hsc_string(string.data + start, string.size - start);
+}
+static inline HscString hsc_string_slice_end(HscString string, Uptr end) {
+	HSC_ASSERT_ARRAY_BOUNDS(end, string.size + 1);
+	return hsc_string(string.data, end);
+}
+static inline HscString hsc_string_slice(HscString string, Uptr start, Uptr end) {
+	HSC_ASSERT_ARRAY_BOUNDS(start, string.size + 1);
+	HSC_ASSERT_ARRAY_BOUNDS(end, string.size + 1);
+	HSC_DEBUG_ASSERT(start <= end, "start of '%zu' must be less than end of '%zu'", start, end);
+	return hsc_string(string.data + start, end - start);
+}
+#define hsc_string_find_lit(string, lit) hsc_string_find(string, lit, sizeof(lit) - 1)
+static inline U32 hsc_string_find(HscString haystack, char* needle, U32 needle_size) {
+	if (needle_size == 0 || haystack.size < needle_size) {
+		return -1;
+	}
+
+	for (U32 idx = 0; idx <= haystack.size - needle_size;) {
+		if (haystack.data[idx] == needle[0]) {
+			bool is_match = true;
+			U32 cmp_idx = 0;
+			for (; cmp_idx < needle_size; cmp_idx += 1) {
+				if (haystack.data[idx + cmp_idx] != needle[cmp_idx]) {
+					is_match = false;
+					break;
+				}
+			}
+			if (is_match) {
+				return idx;
+			}
+			idx += cmp_idx;
+		} else {
+			idx += 1;
+		}
+	}
+
+	return -1;
+}
 
 typedef struct HscStringEntry HscStringEntry;
 struct HscStringEntry {
@@ -600,6 +645,17 @@ struct HscVariable {
 	U32           is_const: 1;
 };
 
+typedef struct HscMacro HscMacro;
+struct HscMacro {
+	HscStringId identifier_string_id;
+	HscString value_string;
+	HscLocation location;
+	U32 value_string_column_start;
+	U32 params_start_idx: 23;
+	U32 params_count: 8;
+	U32 is_function: 1;
+};
+
 typedef U8 HscFunctionShaderStage;
 enum {
 	HSC_FUNCTION_SHADER_STAGE_NONE,
@@ -616,7 +672,7 @@ extern char* hsc_function_shader_stage_strings[HSC_FUNCTION_SHADER_STAGE_COUNT];
 
 typedef struct HscFunction HscFunction;
 struct HscFunction {
-	HscLocation            location;
+	U32                    identifier_token_idx;
 	HscStringId            identifier_string_id;
 	HscDataType            return_data_type;
 	U32                    params_start_idx;
@@ -919,6 +975,20 @@ struct HscCurlyInitializerGen {
 	HscExpr* first_initializer_expr;
 };
 
+typedef struct HscCodeSpan HscCodeSpan;
+struct HscCodeSpan {
+	U8*         code;
+	U32         code_size;
+	HscMacro*   macro; // NULL when this is a file expansion
+	U32         macro_args_start_idx;
+	HscFileId   file_id;
+	HscLocation location;
+	U32*        line_code_start_indices;
+	U32         lines_count;
+	U32         lines_cap;
+	U32         macro_arg_id;
+};
+
 typedef U16 HscAstGenFlags;
 enum {
 	HSC_ASTGEN_FLAGS_FOUND_STATIC = 0x1,
@@ -927,9 +997,25 @@ enum {
 	HSC_ASTGEN_FLAGS_FOUND_NO_RETURN = 0x8,
 };
 
+typedef struct HscMacroArg HscMacroArg;
+struct HscMacroArg {
+	U32 callsite_location_idx;
+	HscString string;
+};
+
 typedef struct HscAstGen HscAstGen;
 struct HscAstGen {
 	HscAstGenFlags flags;
+
+	U32* code_span_stack;
+	U32 code_span_stack_count;
+	U32 code_span_stack_cap;
+
+	HscCodeSpan* code_spans;
+	U32 code_spans_count;
+	U32 code_spans_cap;
+
+	HscCodeSpan* span;
 
 	HscVariable* function_params_and_variables;
 	HscFunction*      functions;
@@ -965,6 +1051,19 @@ struct HscAstGen {
 	U32 typedefs_count;
 	U32 typedefs_cap;
 
+	HscHashTable(HscStringId, U32) macro_declarations;
+	HscMacro* macros;
+	U32 macros_count;
+	U32 macros_cap;
+
+	HscStringId* macro_params;
+	U32 macro_params_count;
+	U32 macro_params_cap;
+
+	HscMacroArg* macro_args;
+	U32 macro_args_count;
+	U32 macro_args_cap;
+
 	HscEnumDataType* enum_data_types;
 	U32 enum_data_types_count;
 	U32 enum_data_types_cap;
@@ -985,6 +1084,10 @@ struct HscAstGen {
 	U64* entry_indices;
 	U32 entry_indices_count;
 	U32 entry_indices_cap;
+
+	char* macro_paste_buffer;
+	U32 macro_paste_buffer_size;
+	U32 macro_paste_buffer_cap;
 
 	HscDataType assign_data_type;
 
@@ -1018,9 +1121,13 @@ struct HscAstGen {
 	char* error_info;
 
 	HscToken* tokens;
+	U32*      token_location_indices;
+
 	HscLocation* token_locations;
+	U32 token_locations_count;
+	U32 token_locations_cap;
+
 	HscTokenValue* token_values;
-	U32* line_code_start_indices;
 	HscStringTable string_table;
 	HscConstantTable constant_table;
 	HscConstantId basic_type_zero_constant_ids[HSC_DATA_TYPE_BASIC_COUNT];
@@ -1031,13 +1138,12 @@ struct HscAstGen {
 	uint32_t tokens_cap;
 	uint32_t token_values_count;
 	uint32_t token_values_cap;
-	U32 lines_count;
 	U32 lines_cap;
-	HscLocation location;
 	const char* file_path;
-	uint8_t* bytes;
-	uint32_t bytes_count;
+	HscLocation location;
 	bool print_color;
+
+	HscStringId va_args_string_id;
 };
 
 bool hsc_opt_is_enabled(HscOpts* opts, HscOpt opt);
@@ -1065,12 +1171,14 @@ HscConstant hsc_constant_table_get(HscConstantTable* constant_table, HscConstant
 bool hsc_constant_as_uint(HscConstant constant, U64* out);
 bool hsc_constant_as_sint(HscConstant constant, S64* out);
 
+void hsc_astgen_ensure_macro_args_count(HscAstGen* astgen, HscMacro* macro, U32 args_count);
+
 typedef struct HscCompilerSetup HscCompilerSetup;
 void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup);
 HSC_NORETURN void hsc_astgen_error_1(HscAstGen* astgen, const char* fmt, ...);
-HSC_NORETURN void hsc_astgen_error_2(HscAstGen* astgen, HscLocation* other_location, const char* fmt, ...);
+HSC_NORETURN void hsc_astgen_error_2(HscAstGen* astgen, U32 other_token_idx, const char* fmt, ...);
 HSC_NORETURN void hsc_astgen_token_error_1(HscAstGen* astgen, const char* fmt, ...);
-HSC_NORETURN void hsc_astgen_token_error_2(HscAstGen* astgen, HscLocation* other_location, const char* fmt, ...);
+HSC_NORETURN void hsc_astgen_token_error_2(HscAstGen* astgen, U32 other_token_idx, const char* fmt, ...);
 void hsc_astgen_add_token(HscAstGen* astgen, HscToken token);
 void hsc_astgen_add_token_value(HscAstGen* astgen, HscTokenValue value);
 void hsc_astgen_tokenize(HscAstGen* astgen);

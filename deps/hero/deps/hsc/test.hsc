@@ -7,6 +7,39 @@ typedef vec2_t Vec2;
 typedef vec3_t Vec3;
 typedef vec4_t Vec4;
 
+// C = A /+*
+
+// #define M_SUB(C) (C - 0.5f)
+
+// A = M_SUB(A /+* )
+
+// #define M_NEG(A) (-A)
+
+// C = M_NEG(M_SUB(A /+* )) + 1
+
+// #define M_SUB(C) (C - 0.5f)
+
+#define ZERO_POINT_FIVE 0.5f
+
+#define M_ADD(D) (D + ZERO_POINT_FIVE)
+
+#define M_SUB(C) (C - ZERO_POINT_FIVE)
+
+#define M_NEG(A) (-A)
+
+#define M_SUPER(A, B, C, D) (M_NEG(M_NEG(M_ADD(A) * M_SUB(M_ADD(B)))) + M_ADD(C) + M_SUB(D))
+
+#define TEST(A, B, ...) vec4(M_SUB(M_SUPER(A, B, A, B)), M_ADD(M_SUB(M_SUPER(1 + __VA_ARGS__, __VA_ARGS__ + 1))), __VA_ARGS__)
+
+#define G(H) H
+#define A(D) G(D) + D
+#define B(E) G(A(G(E)))
+#define C(F) A(G(B(F)))
+
+#define TEST2(A) C(A)
+
+#define TEST3(A, ...) A; __VA_ARGS__
+
 vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
 	return vec4(0.f, 0.f, 0.f, 0.f);
 }
@@ -180,7 +213,11 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 
 	green = uint == 1;
 
-	return vec4(red, green, blue, 1.f);
+	float t = ZERO_POINT_FIVE + TEST2(ZERO_POINT_FIVE);
+
+	TEST3(ZERO_POINT_FIVE);
+
+	return TEST(1.f, 0.f, 0.f, 1.f);
 }
 
 /*
