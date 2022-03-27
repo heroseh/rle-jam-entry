@@ -498,6 +498,7 @@ enum {
 	HSC_TOKEN_KEYWORD_RW_IMAGE3D,
 #define HSC_TOKEN_KEYWORDS_END HSC_TOKEN_COUNT
 #define HSC_TOKEN_KEYWORDS_COUNT (HSC_TOKEN_KEYWORDS_END - HSC_TOKEN_KEYWORDS_START)
+#define HSC_TOKEN_IS_KEYWORD(token) (HSC_TOKEN_KEYWORDS_START <= (token) && (token) < HSC_TOKEN_KEYWORDS_END)
 
 	HSC_TOKEN_COUNT,
 };
@@ -739,6 +740,11 @@ enum {
 	HSC_BINARY_OP_GREATER_THAN,
 	HSC_BINARY_OP_GREATER_THAN_OR_EQUAL,
 
+	HSC_BINARY_OP_LOGICAL_AND,
+	HSC_BINARY_OP_LOGICAL_OR,
+
+	HSC_BINARY_OP_TERNARY,
+
 	HSC_BINARY_OP_COUNT,
 };
 
@@ -766,14 +772,11 @@ enum {
 #define HSC_EXPR_TYPE_BINARY_OP(OP) (HSC_EXPR_TYPE_BINARY_OP_START + HSC_BINARY_OP_##OP)
 	HSC_EXPR_TYPE_BINARY_OP_END = HSC_EXPR_TYPE_BINARY_OP_START + HSC_BINARY_OP_COUNT,
 
-	HSC_EXPR_TYPE_LOGICAL_AND,
-	HSC_EXPR_TYPE_LOGICAL_OR,
 	HSC_EXPR_TYPE_CALL,
 	HSC_EXPR_TYPE_ARRAY_SUBSCRIPT,
 	HSC_EXPR_TYPE_CURLY_INITIALIZER,
 	HSC_EXPR_TYPE_DESIGNATED_INITIALIZER,
 	HSC_EXPR_TYPE_FIELD_ACCESS,
-	HSC_EXPR_TYPE_TERNARY,
 	HSC_EXPR_TYPE_CAST,
 
 	HSC_EXPR_TYPE_LOCAL_VARIABLE,
@@ -915,6 +918,7 @@ HSC_STATIC_ASSERT(sizeof(HscExpr) == sizeof(U64), "HscExpr must be 8 bytes");
 typedef U16 HscOpt;
 enum {
 	HSC_OPT_CONSTANT_FOLDING,
+	HSC_OPT_PP_UNDEF_EVAL,
 
 	HSC_OPT_COUNT,
 };
@@ -987,6 +991,7 @@ struct HscCodeSpan {
 	U32         lines_count;
 	U32         lines_cap;
 	U32         macro_arg_id;
+	bool        is_preprocessor_if;
 };
 
 typedef U16 HscAstGenFlags;
@@ -1002,6 +1007,8 @@ struct HscMacroArg {
 	U32 callsite_location_idx;
 	HscString string;
 };
+
+#define _HSC_TOKENIZER_NESTED_BRACKETS_CAP 32
 
 typedef struct HscAstGen HscAstGen;
 struct HscAstGen {
@@ -1143,7 +1150,17 @@ struct HscAstGen {
 	HscLocation location;
 	bool print_color;
 
+	bool is_preprocessor_if_expression;
+
 	HscStringId va_args_string_id;
+	HscStringId defined_string_id;
+
+	U32 preprocessor_nested_level;
+	U64 preprocessor_nested_level_has_used_else_bitset;
+
+	U32 brackets_to_close_count;
+	HscToken brackets_to_close[_HSC_TOKENIZER_NESTED_BRACKETS_CAP];
+	U32 brackets_to_close_token_indices[_HSC_TOKENIZER_NESTED_BRACKETS_CAP];
 };
 
 bool hsc_opt_is_enabled(HscOpts* opts, HscOpt opt);

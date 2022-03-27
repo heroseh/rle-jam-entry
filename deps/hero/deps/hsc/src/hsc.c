@@ -17,9 +17,8 @@
 // the padded zero bytes at the end of the file we add so we can look ahead in the tokenizer comparisions
 #define _HSC_TOKENIZER_LOOK_HEAD_SIZE 4
 
-#define _HSC_TOKENIZER_NESTED_BRACKETS_CAP 32
-
 #define HSC_DEBUG_CODE_SPAN_PUSH_POP 0
+#define HSC_DEBUG_CODE_PREPROCESSOR 0
 
 void _hsc_assert_failed(const char* cond, const char* file, int line, const char* message, ...) {
 	fprintf(stderr, "assertion failed: %s\nmessage: ", cond);
@@ -67,7 +66,7 @@ bool hsc_hash_table_find(HscHashTable* hash_table, U32 key, U32* value_out) {
 	for (uint32_t idx = 0; idx < hash_table->count; idx += 1) {
 		U32 found_key = hash_table->keys[idx];
 		if (found_key == key) {
-			*value_out = hash_table->values[idx];
+			if (value_out) *value_out = hash_table->values[idx];
 			return true;
 		}
 
@@ -1133,6 +1132,7 @@ void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup) {
 	astgen->print_color = true;
 
 	astgen->va_args_string_id = hsc_string_table_deduplicate_lit(&astgen->string_table, "__VA_ARGS__");
+	astgen->defined_string_id = hsc_string_table_deduplicate_lit(&astgen->string_table, "defined");
 
 	hsc_hash_table_init(&astgen->global_declarations);
 	{
@@ -1540,7 +1540,19 @@ void hsc_code_span_push_macro(HscAstGen* astgen, HscMacro* macro) {
 	span->macro_args_start_idx = astgen->macro_args_count - macro->params_count;
 }
 
-void hsc_code_span_pop(HscAstGen* astgen) {
+void hsc_code_span_push_preprocessor_if(HscAstGen* astgen, HscString condition) {
+	HscCodeSpan* span = _hsc_code_span_push(astgen);
+#if HSC_DEBUG_CODE_SPAN_PUSH_POP
+	HscString name = hsc_string_table_get(&astgen->string_table, macro->identifier_string_id);
+	printf("PUSH_PREPROCESSOR_IF(%.*s)\n", (int)condition.size, condition.data);
+#endif // HSC_DEBUG_CODE_SPAN_PUSH_POP
+
+	span->code = (U8*)condition.data;
+	span->code_size = condition.size;
+	span->is_preprocessor_if = true;
+}
+
+bool hsc_code_span_pop(HscAstGen* astgen) {
 	HSC_DEBUG_ASSERT(astgen->code_span_stack_count, "internal error: we have popped all of the code spans!");
 	astgen->code_span_stack_count -= 1;
 	if (astgen->code_span_stack_count) {
@@ -1555,12 +1567,16 @@ void hsc_code_span_pop(HscAstGen* astgen) {
 		} else if (popped_span->macro) {
 			HscString name = hsc_string_table_get(&astgen->string_table, popped_span->macro->identifier_string_id);
 			printf("POP_MACRO(%.*s)\n", (int)name.size, name.data);
+		} else if (popped_span->is_preprocessor_if) {
+			HscString name = hsc_string_table_get(&astgen->string_table, popped_span->macro->identifier_string_id);
+			printf("POP_PREPROCESSOR_IF(%.*s)\n", (int)popped_span->code_size, popped_span->code);
 		}
 #endif // HSC_DEBUG_CODE_SPAN_PUSH_POP
-
+		return popped_span->is_preprocessor_if;
 	} else {
 		hsc_astgen_add_token(astgen, HSC_TOKEN_EOF);
 		astgen->span = NULL;
+		return true;
 	}
 }
 
@@ -2048,23 +2064,499 @@ void hsc_astgen_parse_preprocessor_undef(HscAstGen* astgen) {
 	HscStringId identifier_string_id = hsc_string_table_deduplicate(&astgen->string_table, (char*)ident_string.data, ident_string.size);
 
 	hsc_hash_table_remove(&astgen->macro_declarations, identifier_string_id.idx_plus_one, NULL);
-
-	U8 byte = astgen->span->code[astgen->span->location.code_end_idx];
-	switch (byte) {
-		case '\r':
-		case '\n':
-		case '\0':
-			return;
-	}
-
-	astgen->span->location.code_start_idx = astgen->span->location.code_end_idx;
-	astgen->span->location.column_start = astgen->span->location.column_end;
-	astgen->span->location.code_end_idx += 1;
-	astgen->span->location.column_end += 1;
-	hsc_astgen_token_error_1(astgen, "unexpected tailing tokens to the #undef operand");
 }
 
-void hsc_astgen_parse_preprocessor_directive(HscAstGen* astgen) {
+bool hsc_astgen_parse_preprocessor_directive(HscAstGen* astgen, bool is_skipping_code, bool is_skipping_until_endif, U32 nested_level);
+
+void hsc_astgen_parse_preprocessor_skip_false_conditional(HscAstGen* astgen, bool is_skipping_until_endif) {
+	HSC_DEBUG_ASSERT(astgen->code_span_stack_count == 1, "internal error: condition preprocessor code should not be inside of macro expansions");
+	HscCodeSpan* span = astgen->span;
+	bool first_non_white_space_char = false;
+	U32 nested_level = astgen->preprocessor_nested_level;
+	while (span->location.code_end_idx < span->code_size) {
+		U8 byte = span->code[astgen->span->location.code_end_idx];
+		switch (byte) {
+			case '\n':
+				astgen->span->location.code_end_idx += 1;
+				hsc_astgen_found_newline(astgen, span);
+				first_non_white_space_char = true;
+				continue;
+			case '#':
+				if (!first_non_white_space_char) {
+					astgen->span->location.column_end += 1;
+					hsc_astgen_token_error_1(astgen, "invalid token '#', preprocessor directives must be the first non-whitespace on the line");
+				}
+
+				if (hsc_astgen_parse_preprocessor_directive(astgen, true, is_skipping_until_endif, nested_level)) {
+					return;
+				}
+
+				first_non_white_space_char = false;
+				continue;
+			case ' ':
+				break;
+			case '\0':
+				return;
+			default:
+				first_non_white_space_char = false;
+				break;
+		}
+		astgen->span->location.code_end_idx += 1;
+		astgen->span->location.column_end += 1;
+	}
+}
+
+bool hsc_astgen_parse_preprocessor_ifdef(HscAstGen* astgen, bool is_true) {
+	hsc_astgen_token_consume_whitespace(astgen);
+	astgen->span->location.code_start_idx = astgen->span->location.code_end_idx;
+	astgen->span->location.column_start = astgen->span->location.column_end;
+
+	HscString ident_string = hsc_astgen_parse_ident(astgen, "invalid token '%c' for macro identifier");
+	astgen->span->location.code_end_idx += ident_string.size;
+	astgen->span->location.column_end += ident_string.size;
+	hsc_astgen_token_consume_whitespace(astgen);
+	HscStringId identifier_string_id = hsc_string_table_deduplicate(&astgen->string_table, (char*)ident_string.data, ident_string.size);
+
+	return hsc_hash_table_find(&astgen->macro_declarations, identifier_string_id.idx_plus_one, NULL) == is_true;
+}
+
+typedef struct HscPPEval HscPPEval;
+struct HscPPEval {
+	union {
+		U64 u64;
+		S64 s64;
+	};
+	bool is_signed;
+};
+
+HscPPEval hsc_astgen_preprocessor_eval_expr(HscAstGen* astgen, U32 min_precedence, U32* token_idx_mut, U32* token_value_idx_mut);
+
+HscPPEval hsc_astgen_preprocessor_eval_unary_expr(HscAstGen* astgen, U32* token_idx_mut, U32* token_value_idx_mut) {
+	HSC_ASSERT_ARRAY_BOUNDS(*token_idx_mut, astgen->tokens_count);
+	HscToken token = astgen->tokens[*token_idx_mut];
+	*token_idx_mut += 1;
+
+	HscPPEval eval;
+	HscUnaryOp unary_op;
+	switch (token) {
+		case HSC_TOKEN_LIT_U32:
+		case HSC_TOKEN_LIT_U64: {
+			HscConstantId constant_id = astgen->token_values[*token_value_idx_mut].constant_id;
+			*token_value_idx_mut += 1;
+			HscConstant constant = hsc_constant_table_get(&astgen->constant_table, constant_id);
+			U64 u64;
+			HSC_DEBUG_ASSERT(hsc_constant_as_uint(constant, &u64), "internal error: expected to be a unsigned int");
+
+			eval.is_signed = false;
+			eval.u64 = u64;
+			break;
+		};
+
+		case HSC_TOKEN_LIT_S32:
+		case HSC_TOKEN_LIT_S64: {
+			HscConstantId constant_id = astgen->token_values[*token_value_idx_mut].constant_id;
+			*token_value_idx_mut += 1;
+			HscConstant constant = hsc_constant_table_get(&astgen->constant_table, constant_id);
+			S64 s64;
+			HSC_DEBUG_ASSERT(hsc_constant_as_sint(constant, &s64), "internal error: expected to be a signed int");
+
+			eval.is_signed = true;
+			eval.s64 = s64;
+			break;
+		};
+
+		case HSC_TOKEN_PARENTHESIS_OPEN:
+			eval = hsc_astgen_preprocessor_eval_expr(astgen, 0, token_idx_mut, token_value_idx_mut);
+			HSC_ASSERT_ARRAY_BOUNDS(*token_idx_mut, astgen->tokens_count);
+			token = astgen->tokens[*token_idx_mut];
+			if (token != HSC_TOKEN_PARENTHESIS_CLOSE) {
+				hsc_astgen_token_error_1(astgen, "expected a ')' here to finish the expression");
+			}
+			*token_idx_mut += 1;
+			break;
+
+		case HSC_TOKEN_TILDE: unary_op = HSC_UNARY_OP_BIT_NOT; goto UNARY;
+		case HSC_TOKEN_EXCLAMATION_MARK: unary_op = HSC_UNARY_OP_LOGICAL_NOT; goto UNARY;
+		case HSC_TOKEN_PLUS: unary_op = HSC_UNARY_OP_PLUS; goto UNARY;
+		case HSC_TOKEN_MINUS: unary_op = HSC_UNARY_OP_NEGATE; goto UNARY;
+UNARY:
+		{
+			eval = hsc_astgen_preprocessor_eval_expr(astgen, 0, token_idx_mut, token_value_idx_mut);
+			switch (unary_op) {
+				case HSC_TOKEN_TILDE:            eval.u64 = ~eval.u64; break;
+				case HSC_TOKEN_EXCLAMATION_MARK: eval.u64 = !eval.u64; break;
+				case HSC_TOKEN_PLUS:                                   break;
+				case HSC_TOKEN_MINUS:            eval.u64 = -eval.u64; break;
+				default: HSC_UNREACHABLE();
+			}
+			break;
+		};
+
+		default:
+			if (HSC_TOKEN_IS_KEYWORD(token) || token == HSC_TOKEN_IDENT) {
+				eval.is_signed = true;
+				eval.s64 = 0;
+
+				if (hsc_opt_is_enabled(&astgen->opts, HSC_OPT_PP_UNDEF_EVAL)) {
+					hsc_astgen_token_error_1(astgen, "undefined identifier in preprocessor expression");
+				}
+			} else {
+				*token_idx_mut -= 1;
+				hsc_astgen_token_error_1(astgen, "'%s' is not a valid preprocessor unary expression token", hsc_token_strings[token]);
+			}
+			break;
+	}
+
+	return eval;
+}
+
+void hsc_astgen_preprocessor_eval_binary_op(HscAstGen* astgen, U32* token_idx_mut, HscBinaryOp* binary_op_type_out, U32* precedence_out) {
+	HSC_ASSERT_ARRAY_BOUNDS(*token_idx_mut, astgen->tokens_count);
+	HscToken token = astgen->tokens[*token_idx_mut];
+	switch (token) {
+		case HSC_TOKEN_ASTERISK:              *binary_op_type_out = HSC_BINARY_OP_MULTIPLY;              *precedence_out = 3;  break;
+		case HSC_TOKEN_FORWARD_SLASH:         *binary_op_type_out = HSC_BINARY_OP_DIVIDE;                *precedence_out = 3;  break;
+		case HSC_TOKEN_PERCENT:               *binary_op_type_out = HSC_BINARY_OP_MODULO;                *precedence_out = 3;  break;
+		case HSC_TOKEN_PLUS:                  *binary_op_type_out = HSC_BINARY_OP_ADD;                   *precedence_out = 4;  break;
+		case HSC_TOKEN_MINUS:                 *binary_op_type_out = HSC_BINARY_OP_SUBTRACT;              *precedence_out = 4;  break;
+		case HSC_TOKEN_BIT_SHIFT_LEFT:        *binary_op_type_out = HSC_BINARY_OP_BIT_SHIFT_LEFT;        *precedence_out = 5;  break;
+		case HSC_TOKEN_BIT_SHIFT_RIGHT:       *binary_op_type_out = HSC_BINARY_OP_BIT_SHIFT_RIGHT;       *precedence_out = 5;  break;
+		case HSC_TOKEN_LESS_THAN:             *binary_op_type_out = HSC_BINARY_OP_LESS_THAN;             *precedence_out = 6;  break;
+		case HSC_TOKEN_LESS_THAN_OR_EQUAL:    *binary_op_type_out = HSC_BINARY_OP_LESS_THAN_OR_EQUAL;    *precedence_out = 6;  break;
+		case HSC_TOKEN_GREATER_THAN:          *binary_op_type_out = HSC_BINARY_OP_GREATER_THAN;          *precedence_out = 6;  break;
+		case HSC_TOKEN_GREATER_THAN_OR_EQUAL: *binary_op_type_out = HSC_BINARY_OP_GREATER_THAN_OR_EQUAL; *precedence_out = 6;  break;
+		case HSC_TOKEN_LOGICAL_EQUAL:         *binary_op_type_out = HSC_BINARY_OP_EQUAL;                 *precedence_out = 7;  break;
+		case HSC_TOKEN_LOGICAL_NOT_EQUAL:     *binary_op_type_out = HSC_BINARY_OP_NOT_EQUAL;             *precedence_out = 7;  break;
+		case HSC_TOKEN_AMPERSAND:             *binary_op_type_out = HSC_BINARY_OP_BIT_AND;               *precedence_out = 8;  break;
+		case HSC_TOKEN_CARET:                 *binary_op_type_out = HSC_BINARY_OP_BIT_XOR;               *precedence_out = 9;  break;
+		case HSC_TOKEN_PIPE:                  *binary_op_type_out = HSC_BINARY_OP_BIT_OR;                *precedence_out = 10; break;
+		case HSC_TOKEN_LOGICAL_AND:           *binary_op_type_out = HSC_BINARY_OP_LOGICAL_AND;           *precedence_out = 11; break;
+		case HSC_TOKEN_LOGICAL_OR:            *binary_op_type_out = HSC_BINARY_OP_LOGICAL_OR;            *precedence_out = 12; break;
+		case HSC_TOKEN_QUESTION_MARK:         *binary_op_type_out = HSC_BINARY_OP_TERNARY;               *precedence_out = 13; break;
+
+		case HSC_TOKEN_PARENTHESIS_CLOSE:
+		case HSC_TOKEN_COLON:
+			*binary_op_type_out = HSC_BINARY_OP_ASSIGN;
+			*precedence_out = 0;
+			break;
+
+		default:
+			hsc_astgen_token_error_1(astgen, "'%s' is not a valid preprocessor binary operator", hsc_token_strings[token]);
+			break;
+	}
+}
+
+HscPPEval hsc_astgen_preprocessor_eval_expr(HscAstGen* astgen, U32 min_precedence, U32* token_idx_mut, U32* token_value_idx_mut) {
+	U32 callee_token_idx = astgen->token_read_idx;
+	HscPPEval left_eval = hsc_astgen_preprocessor_eval_unary_expr(astgen, token_idx_mut, token_value_idx_mut);
+
+	while (*token_idx_mut < astgen->tokens_count) {
+		HscBinaryOp binary_op_type;
+		U32 precedence;
+		hsc_astgen_preprocessor_eval_binary_op(astgen, token_idx_mut, &binary_op_type, &precedence);
+		if (binary_op_type == HSC_BINARY_OP_ASSIGN || (min_precedence && min_precedence <= precedence)) {
+			return left_eval;
+		}
+		*token_idx_mut += 1;
+
+		HscPPEval eval;
+		if (binary_op_type == HSC_BINARY_OP_TERNARY) {
+			HscPPEval true_eval = hsc_astgen_preprocessor_eval_expr(astgen, 0, token_idx_mut, token_value_idx_mut);
+			HSC_ASSERT_ARRAY_BOUNDS(*token_idx_mut, astgen->tokens_count);
+			HscToken token = astgen->tokens[*token_idx_mut];
+			if (token != HSC_TOKEN_COLON) {
+				hsc_astgen_token_error_1(astgen, "expected a ':' for the false side of the ternary expression");
+			}
+			*token_idx_mut += 1;
+			HscPPEval false_eval = hsc_astgen_preprocessor_eval_expr(astgen, 0, token_idx_mut, token_value_idx_mut);
+			eval = left_eval.u64 ? true_eval : false_eval;
+		} else {
+			HscPPEval right_eval = hsc_astgen_preprocessor_eval_expr(astgen, precedence, token_idx_mut, token_value_idx_mut);
+			eval.is_signed = left_eval.is_signed == right_eval.is_signed;
+			switch (binary_op_type) {
+				case HSC_BINARY_OP_ADD: eval.u64 = left_eval.u64 + right_eval.u64; break;
+				case HSC_BINARY_OP_SUBTRACT: eval.u64 = left_eval.u64 - right_eval.u64; break;
+				case HSC_BINARY_OP_MULTIPLY: eval.u64 = left_eval.u64 * right_eval.u64; break;
+				case HSC_BINARY_OP_DIVIDE:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 / right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 / right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_MODULO:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 % right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 % right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_BIT_AND:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 & right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 & right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_BIT_OR:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 | right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 | right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_BIT_XOR:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 ^ right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 ^ right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_BIT_SHIFT_LEFT:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 << right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 << right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_BIT_SHIFT_RIGHT:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 >> right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 >> right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_EQUAL:     eval.u64 = left_eval.u64 == right_eval.u64; break;
+				case HSC_BINARY_OP_NOT_EQUAL: eval.u64 = left_eval.u64 != right_eval.u64; break;
+				case HSC_BINARY_OP_LESS_THAN:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 < right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 < right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_LESS_THAN_OR_EQUAL:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 <= right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 <= right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_GREATER_THAN:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 > right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 > right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_GREATER_THAN_OR_EQUAL:
+					if (eval.is_signed) { eval.s64 = left_eval.s64 >= right_eval.s64; }
+					else {                eval.u64 = left_eval.u64 >= right_eval.u64; }
+					break;
+				case HSC_BINARY_OP_LOGICAL_AND:
+					eval.u64 = left_eval.u64 && right_eval.u64;
+					break;
+				case HSC_BINARY_OP_LOGICAL_OR:
+					eval.u64 = left_eval.u64 || right_eval.u64;
+					break;
+				default:
+					HSC_UNREACHABLE();
+			}
+		}
+
+		left_eval = eval;
+	}
+
+	return left_eval;
+}
+
+bool hsc_astgen_parse_preprocessor_if(HscAstGen* astgen) {
+	hsc_astgen_token_consume_whitespace(astgen);
+	astgen->span->location.code_start_idx = astgen->span->location.code_end_idx;
+	astgen->span->location.column_start = astgen->span->location.column_end;
+
+	HscString condition = hsc_string((char*)&astgen->span->code[astgen->span->location.code_end_idx], 0);
+	hsc_astgen_token_consume_until_any_byte(astgen, "\n");
+	condition.size = (char*)&astgen->span->code[astgen->span->location.code_end_idx] - condition.data;
+
+	U32 token_start_idx = astgen->tokens_count;
+	U32 token_value_start_idx = astgen->token_values_count;
+	U32 token_location_start_idx = astgen->token_locations_count;
+	hsc_code_span_push_preprocessor_if(astgen, condition);
+
+	astgen->is_preprocessor_if_expression = true;
+	void hsc_astgen_tokenize_run(HscAstGen* astgen);
+	hsc_astgen_tokenize_run(astgen);
+	astgen->is_preprocessor_if_expression = false;
+
+	if (token_start_idx == astgen->tokens_count) {
+		hsc_astgen_token_error_1(astgen, "condition expands to no preprocessor expression tokens");
+	}
+
+	U32 token_idx = token_start_idx;
+	U32 token_value_idx = token_value_start_idx;
+	bool is_true = !!hsc_astgen_preprocessor_eval_expr(astgen, 0, &token_idx, &token_value_idx).u64;
+
+	HSC_DEBUG_ASSERT(token_idx == astgen->tokens_count, "internal error: preprocessor expression has not been fully evaluated");
+
+	astgen->tokens_count = token_start_idx;
+	astgen->token_values_count = token_value_start_idx;
+	astgen->token_locations_count = token_location_start_idx;
+
+	astgen->location.column_end += condition.size;
+	astgen->location.code_end_idx += condition.size;
+
+	return is_true;
+}
+
+void hsc_astgen_parse_preprocessor_defined(HscAstGen* astgen) {
+	HscCodeSpan* span = astgen->span;
+
+	span->location.column_end += sizeof("defined") - 1;
+	span->location.code_end_idx += sizeof("defined") - 1;
+	hsc_astgen_token_consume_whitespace(astgen);
+
+	bool has_parenthesis = span->code[span->location.code_end_idx] == '(';
+	if (has_parenthesis) {
+		span->location.column_end += 1;
+		span->location.code_end_idx += 1;
+		hsc_astgen_token_consume_whitespace(astgen);
+	}
+
+	HscString macro_ident_string = hsc_astgen_parse_ident(astgen, "expected an 'identifier' of a macro to follow the 'defined' preprocessor unary operator");
+	HscStringId macro_string_id = hsc_string_table_deduplicate(&astgen->string_table, (char*)macro_ident_string.data, macro_ident_string.size);
+
+	bool does_macro_exist = hsc_hash_table_find(&astgen->macro_declarations, macro_string_id.idx_plus_one, NULL);
+	span->location.column_end += macro_ident_string.size;
+	span->location.code_end_idx += macro_ident_string.size;
+
+	if (has_parenthesis) {
+		hsc_astgen_token_consume_whitespace(astgen);
+		if (span->code[span->location.code_end_idx] != ')') {
+			hsc_astgen_token_error_1(astgen, "expected an ')' to finish the 'defined' preprocessor unary operator");
+		}
+		span->location.code_end_idx += 1;
+		span->location.column_end += 1;
+	}
+
+	HscConstantId* basic_type_constant_ids = does_macro_exist ? astgen->basic_type_one_constant_ids : astgen->basic_type_zero_constant_ids;
+	HscTokenValue token_value;
+	token_value.constant_id = basic_type_constant_ids[HSC_DATA_TYPE_U32];
+
+	hsc_astgen_add_token(astgen, HSC_TOKEN_LIT_U32);
+	hsc_astgen_add_token_value(astgen, token_value);
+}
+
+typedef U8 HscPPDirective;
+enum {
+	HSC_PP_DIRECTIVE_DEFINE,
+	HSC_PP_DIRECTIVE_UNDEF,
+	HSC_PP_DIRECTIVE_INCLUDE,
+	HSC_PP_DIRECTIVE_IF,
+	HSC_PP_DIRECTIVE_IFDEF,
+	HSC_PP_DIRECTIVE_IFNDEF,
+	HSC_PP_DIRECTIVE_ELSE,
+	HSC_PP_DIRECTIVE_ELIF,
+	HSC_PP_DIRECTIVE_ELIFDEF,
+	HSC_PP_DIRECTIVE_ELIFNDEF,
+	HSC_PP_DIRECTIVE_ENDIF,
+	HSC_PP_DIRECTIVE_LINE,
+	HSC_PP_DIRECTIVE_ERROR,
+	HSC_PP_DIRECTIVE_PRAGMA,
+
+	HSC_PP_DIRECTIVE_COUNT,
+};
+
+char* hsc_pp_directive_enum_strings[HSC_PP_DIRECTIVE_COUNT] = {
+	[HSC_PP_DIRECTIVE_DEFINE] = "HSC_PP_DIRECTIVE_DEFINE",
+	[HSC_PP_DIRECTIVE_UNDEF] = "HSC_PP_DIRECTIVE_UNDEF",
+	[HSC_PP_DIRECTIVE_INCLUDE] = "HSC_PP_DIRECTIVE_INCLUDE",
+	[HSC_PP_DIRECTIVE_IF] = "HSC_PP_DIRECTIVE_IF",
+	[HSC_PP_DIRECTIVE_IFDEF] = "HSC_PP_DIRECTIVE_IFDEF",
+	[HSC_PP_DIRECTIVE_IFNDEF] = "HSC_PP_DIRECTIVE_IFNDEF",
+	[HSC_PP_DIRECTIVE_ELSE] = "HSC_PP_DIRECTIVE_ELSE",
+	[HSC_PP_DIRECTIVE_ELIF] = "HSC_PP_DIRECTIVE_ELIF",
+	[HSC_PP_DIRECTIVE_ELIFDEF] = "HSC_PP_DIRECTIVE_ELIFDEF",
+	[HSC_PP_DIRECTIVE_ELIFNDEF] = "HSC_PP_DIRECTIVE_ELIFNDEF",
+	[HSC_PP_DIRECTIVE_ENDIF] = "HSC_PP_DIRECTIVE_ENDIF",
+	[HSC_PP_DIRECTIVE_LINE] = "HSC_PP_DIRECTIVE_LINE",
+	[HSC_PP_DIRECTIVE_ERROR] = "HSC_PP_DIRECTIVE_ERROR",
+	[HSC_PP_DIRECTIVE_PRAGMA] = "HSC_PP_DIRECTIVE_PRAGMA",
+};
+
+char* hsc_pp_directive_strings[HSC_PP_DIRECTIVE_COUNT] = {
+	[HSC_PP_DIRECTIVE_DEFINE] = "define",
+	[HSC_PP_DIRECTIVE_UNDEF] = "undef",
+	[HSC_PP_DIRECTIVE_INCLUDE] = "include",
+	[HSC_PP_DIRECTIVE_IF] = "if",
+	[HSC_PP_DIRECTIVE_IFDEF] = "ifdef",
+	[HSC_PP_DIRECTIVE_IFNDEF] = "ifndef",
+	[HSC_PP_DIRECTIVE_ELSE] = "else",
+	[HSC_PP_DIRECTIVE_ELIF] = "elif",
+	[HSC_PP_DIRECTIVE_ELIFDEF] = "elifdef",
+	[HSC_PP_DIRECTIVE_ELIFNDEF] = "elifndef",
+	[HSC_PP_DIRECTIVE_ENDIF] = "endif",
+	[HSC_PP_DIRECTIVE_LINE] = "line",
+	[HSC_PP_DIRECTIVE_ERROR] = "error",
+	[HSC_PP_DIRECTIVE_PRAGMA] = "pragma",
+};
+
+U32 hsc_pp_directive_hashes[] = {
+	[HSC_PP_DIRECTIVE_DEFINE] = 0x6a9f8552,
+	[HSC_PP_DIRECTIVE_UNDEF] = 0x75191b51,
+	[HSC_PP_DIRECTIVE_INCLUDE] = 0x75597a67,
+	[HSC_PP_DIRECTIVE_IF] = 0x39386e06,
+	[HSC_PP_DIRECTIVE_IFDEF] = 0x546cc0ed,
+	[HSC_PP_DIRECTIVE_IFNDEF] = 0xf1e59c9f,
+	[HSC_PP_DIRECTIVE_ELSE] = 0xbdbf5bf0,
+	[HSC_PP_DIRECTIVE_ELIF] = 0xc0a5c8c3,
+	[HSC_PP_DIRECTIVE_ELIFDEF] = 0x7aeee312,
+	[HSC_PP_DIRECTIVE_ELIFNDEF] = 0xdc679c86,
+	[HSC_PP_DIRECTIVE_ENDIF] = 0x1c12ad4d,
+	[HSC_PP_DIRECTIVE_LINE] = 0x17db1627,
+	[HSC_PP_DIRECTIVE_ERROR] = 0x21918751,
+	[HSC_PP_DIRECTIVE_PRAGMA] = 0x19fa4625,
+};
+
+#define HSC_FNV_HASH_32_INITIAL 0x811c9dc5
+U32 hsc_fnv_hash_32(char* bytes, U32 byte_count, U32 hash) {
+	char* bytes_end = bytes + byte_count;
+	while (bytes < bytes_end) {
+		hash = hash ^ *bytes;
+		hash = hash * 0x01000193;
+		bytes += 1;
+	}
+	return hash;
+}
+
+void hsc_generate_enum_hashes(char* array_name, char** strings, char** enum_strings, U32 enums_count) {
+	U32 used_hashes[128];
+	HSC_ASSERT(enums_count <= HSC_ARRAY_COUNT(used_hashes), "internal error: used_hashes needs to be atleast %u", enums_count);
+
+	for (U32 idx = 0; idx < enums_count; idx += 1) {
+		char* string = strings[idx];
+		U32 string_size = strlen(string);
+		U32 hash = hsc_fnv_hash_32(string, string_size, HSC_FNV_HASH_32_INITIAL);
+		for (U32 used_idx = 0; used_idx < idx; used_idx += 1) {
+			HSC_ASSERT(used_hashes[used_idx] != hash, "internal error: '%s' and '%s' have the same hash of '0x%x'", strings[idx], strings[used_idx]);
+		}
+		used_hashes[idx] = hash;
+	}
+
+	printf("U32 %s[] = {\n", array_name);
+	for (U32 idx = 0; idx < enums_count; idx += 1) {
+		char* enum_string = enum_strings[idx];
+		U32 hash = used_hashes[idx];
+		printf("\t[%s] = 0x%x,\n", enum_string, hash);
+	}
+	printf("};\n");
+};
+
+void hsc_generate_hashes() {
+	hsc_generate_enum_hashes("hsc_pp_directive_hashes", hsc_pp_directive_strings, hsc_pp_directive_enum_strings, HSC_PP_DIRECTIVE_COUNT);
+	exit(0);
+}
+
+U32 hsc_string_to_enum_hashed_find(HscString string, U32* enum_hashes, U32 enums_count) {
+	U32 hash = hsc_fnv_hash_32(string.data, string.size, HSC_FNV_HASH_32_INITIAL);
+	for (U32 enum_ = 0; enum_ < enums_count; enum_ += 1) {
+		if (enum_hashes[enum_] == hash) {
+			return enum_;
+		}
+	}
+	return enums_count;
+}
+
+void hsc_parse_preprocessor_found_endif(HscAstGen* astgen) {
+	HSC_ASSERT_ARRAY_BOUNDS(astgen->preprocessor_nested_level, sizeof(astgen->preprocessor_nested_level_has_used_else_bitset) * 8);
+	astgen->preprocessor_nested_level_has_used_else_bitset &= ~(1 << astgen->preprocessor_nested_level);
+}
+
+void hsc_parse_preprocessor_found_else(HscAstGen* astgen) {
+	HSC_ASSERT_ARRAY_BOUNDS(astgen->preprocessor_nested_level - 1, sizeof(astgen->preprocessor_nested_level_has_used_else_bitset) * 8);
+	astgen->preprocessor_nested_level_has_used_else_bitset |= 1 << (astgen->preprocessor_nested_level - 1);
+}
+
+void hsc_parse_preprocessor_ensure_first_else(HscAstGen* astgen, HscString ident_string) {
+	HSC_ASSERT_ARRAY_BOUNDS(astgen->preprocessor_nested_level - 1, sizeof(astgen->preprocessor_nested_level_has_used_else_bitset) * 8);
+	if (astgen->preprocessor_nested_level_has_used_else_bitset & (1 << (astgen->preprocessor_nested_level - 1))) {
+		hsc_astgen_token_error_1(astgen, "'#%.*s' cannot follow an '#else' in the same preprocessor if chain", (int)ident_string.size, ident_string.data);
+	}
+}
+
+//
+// return true if code should be processed and false if code should be skipped
+bool hsc_astgen_parse_preprocessor_directive(HscAstGen* astgen, bool is_skipping_code, bool is_skipping_until_endif, U32 nested_level) {
 	astgen->span->location.code_end_idx += 1; // skip '#'
 	astgen->span->location.column_end += 1;
 	hsc_astgen_token_consume_whitespace(astgen);
@@ -2074,33 +2566,162 @@ void hsc_astgen_parse_preprocessor_directive(HscAstGen* astgen) {
 		case '\r':
 		case '\n':
 		case '\0':
-			return;
+			return false;
 	}
 
 	HscString ident_string = hsc_astgen_parse_ident(astgen, "invalid token '%c' for preprocessor directive");
 	astgen->span->location.code_end_idx += ident_string.size;
 	astgen->span->location.column_end += ident_string.size;
-	if (ident_string.size) {
-		if (hsc_string_eq_lit(ident_string, "define")) {
-			hsc_astgen_parse_preprocessor_define(astgen);
-		} else if (hsc_string_eq_lit(ident_string, "undef")) {
-			hsc_astgen_parse_preprocessor_undef(astgen);
-		} else {
-			hsc_astgen_token_error_1(astgen, "invalid preprocessor directive '#%.*s'", (int)ident_string.size, ident_string.data);
+	if (ident_string.size == 0) {
+		goto END;
+	}
+
+	HscPPDirective directive = hsc_string_to_enum_hashed_find(ident_string, hsc_pp_directive_hashes, HSC_PP_DIRECTIVE_COUNT);
+	if (directive == HSC_PP_DIRECTIVE_COUNT) {
+		hsc_astgen_token_error_1(astgen, "invalid preprocessor directive '#%.*s'", (int)ident_string.size, ident_string.data);
+	}
+
+#if HSC_DEBUG_CODE_PREPROCESSOR
+	U32 debug_indent_level = astgen->preprocessor_nested_level;
+	U32 debug_line = astgen->span->location.line_end;
+	if (directive == HSC_PP_DIRECTIVE_ENDIF) {
+		debug_indent_level -= 1;
+	}
+#endif
+
+	if (is_skipping_code) {
+		switch (directive) {
+			case HSC_PP_DIRECTIVE_DEFINE:
+			case HSC_PP_DIRECTIVE_UNDEF:
+			case HSC_PP_DIRECTIVE_INCLUDE:
+			case HSC_PP_DIRECTIVE_LINE:
+			case HSC_PP_DIRECTIVE_ERROR:
+			case HSC_PP_DIRECTIVE_PRAGMA:
+				break;
+			case HSC_PP_DIRECTIVE_IF:
+			case HSC_PP_DIRECTIVE_IFDEF:
+			case HSC_PP_DIRECTIVE_IFNDEF:
+				astgen->preprocessor_nested_level += 1;
+				break;
+			case HSC_PP_DIRECTIVE_ENDIF:
+				if (astgen->preprocessor_nested_level == nested_level) {
+					is_skipping_code = false;
+				}
+				astgen->preprocessor_nested_level -= 1;
+				hsc_parse_preprocessor_found_endif(astgen);
+				break;
+			case HSC_PP_DIRECTIVE_ELSE:
+			case HSC_PP_DIRECTIVE_ELIF:
+			case HSC_PP_DIRECTIVE_ELIFDEF:
+			case HSC_PP_DIRECTIVE_ELIFNDEF:
+				hsc_parse_preprocessor_ensure_first_else(astgen, ident_string);
+				if (directive == HSC_PP_DIRECTIVE_ELSE) {
+					hsc_parse_preprocessor_found_else(astgen);
+				}
+				if (!is_skipping_until_endif && astgen->preprocessor_nested_level == nested_level) {
+					switch (directive) {
+						case HSC_PP_DIRECTIVE_ELSE:
+							is_skipping_code = false;
+							break;
+						case HSC_PP_DIRECTIVE_ELIF:
+							is_skipping_code = !hsc_astgen_parse_preprocessor_if(astgen);
+							break;
+						case HSC_PP_DIRECTIVE_ELIFDEF:
+						case HSC_PP_DIRECTIVE_ELIFNDEF:
+							is_skipping_code = !hsc_astgen_parse_preprocessor_ifdef(astgen, directive == HSC_PP_DIRECTIVE_ELIFDEF);
+							break;
+					}
+				}
+				break;
+		}
+
+#if HSC_DEBUG_CODE_PREPROCESSOR
+		char* plus_or_minus = is_skipping_code ? "-" : "+";
+		printf("%s(%u)#%-7s at line %u\n", plus_or_minus, debug_indent_level, hsc_pp_directive_strings[directive], debug_line);
+#endif
+	} else {
+		switch (directive) {
+			case HSC_PP_DIRECTIVE_DEFINE:
+				hsc_astgen_parse_preprocessor_define(astgen);
+				break;
+			case HSC_PP_DIRECTIVE_UNDEF:
+				hsc_astgen_parse_preprocessor_undef(astgen);
+				break;
+			case HSC_PP_DIRECTIVE_INCLUDE:
+				HSC_ABORT("TODO");
+				// hsc_astgen_parse_preprocessor_include(astgen);
+				break;
+			case HSC_PP_DIRECTIVE_LINE:
+				HSC_ABORT("TODO");
+				// hsc_astgen_parse_preprocessor_line(astgen);
+				break;
+			case HSC_PP_DIRECTIVE_ERROR:
+				HSC_ABORT("TODO");
+				// hsc_astgen_parse_preprocessor_error(astgen);
+				break;
+			case HSC_PP_DIRECTIVE_PRAGMA:
+				HSC_ABORT("TODO");
+				// hsc_astgen_parse_preprocessor_pragma(astgen);
+				break;
+			case HSC_PP_DIRECTIVE_IF:
+				astgen->preprocessor_nested_level += 1;
+				is_skipping_code = !hsc_astgen_parse_preprocessor_if(astgen);
+				break;
+			case HSC_PP_DIRECTIVE_IFDEF:
+			case HSC_PP_DIRECTIVE_IFNDEF:
+				astgen->preprocessor_nested_level += 1;
+				is_skipping_code = !hsc_astgen_parse_preprocessor_ifdef(astgen, directive == HSC_PP_DIRECTIVE_IFDEF);
+				break;
+			case HSC_PP_DIRECTIVE_ENDIF:
+				if (astgen->preprocessor_nested_level == 0) {
+					hsc_astgen_token_error_1(astgen, "'#%.*s' must follow an open #if/#ifdef/#ifndef", (int)ident_string.size, ident_string.data);
+				}
+				astgen->preprocessor_nested_level -= 1;
+				hsc_parse_preprocessor_found_endif(astgen);
+				break;
+			case HSC_PP_DIRECTIVE_ELSE:
+			case HSC_PP_DIRECTIVE_ELIF:
+			case HSC_PP_DIRECTIVE_ELIFDEF:
+			case HSC_PP_DIRECTIVE_ELIFNDEF:
+				hsc_parse_preprocessor_ensure_first_else(astgen, ident_string);
+				if (directive == HSC_PP_DIRECTIVE_ELSE) {
+					hsc_parse_preprocessor_found_else(astgen);
+				}
+
+				if (astgen->preprocessor_nested_level == 0) {
+					hsc_astgen_token_error_1(astgen, "'#%.*s' must follow an open #if/#ifdef/#ifndef", (int)ident_string.size, ident_string.data);
+				}
+				is_skipping_code = true;
+				is_skipping_until_endif = true;
+				break;
+		}
+
+#if HSC_DEBUG_CODE_PREPROCESSOR
+		printf("+(%u)#%-7s at line %u\n", debug_indent_level, hsc_pp_directive_strings[directive], debug_line);
+#endif
+
+		if (is_skipping_code) {
+			hsc_astgen_parse_preprocessor_skip_false_conditional(astgen, is_skipping_until_endif);
+		}
+		is_skipping_code = false;
+	}
+
+END: {}
+	if (!is_skipping_code) {
+		byte = astgen->span->code[astgen->span->location.code_end_idx];
+		switch (byte) {
+			case '\r':
+			case '\n':
+				break;
+			default:
+				if (astgen->span->location.code_end_idx < astgen->span->code_size) {
+					hsc_astgen_token_error_1(astgen, "too many arguments for the '#%.*s' directive", (int)ident_string.size, ident_string.data);
+				}
+				break;
 		}
 	}
 
-	byte = astgen->span->code[astgen->span->location.code_end_idx];
-	switch (byte) {
-		case '\r':
-		case '\n':
-			break;
-		default:
-			if (astgen->span->location.code_end_idx < astgen->span->code_size) {
-				hsc_astgen_token_error_1(astgen, "too many arguments for the '#%.*s' directive", (int)ident_string.size, ident_string.data);
-			}
-			break;
-	}
+	return !is_skipping_code;
 }
 
 U32 hsc_astgen_macro_find_param(HscAstGen* astgen, HscMacro* macro, HscStringId param_string_id) {
@@ -2342,20 +2963,12 @@ bool hsc_code_span_push_macro_if_it_is_one(HscAstGen* astgen, HscString ident_st
 	return true;
 }
 
-void hsc_astgen_tokenize(HscAstGen* astgen) {
-	HscToken brackets_to_close[_HSC_TOKENIZER_NESTED_BRACKETS_CAP];
-	U32 brackets_to_close_token_indices[_HSC_TOKENIZER_NESTED_BRACKETS_CAP];
-	uint32_t brackets_to_close_count = 0;
-
-	astgen->span->location.code_start_idx = 0;
-	astgen->span->location.code_end_idx = 0;
-	astgen->span->location.line_start = 1;
-	astgen->span->location.line_end = 1;
-	astgen->span->location.column_start = 1;
-	astgen->span->location.column_end = 1;
+void hsc_astgen_tokenize_run(HscAstGen* astgen) {
 	while (astgen->span) {
 		if (astgen->span->location.code_end_idx >= astgen->span->code_size) {
-			hsc_code_span_pop(astgen);
+			if (hsc_code_span_pop(astgen)) {
+				return;
+			}
 			continue;
 		}
 
@@ -2421,10 +3034,10 @@ void hsc_astgen_tokenize(HscAstGen* astgen) {
 					astgen->span->location.code_end_idx += 2;
 					while (astgen->span->location.code_end_idx < astgen->span->code_size) {
 						uint8_t b = astgen->span->code[astgen->span->location.code_end_idx];
-						astgen->span->location.code_end_idx += 1;
 						if (b == '\n') {
 							break;
 						}
+						astgen->span->location.code_end_idx += 1;
 					}
 
 					token_size = astgen->span->location.code_end_idx - astgen->span->location.code_start_idx;
@@ -2576,12 +3189,12 @@ void hsc_astgen_tokenize(HscAstGen* astgen) {
 				goto OPEN_BRACKETS;
 OPEN_BRACKETS:
 			{
-				if (brackets_to_close_count >= _HSC_TOKENIZER_NESTED_BRACKETS_CAP) {
+				if (astgen->brackets_to_close_count >= _HSC_TOKENIZER_NESTED_BRACKETS_CAP) {
 					hsc_astgen_token_error_1(astgen, "nested brackets capacity of '%u' has been exceeded", _HSC_TOKENIZER_NESTED_BRACKETS_CAP);
 				}
-				brackets_to_close[brackets_to_close_count] = close_token;
-				brackets_to_close_token_indices[brackets_to_close_count] = astgen->tokens_count;
-				brackets_to_close_count += 1;
+				astgen->brackets_to_close[astgen->brackets_to_close_count] = close_token;
+				astgen->brackets_to_close_token_indices[astgen->brackets_to_close_count] = astgen->tokens_count;
+				astgen->brackets_to_close_count += 1;
 				break;
 			};
 			case '}':
@@ -2595,15 +3208,15 @@ OPEN_BRACKETS:
 				goto CLOSE_BRACKETS;
 CLOSE_BRACKETS:
 			{
-				if (brackets_to_close_count == 0) {
+				if (astgen->brackets_to_close_count == 0) {
 					hsc_astgen_token_error_1(astgen, "no brackets are open to close '%c'", byte);
 				}
 
-				brackets_to_close_count -= 1;
-				if (brackets_to_close[brackets_to_close_count] != token) {
+				astgen->brackets_to_close_count -= 1;
+				if (astgen->brackets_to_close[astgen->brackets_to_close_count] != token) {
 					astgen->span->location.code_end_idx += 1;
 					astgen->span->location.column_end += 1;
-					hsc_astgen_token_error_2(astgen, brackets_to_close_token_indices[brackets_to_close_count], "expected to close bracket pair with '%s' but got '%c'", hsc_token_strings[brackets_to_close[brackets_to_close_count]], byte);
+					hsc_astgen_token_error_2(astgen, astgen->brackets_to_close_token_indices[astgen->brackets_to_close_count], "expected to close bracket pair with '%s' but got '%c'", hsc_token_strings[astgen->brackets_to_close[astgen->brackets_to_close_count]], byte);
 				}
 				break;
 			};
@@ -2625,7 +3238,7 @@ CLOSE_BRACKETS:
 					}
 
 					if (astgen->tokens_count == 0 || astgen->token_locations[astgen->tokens_count - 1].line_end != astgen->span->location.line_start) {
-						hsc_astgen_parse_preprocessor_directive(astgen);
+						hsc_astgen_parse_preprocessor_directive(astgen, false, false, 0);
 						continue;
 					} else {
 						hsc_astgen_token_error_1(astgen, "invalid token '#', preprocessor directives must be the first non-whitespace on the line");
@@ -2636,6 +3249,11 @@ CLOSE_BRACKETS:
 				token_size = ident_string.size;
 
 				HscStringId string_id = hsc_string_table_deduplicate(&astgen->string_table, (char*)ident_string.data, ident_string.size);
+				if (astgen->is_preprocessor_if_expression && string_id.idx_plus_one == astgen->defined_string_id.idx_plus_one) {
+					hsc_astgen_parse_preprocessor_defined(astgen);
+					continue;
+				}
+
 				if (astgen->span->macro || astgen->span->macro_arg_id) {
 					if (hsc_code_span_push_macro_arg_if_it_is_one(astgen, ident_string, string_id)) {
 						continue;
@@ -2672,6 +3290,19 @@ CLOSE_BRACKETS:
 		astgen->span->location.column_end += token_size;
 		hsc_astgen_add_token(astgen, token);
 	}
+}
+
+void hsc_astgen_tokenize(HscAstGen* astgen) {
+	astgen->brackets_to_close_count = 0;
+
+	astgen->span->location.code_start_idx = 0;
+	astgen->span->location.code_end_idx = 0;
+	astgen->span->location.line_start = 1;
+	astgen->span->location.line_end = 1;
+	astgen->span->location.column_start = 1;
+	astgen->span->location.column_end = 1;
+
+	hsc_astgen_tokenize_run(astgen);
 }
 
 HscToken hsc_token_peek(HscAstGen* astgen) {
@@ -4129,15 +4760,15 @@ void hsc_astgen_generate_binary_op(HscAstGen* astgen, HscExprType* binary_op_typ
 			*precedence_out = 10;
 			break;
 		case HSC_TOKEN_LOGICAL_AND:
-			*binary_op_type_out = HSC_EXPR_TYPE_LOGICAL_AND;
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(LOGICAL_AND);
 			*precedence_out = 11;
 			break;
 		case HSC_TOKEN_LOGICAL_OR:
-			*binary_op_type_out = HSC_EXPR_TYPE_LOGICAL_OR;
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(LOGICAL_OR);
 			*precedence_out = 12;
 			break;
 		case HSC_TOKEN_QUESTION_MARK:
-			*binary_op_type_out = HSC_EXPR_TYPE_TERNARY;
+			*binary_op_type_out = HSC_EXPR_TYPE_BINARY_OP(TERNARY);
 			*precedence_out = 13;
 			break;
 		case HSC_TOKEN_EQUAL:
@@ -4438,7 +5069,7 @@ HscExpr* hsc_astgen_generate_ternary_expr(HscAstGen* astgen, HscExpr* cond_expr)
 		hsc_astgen_error_2(astgen, other_token_idx, "type mismatch '%.*s' and '%.*s'", (int)false_data_type_name.size, false_data_type_name.data, (int)true_data_type_name.size, true_data_type_name.data);
 	}
 
-	HscExpr* expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_TERNARY);
+	HscExpr* expr = hsc_astgen_alloc_expr(astgen, HSC_EXPR_TYPE_BINARY_OP(TERNARY));
 	expr->ternary.cond_expr_rel_idx = expr - cond_expr;
 	expr->ternary.true_expr_rel_idx = expr - true_expr;
 	expr->ternary.false_expr_rel_idx = expr - false_expr;
@@ -4484,7 +5115,7 @@ HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 			}
 
 			left_expr = hsc_astgen_generate_field_access_expr(astgen, left_expr);
-		} else if (binary_op_type == HSC_EXPR_TYPE_TERNARY) {
+		} else if (binary_op_type == HSC_EXPR_TYPE_BINARY_OP(TERNARY)) {
 			left_expr = hsc_astgen_generate_ternary_expr(astgen, left_expr);
 		} else if (binary_op_type == HSC_EXPR_TYPE_UNARY_OP(POST_INCREMENT) || binary_op_type == HSC_EXPR_TYPE_UNARY_OP(POST_DECREMENT)) {
 			HscUnaryOp unary_op = binary_op_type - HSC_EXPR_TYPE_UNARY_OP_START;
@@ -4500,7 +5131,7 @@ HscExpr* hsc_astgen_generate_expr(HscAstGen* astgen, U32 min_precedence) {
 			}
 
 			HscDataType data_type;
-			if (HSC_EXPR_TYPE_BINARY_OP(EQUAL) <= binary_op_type && binary_op_type <= HSC_EXPR_TYPE_LOGICAL_OR) {
+			if (HSC_EXPR_TYPE_BINARY_OP(EQUAL) <= binary_op_type && binary_op_type <= HSC_EXPR_TYPE_BINARY_OP(LOGICAL_OR)) {
 				data_type = HSC_DATA_TYPE_BOOL;
 			} else {
 				data_type = left_expr->data_type; // TODO make implicit conversions explicit in the AST and make the error above work correctly
@@ -5534,8 +6165,8 @@ UNARY:
 		case HSC_EXPR_TYPE_BINARY_OP(LESS_THAN_OR_EQUAL): expr_name = "LESS_THAN_OR_EQUAL"; goto BINARY;
 		case HSC_EXPR_TYPE_BINARY_OP(GREATER_THAN): expr_name = "GREATER_THAN"; goto BINARY;
 		case HSC_EXPR_TYPE_BINARY_OP(GREATER_THAN_OR_EQUAL): expr_name = "GREATER_THAN_OR_EQUAL"; goto BINARY;
-		case HSC_EXPR_TYPE_LOGICAL_AND: expr_name = "LOGICAL_AND"; goto BINARY;
-		case HSC_EXPR_TYPE_LOGICAL_OR: expr_name = "LOGICAL_OR"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(LOGICAL_AND): expr_name = "LOGICAL_AND"; goto BINARY;
+		case HSC_EXPR_TYPE_BINARY_OP(LOGICAL_OR): expr_name = "LOGICAL_OR"; goto BINARY;
 		case HSC_EXPR_TYPE_CALL: expr_name = "CALL"; goto BINARY;
 		case HSC_EXPR_TYPE_ARRAY_SUBSCRIPT: expr_name = "ARRAY_SUBSCRIPT"; goto BINARY;
 BINARY:
@@ -5646,7 +6277,7 @@ BINARY:
 			fprintf(f, "GLOBAL_VARIABLE(#%u): %s", expr->variable.idx, buf);
 			break;
 		};
-		case HSC_EXPR_TYPE_TERNARY: {
+		case HSC_EXPR_TYPE_BINARY_OP(TERNARY): {
 			fprintf(f, "%s: {\n", "STMT_TERNARY");
 
 			HscExpr* cond_expr = expr - expr->ternary.cond_expr_rel_idx;
@@ -6553,8 +7184,8 @@ UNARY:
 			ir->last_operand = operands[0];
 			break;
 		};
-		case HSC_EXPR_TYPE_LOGICAL_AND:
-		case HSC_EXPR_TYPE_LOGICAL_OR:
+		case HSC_EXPR_TYPE_BINARY_OP(LOGICAL_AND):
+		case HSC_EXPR_TYPE_BINARY_OP(LOGICAL_OR):
 		{
 			HscExpr* left_expr = expr - expr->binary.left_expr_rel_idx;
 			HscExpr* right_expr = expr - expr->binary.right_expr_rel_idx;
@@ -6570,8 +7201,8 @@ UNARY:
 			HscIROperand* cond_branch_operands = hsc_ir_add_operands_many(ir, ir_function, 3);
 			hsc_ir_add_instruction(ir, ir_function, HSC_IR_OP_CODE_BRANCH_CONDITIONAL, cond_branch_operands, 3);
 			cond_branch_operands[0] = cond_operand;
-			U32 success_idx = expr->type != HSC_EXPR_TYPE_LOGICAL_AND;
-			U32 converging_idx = expr->type == HSC_EXPR_TYPE_LOGICAL_AND;
+			U32 success_idx = expr->type != HSC_EXPR_TYPE_BINARY_OP(LOGICAL_AND);
+			U32 converging_idx = expr->type == HSC_EXPR_TYPE_BINARY_OP(LOGICAL_AND);
 
 			basic_block = hsc_ir_add_basic_block(ir, ir_function);
 			HscIROperand success_basic_block_operand = HSC_IR_OPERAND_BASIC_BLOCK_INIT(hsc_ir_basic_block_idx(ir, ir_function, basic_block));
@@ -6825,7 +7456,7 @@ UNARY:
 			}
 			break;
 		};
-		case HSC_EXPR_TYPE_TERNARY: {
+		case HSC_EXPR_TYPE_BINARY_OP(TERNARY): {
 			HscExpr* cond_expr = expr - expr->ternary.cond_expr_rel_idx;
 			basic_block = hsc_ir_generate_condition_expr(ir, astgen, ir_function, basic_block, cond_expr);
 			HscIROperand cond_operand = ir->last_operand;

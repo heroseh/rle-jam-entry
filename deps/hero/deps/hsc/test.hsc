@@ -40,6 +40,38 @@ typedef vec4_t Vec4;
 
 #define TEST3(A, ...) A; __VA_ARGS__
 
+#ifdef COND
+#ifdef COND2
+#define COND_TEST 1.f
+#else
+#define COND_TEST 0.75f
+#endif
+#else
+#ifdef COND2
+#define COND_TEST 0.25f
+#else
+#define COND_TEST 0.f
+#endif
+#endif
+
+#define COND(A) A * A
+
+#define INDIRECTION defined COND
+
+#if INDIRECTION
+#define COND_TEST1 1.f
+#elif 0
+#define COND_TEST1 0.5f
+#else
+#define COND_TEST1 0.f
+#endif
+
+#ifdef COND
+#define COND_TEST2 1.f
+#else
+#define COND_TEST2 0.f
+#endif
+
 vertex Vec4 billboard_shader_vertex(U32 vertex_idx, U32 instance_idx) {
 	return vec4(0.f, 0.f, 0.f, 0.f);
 }
@@ -217,7 +249,7 @@ fragment Vec4 billboard_shader_fragment(Vec4 state) {
 
 	TEST3(ZERO_POINT_FIVE);
 
-	return TEST(1.f, 0.f, 0.f, 1.f);
+	return vec4(COND_TEST, COND_TEST1, COND_TEST2, 1.f);
 }
 
 /*
