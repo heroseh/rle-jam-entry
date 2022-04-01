@@ -2364,6 +2364,19 @@ ERROR:
 	astgen->token_locations_count = token_location_start_idx;
 }
 
+void hsc_astgen_parse_preprocessor_error(HscAstGen* astgen) {
+	hsc_astgen_token_consume_whitespace(astgen);
+	HscCodeSpan* span = astgen->span;
+
+	span->location.column_start = span->location.column_end;
+
+	HscString message = hsc_string((char*)&astgen->span->code[astgen->span->location.code_end_idx], 0);
+	hsc_astgen_token_consume_until_any_byte(astgen, "\n");
+	message.size = (char*)&astgen->span->code[astgen->span->location.code_end_idx] - message.data;
+
+	hsc_astgen_token_error_1(astgen, "%.*s", (int)message.size, message.data);
+}
+
 bool hsc_astgen_parse_preprocessor_directive(HscAstGen* astgen, bool is_skipping_code, bool is_skipping_until_endif, U32 nested_level);
 
 void hsc_astgen_parse_preprocessor_skip_false_conditional(HscAstGen* astgen, bool is_skipping_until_endif) {
@@ -2938,8 +2951,7 @@ bool hsc_astgen_parse_preprocessor_directive(HscAstGen* astgen, bool is_skipping
 				// hsc_astgen_parse_preprocessor_line(astgen);
 				break;
 			case HSC_PP_DIRECTIVE_ERROR:
-				HSC_ABORT("TODO");
-				// hsc_astgen_parse_preprocessor_error(astgen);
+				hsc_astgen_parse_preprocessor_error(astgen);
 				break;
 			case HSC_PP_DIRECTIVE_PRAGMA:
 				HSC_ABORT("TODO");
