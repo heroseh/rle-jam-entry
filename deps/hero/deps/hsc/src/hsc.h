@@ -671,6 +671,16 @@ struct HscMacro {
 	U32 is_function: 1;
 };
 
+typedef U32 HscPredefinedMacro;
+enum {
+	HSC_PREDEFINED_MACRO___FILE__,
+	HSC_PREDEFINED_MACRO___LINE__,
+	HSC_PREDEFINED_MACRO___COUNTER__,
+	HSC_PREDEFINED_MACRO___HSC__,
+
+	HSC_PREDEFINED_MACRO_COUNT,
+};
+
 typedef U8 HscFunctionShaderStage;
 enum {
 	HSC_FUNCTION_SHADER_STAGE_NONE,
@@ -1226,6 +1236,9 @@ struct HscAstGen {
 
 	HscStringId va_args_string_id;
 	HscStringId defined_string_id;
+	HscStringId predefined_macro_identifier_string_start_id;
+
+	U32 __counter__;
 
 	HscCodeFileId include_code_file_id;
 
@@ -1235,6 +1248,11 @@ struct HscAstGen {
 	HscToken brackets_to_close[_HSC_TOKENIZER_NESTED_BRACKETS_CAP];
 	U32 brackets_to_close_token_indices[_HSC_TOKENIZER_NESTED_BRACKETS_CAP];
 };
+
+void hsc_string_buffer_clear(HscAstGen* astgen);
+void hsc_string_buffer_append_byte(HscAstGen* astgen, char byte);
+void hsc_string_buffer_append_string(HscAstGen* astgen, char* string, U32 string_size);
+void hsc_string_buffer_append_fmt(HscAstGen* astgen, char* fmt, ...);
 
 bool hsc_code_file_find_or_insert(HscAstGen* astgen, HscStringId path_string_id, HscCodeFileId* code_file_id_out, HscCodeFile** code_file_out);
 HscCodeFile* hsc_code_file_get(HscAstGen* astgen, HscCodeFileId code_file_id);
@@ -1264,6 +1282,7 @@ HscDataType hsc_data_type_signed_to_unsigned(HscDataType data_type);
 
 void hsc_string_table_init(HscStringTable* string_table, uint32_t data_cap, uint32_t entries_cap);
 #define hsc_string_table_deduplicate_lit(string_table, string_lit) hsc_string_table_deduplicate(string_table, string_lit, sizeof(string_lit) - 1)
+#define hsc_string_table_deduplicate_c_string(string_table, c_string) hsc_string_table_deduplicate(string_table, c_string, strlen(c_string))
 HscStringId hsc_string_table_deduplicate(HscStringTable* string_table, char* string, uint32_t string_size);
 HscString hsc_string_table_get(HscStringTable* string_table, HscStringId id);
 

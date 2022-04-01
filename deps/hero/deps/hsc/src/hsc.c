@@ -1126,6 +1126,13 @@ HscCodeSpan* hsc_code_span_get(HscAstGen* astgen, U32 span_idx) {
 	return &astgen->code_spans[span_idx];
 }
 
+char* hsc_predefined_macro_identifier_strings[HSC_PREDEFINED_MACRO_COUNT] = {
+	[HSC_PREDEFINED_MACRO___FILE__] = "__FILE__",
+	[HSC_PREDEFINED_MACRO___LINE__] = "__LINE__",
+	[HSC_PREDEFINED_MACRO___COUNTER__] = "__COUNTER__",
+	[HSC_PREDEFINED_MACRO___HSC__] = "__HSC__",
+};
+
 void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup) {
 	astgen->code_span_stack = HSC_ALLOC_ARRAY(U32, setup->exprs_cap);
 	HSC_ASSERT(astgen->code_span_stack, "out of memory");
@@ -1260,11 +1267,28 @@ void hsc_astgen_init(HscAstGen* astgen, HscCompilerSetup* setup) {
 		astgen->functions_count = HSC_FUNCTION_IDX_USER_START;
 	}
 	hsc_hash_table_init(&astgen->path_to_code_file_id_map);
-	hsc_hash_table_init(&astgen->macro_declarations);
 	hsc_hash_table_init(&astgen->struct_declarations);
 	hsc_hash_table_init(&astgen->union_declarations);
 	hsc_hash_table_init(&astgen->enum_declarations);
 	hsc_hash_table_init(&astgen->field_name_to_token_idx);
+
+	astgen->predefined_macro_identifier_string_start_id.idx_plus_one = astgen->string_table.entries_count + 1;
+	for (U32 predefined_macro = 0; predefined_macro < HSC_PREDEFINED_MACRO_COUNT; predefined_macro += 1) {
+		char* identifier_string = hsc_predefined_macro_identifier_strings[predefined_macro];
+		HscStringId string_id = hsc_string_table_deduplicate_c_string(&astgen->string_table, identifier_string);
+		HSC_DEBUG_ASSERT(
+			astgen->predefined_macro_identifier_string_start_id.idx_plus_one + predefined_macro == string_id.idx_plus_one,
+			"internal error: predefined macro string ids to not map to the enum"
+		);
+	}
+
+	hsc_hash_table_init(&astgen->macro_declarations);
+	for (U32 predefined_macro = 0; predefined_macro < HSC_PREDEFINED_MACRO_COUNT; predefined_macro += 1) {
+		U32* macro_idx_ptr;
+		HscStringId identifier_string_id = { astgen->predefined_macro_identifier_string_start_id.idx_plus_one + predefined_macro };
+		hsc_hash_table_find_or_insert(&astgen->macro_declarations, identifier_string_id.idx_plus_one, &macro_idx_ptr);
+		*macro_idx_ptr = U32_MAX;
+	}
 }
 
 void hsc_astgen_error_file_line(HscAstGen* astgen, char* file_path, U32 line, U32 column) {
@@ -1660,6 +1684,41 @@ bool hsc_code_span_is_macro_on_stack(HscAstGen* astgen, HscMacro* macro) {
 	return false;
 }
 
+void hsc_code_span_push_predefined_macro(HscAstGen* astgen, HscPredefinedMacro predefined_macro) {
+	HscString code;
+	switch (predefined_macro) {
+		case HSC_PREDEFINED_MACRO___FILE__: {
+			HscString path_string = astgen->span->code_file->path_string;
+			code = hsc_string(&astgen->string_buffer[astgen->string_buffer_size], astgen->string_buffer_size);
+			hsc_string_buffer_append_fmt(astgen, "\"%.*s\"", (int)path_string.size, path_string.data);
+			code.size = astgen->string_buffer_size - code.size;
+			break;
+		};
+		case HSC_PREDEFINED_MACRO___LINE__:
+			code = hsc_string(&astgen->string_buffer[astgen->string_buffer_size], astgen->string_buffer_size);
+			hsc_string_buffer_append_fmt(astgen, "%u", astgen->span->location.line_end);
+			code.size = astgen->string_buffer_size - code.size;
+			break;
+		case HSC_PREDEFINED_MACRO___COUNTER__:
+			code = hsc_string(&astgen->string_buffer[astgen->string_buffer_size], astgen->string_buffer_size);
+			hsc_string_buffer_append_fmt(astgen, "%u", astgen->__counter__);
+			code.size = astgen->string_buffer_size - code.size;
+			astgen->__counter__ += 1;
+			break;
+		case HSC_PREDEFINED_MACRO___HSC__:
+			return;
+	}
+
+	HscCodeSpan* span = _hsc_code_span_push(astgen);
+#if HSC_DEBUG_CODE_SPAN_PUSH_POP
+	HscString name = hsc_string_table_get(&astgen->string_table, macro->identifier_string_id);
+	printf("PUSH_PREDEFINED_MACRO(%s)\n", hsc_predefined_macro_identifier_strings[predefined_macro]);
+#endif // HSC_DEBUG_CODE_SPAN_PUSH_POP
+
+	span->code = (U8*)code.data;
+	span->code_size = code.size;
+}
+
 void hsc_code_span_push_macro(HscAstGen* astgen, HscMacro* macro) {
 	HscCodeSpan* span = _hsc_code_span_push(astgen);
 #if HSC_DEBUG_CODE_SPAN_PUSH_POP
@@ -1786,6 +1845,36 @@ void hsc_string_buffer_append_string(HscAstGen* astgen, char* string, U32 string
 	astgen->string_buffer_size += string_size;
 	HSC_ASSERT_ARRAY_BOUNDS(astgen->string_buffer_size - 1, astgen->string_buffer_cap);
 	memcpy(dst, string, string_size);
+}
+
+void hsc_string_buffer_append_fmt(HscAstGen* astgen, char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+
+	va_list args_copy;
+	va_copy(args_copy, args);
+
+	//
+	// add 1 so we have enough room for the null terminator that vsnprintf always outputs
+	// vsnprintf will return -1 on an encoding error.
+	Uptr count = vsnprintf(NULL, 0, fmt, args_copy) + 1;
+	va_end(args_copy);
+	HSC_DEBUG_ASSERT(count >= 1, "a vsnprintf encoding error has occurred");
+
+	//
+	// resize the stack to have enough room to store the pushed formatted string with the null terminator
+	Uptr insert_idx = astgen->string_buffer_size;
+	Uptr new_count = astgen->string_buffer_size + count;
+	HSC_ASSERT_ARRAY_BOUNDS(new_count - 1, astgen->string_buffer_cap);
+
+	//
+	// now call vsnprintf for real this time, with a buffer
+	// to actually copy the formatted string.
+	char* ptr = &astgen->string_buffer[astgen->string_buffer_size];
+	count = vsnprintf(ptr, count, fmt, args);
+	astgen->string_buffer_size = new_count - 1; // now set the new count minus the null terminator
+
+	va_end(args);
 }
 
 uint32_t hsc_parse_num(HscAstGen* astgen, HscToken* token_out) {
@@ -3102,6 +3191,18 @@ bool hsc_code_span_push_macro_if_it_is_one(HscAstGen* astgen, HscString ident_st
 	}
 
 	HscCodeSpan* span = astgen->span;
+	if (macro_idx == U32_MAX) {
+		span->location.column_start = span->location.column_end;
+		span->location.code_start_idx = span->location.code_end_idx;
+		span->location.column_end += ident_string.size;
+		span->location.code_end_idx += ident_string.size;
+
+		HscPredefinedMacro predefined_macro = string_id.idx_plus_one - astgen->predefined_macro_identifier_string_start_id.idx_plus_one;
+		HSC_DEBUG_ASSERT(predefined_macro < HSC_PREDEFINED_MACRO_COUNT, "internal error: expected this to be a predefined macro");
+		hsc_code_span_push_predefined_macro(astgen, predefined_macro);
+		return true;
+	}
+
 	HscMacro* macro = hsc_macro_get(astgen, macro_idx);
 
 	if (hsc_code_span_is_macro_on_stack(astgen, macro)) {
@@ -3114,7 +3215,9 @@ bool hsc_code_span_push_macro_if_it_is_one(HscAstGen* astgen, HscString ident_st
 	span->location.code_end_idx += ident_string.size;
 
 	if (!macro->is_function) {
-		hsc_code_span_push_macro(astgen, macro);
+		if (macro->value_string.size) {
+			hsc_code_span_push_macro(astgen, macro);
+		}
 		return true;
 	}
 
@@ -3258,7 +3361,9 @@ bool hsc_code_span_push_macro_if_it_is_one(HscAstGen* astgen, HscString ident_st
 
 	hsc_astgen_ensure_macro_args_count(astgen, macro, args_count);
 
-	hsc_code_span_push_macro(astgen, macro);
+	if (macro->value_string.size) {
+		hsc_code_span_push_macro(astgen, macro);
+	}
 	return true;
 }
 
