@@ -54,9 +54,11 @@ typedef vec4_t Vec4;
 #endif
 #endif
 
+#include "test.h"
+
 #define COND(A) A * A
 
-#define INDIRECTION defined COND
+#define INDIRECTION defined(TEST_H)
 
 #if INDIRECTION
 #define COND_TEST1 1.f

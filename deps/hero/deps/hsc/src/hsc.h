@@ -114,7 +114,7 @@ HSC_NORETURN void _hsc_abort(const char* file, int line, const char* message, ..
 #define HSC_DIV_ROUND_UP(a, b) (((a) / (b)) + ((a) % (b) != 0))
 
 #define HSC_DEFINE_ID(Name) typedef struct Name { uint32_t idx_plus_one; } Name
-HSC_DEFINE_ID(HscFileId);
+HSC_DEFINE_ID(HscCodeFileId);
 HSC_DEFINE_ID(HscStringId);
 HSC_DEFINE_ID(HscConstantId);
 HSC_DEFINE_ID(HscFunctionTypeId);
@@ -161,6 +161,18 @@ struct HscLocation {
 };
 
 #define HSC_COMPOUND_TYPE_NESTED_FIELD_CAP 16
+
+// ===========================================
+//
+//
+// Platform Abstraction
+//
+//
+// ===========================================
+
+void hsc_get_last_system_error_string(char* buf_out, U32 buf_out_size);
+bool hsc_file_exist(char* path);
+U8* hsc_file_read_all_the_code(char* path, U64* size_out);
 
 // ===========================================
 //
@@ -388,6 +400,8 @@ enum {
 
 	HSC_TOKEN_EOF,
 	HSC_TOKEN_IDENT,
+	HSC_TOKEN_STRING,
+	HSC_TOKEN_INCLUDE_PATH_SYSTEM,
 
 	//
 	// symbols
@@ -979,19 +993,60 @@ struct HscCurlyInitializerGen {
 	HscExpr* first_initializer_expr;
 };
 
+typedef U8 HscPPDirective;
+enum {
+	HSC_PP_DIRECTIVE_DEFINE,
+	HSC_PP_DIRECTIVE_UNDEF,
+	HSC_PP_DIRECTIVE_INCLUDE,
+	HSC_PP_DIRECTIVE_IF,
+	HSC_PP_DIRECTIVE_IFDEF,
+	HSC_PP_DIRECTIVE_IFNDEF,
+	HSC_PP_DIRECTIVE_ELSE,
+	HSC_PP_DIRECTIVE_ELIF,
+	HSC_PP_DIRECTIVE_ELIFDEF,
+	HSC_PP_DIRECTIVE_ELIFNDEF,
+	HSC_PP_DIRECTIVE_ENDIF,
+	HSC_PP_DIRECTIVE_LINE,
+	HSC_PP_DIRECTIVE_ERROR,
+	HSC_PP_DIRECTIVE_PRAGMA,
+
+	HSC_PP_DIRECTIVE_COUNT,
+};
+
+typedef struct HscPPIfSpan HscPPIfSpan;
+struct HscPPIfSpan {
+	HscPPDirective directive;
+	bool           has_else;
+	HscLocation    location;
+};
+
+typedef U32 HscCodeFileFlags;
+enum {
+	HSC_CODE_FILE_FLAGS_COMPILATION_UNIT = 0x1,
+	HSC_CODE_FILE_FLAGS_INCLUDE_GUARD = 0x2,
+};
+
+typedef struct HscCodeFile HscCodeFile;
+struct HscCodeFile {
+	HscCodeFileFlags flags;
+	HscString path_string;
+	U8* code;
+	U64 code_size;
+};
+
 typedef struct HscCodeSpan HscCodeSpan;
 struct HscCodeSpan {
-	U8*         code;
-	U32         code_size;
-	HscMacro*   macro; // NULL when this is a file expansion
-	U32         macro_args_start_idx;
-	HscFileId   file_id;
-	HscLocation location;
-	U32*        line_code_start_indices;
-	U32         lines_count;
-	U32         lines_cap;
-	U32         macro_arg_id;
-	bool        is_preprocessor_if;
+	U8*            code;
+	U32            code_size;
+	HscMacro*      macro; // NULL when this is a file expansion
+	U32            macro_args_start_idx;
+	HscCodeFile*   code_file;
+	HscLocation    location;
+	U32*           line_code_start_indices;
+	U32            lines_count;
+	U32            lines_cap;
+	U32            macro_arg_id;
+	bool           is_preprocessor_expression;
 };
 
 typedef U16 HscAstGenFlags;
@@ -1013,6 +1068,15 @@ struct HscMacroArg {
 typedef struct HscAstGen HscAstGen;
 struct HscAstGen {
 	HscAstGenFlags flags;
+
+	HscHashTable(HscStringId, HscCodeFileId) path_to_code_file_id_map;
+	HscCodeFile* code_files;
+	U32 code_files_count;
+	U32 code_files_cap;
+
+	HscPPIfSpan* pp_if_spans_stack;
+	U32 pp_if_spans_stack_count;
+	U32 pp_if_spans_stack_cap;
 
 	U32* code_span_stack;
 	U32 code_span_stack_count;
@@ -1127,6 +1191,10 @@ struct HscAstGen {
 
 	char* error_info;
 
+	char* string_buffer;
+	U32 string_buffer_size;
+	U32 string_buffer_cap;
+
 	HscToken* tokens;
 	U32*      token_location_indices;
 
@@ -1151,17 +1219,38 @@ struct HscAstGen {
 	bool print_color;
 
 	bool is_preprocessor_if_expression;
+	bool is_preprocessor_include;
+
+	char** include_paths;
+	U32 include_paths_count;
 
 	HscStringId va_args_string_id;
 	HscStringId defined_string_id;
 
+	HscCodeFileId include_code_file_id;
+
 	U32 preprocessor_nested_level;
-	U64 preprocessor_nested_level_has_used_else_bitset;
 
 	U32 brackets_to_close_count;
 	HscToken brackets_to_close[_HSC_TOKENIZER_NESTED_BRACKETS_CAP];
 	U32 brackets_to_close_token_indices[_HSC_TOKENIZER_NESTED_BRACKETS_CAP];
 };
+
+bool hsc_code_file_find_or_insert(HscAstGen* astgen, HscStringId path_string_id, HscCodeFileId* code_file_id_out, HscCodeFile** code_file_out);
+HscCodeFile* hsc_code_file_get(HscAstGen* astgen, HscCodeFileId code_file_id);
+
+void hsc_pp_if_span_push(HscAstGen* astgen, HscPPDirective directive);
+void hsc_pp_if_span_pop(HscAstGen* astgen);
+HscPPIfSpan* hsc_pp_if_span_peek_top(HscAstGen* astgen);
+
+/*
+void hsc_pp_if_span_maybe_promote_to_if_guard(HscAstGen* astgen);
+void hsc_pp_if_span_finalize_and_pop(HscAstGen* astgen);
+bool hsc_pp_if_span_is_if_guard(HscPPIfSpan* pp_if_span);
+HscPPIfSpan* hsc_pp_if_span_head(HscAstGen* astgen, HscCodeFile* code_file);
+HscPPIfSpan* hsc_pp_if_span_prev(HscAstGen* astgen, HscPPIfSpan* pp_if_span);
+HscPPIfSpan* hsc_pp_if_span_next(HscAstGen* astgen, HscPPIfSpan* pp_if_span);
+*/
 
 bool hsc_opt_is_enabled(HscOpts* opts, HscOpt opt);
 void hsc_opt_set_enabled(HscOpts* opts, HscOpt opt);
@@ -1626,5 +1715,5 @@ struct HscCompilerSetup {
 
 void hsc_compiler_init(HscCompiler* compiler, HscCompilerSetup* setup);
 
-void hsc_compiler_compile(HscCompiler* compiler, const char* file_path);
+void hsc_compiler_compile(HscCompiler* compiler, char* file_path);
 
